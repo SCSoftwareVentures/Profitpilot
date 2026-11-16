@@ -45,6 +45,7 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requireRole("o
   const batch=await client.query("SELECT id,status FROM import_batches WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
   if(!batch.rowCount)return {status:404,error:"Import batch not found"};
   if(!["registered","review","validating"].includes(batch.rows[0].status))return {status:409,error:"Import batch is not open for row ingestion"};
+  if(batch.rows[0].source_type==="payroll")return {status:422,error:"Payroll row ingestion is disabled until the source-row ledger, privacy-safe column mapping and reviewer workflow are implemented. Do not submit employee or payroll personal information."};
   let inserted=0;
   for(let i=0;i<rows.length;i++){
    const row=await client.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,$3,$4) ON CONFLICT(batch_id,row_number) DO NOTHING RETURNING id",[req.membership.tenantId,req.params.batchId,i+1,JSON.stringify(rows[i])]);
