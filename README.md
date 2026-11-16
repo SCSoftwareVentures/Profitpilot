@@ -6,7 +6,7 @@ ProfitPilot is a proposed business operations and customer transaction-managemen
 
 The repository is a product-validation specification and partial API/database implementation scaffold, not a complete or deployed customer application. Customer demand, legal/privacy clearance, production security and unit economics are not yet established.
 
-**Current review branches:** PR #25 (security hardening) and PR #26 (product blueprint) remain separate draft, unmerged branches. CI run #310 passed on PR #25 head 17178768002b978d6f5bd76f0192b2bbff7a4355; CI run #343 passed on PR #26 head 4ca08f6418cc498cd0e5db05565403ac837e75a7. These are independent checks, not a combined integration result or independent certification.
+**Current review branches:** PR #25 (security hardening) and PR #26 (product blueprint) remain separate draft, unmerged branches. CI run #310 passed on PR #25 head 17178768002b978d6f5bd76f0192b2bbff7a4355; CI run #347 passed on PR #26 head 559c7476d13e42ec9d9190409b8e3b091407a1bb. These are independent checks, not a combined integration result or independent certification.
 
 ## Initial validation approach
 

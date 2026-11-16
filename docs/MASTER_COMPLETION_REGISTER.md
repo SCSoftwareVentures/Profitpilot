@@ -20,7 +20,7 @@ The correct completion measure is evidence, not the volume of documentation or c
 | Common base | main commit 55d1403c0dc34ac26a9bdb58107662754f34a8e3 | Both active PRs originate from this base |
 | PR #25 | security/exhaustive-hardening; head 17178768002b978d6f5bd76f0192b2bbff7a4355; open, draft, unmerged | Application, database, CI and security hardening changes for review |
 | PR #25 CI | Run #310; Node.js 22 and PostgreSQL migration/RLS jobs passed | Configured automated checks passed on PR #25's exact head |
-| PR #26 | product/six-differentiators-blueprint; head 4ca08f6418cc498cd0e5db05565403ac837e75a7; open, draft, unmerged | Documentation-only product, validation, financial and governance design |
+| PR #26 | product/six-differentiators-blueprint; head 559c7476d13e42ec9d9190409b8e3b091407a1bb; open, draft, unmerged | Documentation-only product, validation, financial and governance design |
 | PR #26 CI | Run #343; Node.js 22 and PostgreSQL migration/RLS jobs passed | Configured checks passed on PR #26's exact head and its own base |
 | Branch relationship | PR #25 and PR #26 are sibling branches, not a combined candidate | PR #26's CI does not exercise PR #25's changes |
 | Production | No production deployment or configured customer environment established | No customer data or production use authorised |
@@ -198,3 +198,8 @@ Static inspection of the PR #25 review branch identifies two further material ri
 - contract baseline data has currency, but the reviewed schema does not carry the full explicit tax-basis metadata needed to prove compatibility with invoice amounts.
 
 These are recorded in API_CALCULATION_PATH_AUDIT.md. Findings are static; proposed tests are NOT RUN.
+
+
+## 11. Final status snapshot
+
+PR #26 head 559c7476d13e42ec9d9190409b8e3b091407a1bb completed CI run #347 successfully on 16 November 2026. Both configured jobs passed: Verify (Node.js 22) and PostgreSQL migrations/tenant RLS, including authenticated API integration, container build and health check. This result applies to this documentation branch and its own base; it does not constitute combined PR #25/#26 integration or execution of the proposed financial acceptance suites.

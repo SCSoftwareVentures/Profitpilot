@@ -14,8 +14,8 @@ The first delivery mode is concierge validation using authorised data and an app
 
 - PR #25 security branch: 17178768002b978d6f5bd76f0192b2bbff7a4355; open, draft and unmerged.
 - PR #25 CI run #310 passed Node.js 22 dependency/syntax/unit checks and PostgreSQL migrations, tenant/RLS, authenticated API, container-build and health checks.
-- PR #26 product blueprint branch: 4ca08f6418cc498cd0e5db05565403ac837e75a7; open, draft and unmerged.
-- PR #26 CI run #343 passed Node.js 22 syntax/unit checks and PostgreSQL migration/RLS, authenticated API, container-build and health checks.
+- PR #26 product blueprint branch: 559c7476d13e42ec9d9190409b8e3b091407a1bb; open, draft and unmerged.
+- PR #26 CI run #347 passed Node.js 22 syntax/unit checks and PostgreSQL migration/RLS, authenticated API, container-build and health checks.
 - The PRs are sibling branches against main commit 55d1403c0dc34ac26a9bdb58107662754f34a8e3. The CI runs are separate; neither proves a combined candidate.
 - Neither PR has been merged. No production environment or customer pilot is established.
 
@@ -87,4 +87,4 @@ The product-blueprint branch now also contains:
 
 These documents improve preparation and make the remaining work actionable. They do not provide missing customer evidence, specialist sign-offs, signed G5 approval, implementation or production readiness.
 
-Latest CI on the prior docs-only head 4ca08f6418cc498cd0e5db05565403ac837e75a7 (run #343) passed both configured jobs. A new documentation commit has since advanced the branch; its own CI must be checked separately.
+Latest CI on the prior docs-only head 559c7476d13e42ec9d9190409b8e3b091407a1bb (run #347) passed both configured jobs. The latest documentation commit passed run #347 on its exact head.
