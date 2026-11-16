@@ -95,7 +95,7 @@ app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requireRol
 
 app.post("/v1/tenants/:tenantId/calculations",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
  const {contractId,siteId,periodStart,periodEnd}=req.body||{};
- if(!/^[0-9a-f-]{36}$/i.test(contractId||"")||!/^[0-9a-f-]{36}$/i.test(siteId||"")||!/^\\d{4}-\\d{2}-\\d{2}$/.test(periodStart||"")||!/^\\d{4}-\\d{2}-\\d{2}$/.test(periodEnd||"")||periodEnd<periodStart)return res.status(400).json({error:"Valid contract, site and period are required"});
+ if(!/^[0-9a-f-]{36}$/i.test(contractId||"")||!/^[0-9a-f-]{36}$/i.test(siteId||"")||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodEnd<periodStart)return res.status(400).json({error:"Valid contract, site and period are required"});
  const result=await withTenant(req.membership.tenantId,async client=>{
   const base=await client.query("SELECT c.id,cv.version_no,cv.currency FROM contracts c JOIN contract_versions cv ON cv.contract_id=c.id AND cv.tenant_id=c.tenant_id JOIN sites s ON s.id=$2 AND s.tenant_id=c.tenant_id AND s.business_id=c.business_id WHERE c.id=$1 AND c.tenant_id=$3 AND cv.approved_at IS NOT NULL AND cv.approved_by IS NOT NULL AND cv.effective_from <= $5::date AND (cv.effective_to IS NULL OR cv.effective_to >= $4::date)",[contractId,siteId,req.membership.tenantId,periodStart,periodEnd]);
   if(!base.rowCount)return {error:"No matching contract/site and effective contract version for this period"};
