@@ -42,6 +42,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 100
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     ports:
       - "127.0.0.1:8080:8080"
     restart: unless-stopped
