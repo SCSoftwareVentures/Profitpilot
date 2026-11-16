@@ -100,3 +100,9 @@ This addendum supersedes earlier statements in this document that all-table data
 - Latest review-branch CI run **#226** passed for commit `b5ada13b6c70dbac09114378ce7fb847388bb6c3`. This remains ephemeral test evidence, not independent security certification.
 
 Still not implemented or verified: private object storage and secure file lifecycle, malware scanning, production identity-provider/MFA configuration, managed production HMAC secret custody and recovery exercises, distributed rate limiting, production backup/restore, privacy impact/legal review, independent penetration test and remediation retest. Do not use real customer or employee information until these gates are completed and explicitly approved.
+
+
+### Final security regression verification — 16 November 2026 (PR #25 review branch)
+Hosted CI run **#292** passed on commit `b70ecc2ce9664551efb2c8f33e9be2235db3c18c`. In addition to the previously listed tenant/JWT/role controls, the catalogue audit now checks runtime-role memberships and object ownership; the container smoke test uses a read-only filesystem, no added capabilities and no-new-privileges. This remains review-branch CI evidence, not production certification.
+
+The import endpoint registers metadata only. Its status is `registered`; no original binary file is uploaded or stored. Private object storage, authenticated binary transfer, malware scanning and retention/deletion remain unimplemented and are release blockers.
