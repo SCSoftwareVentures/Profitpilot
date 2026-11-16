@@ -23,6 +23,9 @@ test("CSV rejects non-text input",()=>assert.throws(()=>parseCsv(null),/must be 
 test("invoice missing required fields is held",()=>assert.equal(validateInvoiceRows([{invoice_id:"1",date:"2026-11-01",amount:"3"}])[0].status,"held"));
 test("invoice valid row remains pending human review",()=>assert.equal(validateInvoiceRows([{invoice_id:"1",site:"A",date:"2026-11-01",amount:"3"}])[0].status,"pending_review"));
 test("negative invoice is held",()=>assert.equal(validateInvoiceRows([{invoice_id:"1",site:"A",date:"2026-11-01",amount:"-3"}])[0].status,"held"));
+test("invoice whitespace-only identity fields are held",()=>assert.equal(validateInvoiceRows([{invoice_id:" ",site:"A",date:"2026-11-01",amount:"3"}])[0].status,"held"));
+test("invoice amount rejects non-decimal numeric syntax",()=>assert.equal(validateInvoiceRows([{invoice_id:"1",site:"A",date:"2026-11-01",amount:"0x10"}])[0].status,"held"));
+test("invoice amount rejects more than two fractional digits",()=>assert.equal(validateInvoiceRows([{invoice_id:"1",site:"A",date:"2026-11-01",amount:"1.234"}])[0].status,"held"));
 test("impossible calendar date is held",()=>assert.equal(validateInvoiceRows([{invoice_id:"1",site:"A",date:"2026-02-31",amount:"3"}])[0].status,"held"));
 test("payroll buckets reconcile",()=>assert.equal(allocatePayroll({pool:1000,direct:[{site:"A",amount:400}],approved:[{site:"B",amount:300}],nonSite:200,excluded:50}).reconciles,true));
 test("over-allocation is rejected",()=>assert.equal(allocatePayroll({pool:100,direct:[{site:"A",amount:101}]}).reconciles,false));
