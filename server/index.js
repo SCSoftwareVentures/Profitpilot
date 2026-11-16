@@ -38,6 +38,25 @@ app.post("/v1/tenants/:tenantId/imports",membership,requireRole("owner","admin",
   res.status(201).json({batch:result.rows[0]});
  }catch(e){next(e);}
 });
+app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requireRole("owner","admin","analyst"),async(req,res,next)=>{try{
+ const rows=req.body?.rows;
+ if(!Array.isArray(rows)||rows.length<1||rows.length>200||rows.some(x=>!x||typeof x!=="object"||Array.isArray(x)))return res.status(400).json({error:"Provide 1–200 row objects"});
+ const result=await withTenant(req.membership.tenantId,async client=>{
+  const batch=await client.query("SELECT id,status FROM import_batches WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
+  if(!batch.rowCount)return {status:404,error:"Import batch not found"};
+  if(!["uploaded","review","validating"].includes(batch.rows[0].status))return {status:409,error:"Import batch is not open for row ingestion"};
+  let inserted=0;
+  for(let i=0;i<rows.length;i++){
+   const row=await client.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,$3,$4) ON CONFLICT(batch_id,row_number) DO NOTHING RETURNING id",[req.membership.tenantId,req.params.batchId,i+1,JSON.stringify(rows[i])]);
+   inserted+=row.rowCount;
+  }
+  await client.query("UPDATE import_batches SET status='review' WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
+  return {status:201,inserted,received:rows.length,duplicates:rows.length-inserted};
+ });
+ if(result.error)return res.status(result.status).json({error:result.error});
+ res.status(result.status).json({batchId:req.params.batchId,inserted:result.inserted,received:result.received,duplicates:result.duplicates});
+ }catch(e){next(e);}});
+
 app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
  const result=await withTenant(req.membership.tenantId,async c=>{const r=await c.query("UPDATE import_batches SET status='review' WHERE id=$1 AND tenant_id=$2 AND status IN ('uploaded','failed') RETURNING id,status",[req.params.batchId,req.membership.tenantId]);return r.rows[0]||null;});
  if(!result)return res.status(404).json({error:"Batch not found or not eligible for validation"});
