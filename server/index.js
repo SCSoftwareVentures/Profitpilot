@@ -124,7 +124,7 @@ app.get("/v1/tenants/:tenantId/calculations/:runId",membership,async(req,res,nex
  }catch(e){next(e);}});
  
 
-app.use((err,req,res,next)=>{const id=randomUUID();process.stderr.write(JSON.stringify({event:"request_error",id,message:err.message})+"\n");const status=err.code==="23505"?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);res.status(status).json({error:status===409?"Conflicting record; refresh and review the current state":status<500?err.message:"Internal server error",reference:id});});
+app.use((err,req,res,next)=>{const id=randomUUID();const status=err.code==="23505"?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
 if(process.env.NODE_ENV!=="test")app.listen(port,()=>process.stdout.write("ProfitPilot API listening on "+port+"\n"));
 export default app;
