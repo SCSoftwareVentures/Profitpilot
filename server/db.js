@@ -7,7 +7,7 @@ export async function withTenant(tenantId,subject,fn){
  if(typeof subject!=="string"||!subject)throw new Error("Verified identity subject is required for tenant context");
  const secret=process.env.TENANT_CONTEXT_HMAC_SECRET||"";
  const keyId=process.env.TENANT_CONTEXT_HMAC_KEY_ID||"primary";
- if(!/^[a-f0-9]{64,}$/i.test(secret))throw new Error("Tenant context signing secret must be at least 32 bytes of hexadecimal data");
+ if(secret.length%2!==0||!/^[a-f0-9]{64,}$/i.test(secret))throw new Error("Tenant context signing secret must be at least 32 bytes of hexadecimal data");
  const expires=String(Math.floor(Date.now()/1000)+30);
  const nonce=randomBytes(16).toString("hex");
  const payload=[tenantId,subject,expires,nonce,keyId].join("\n");
