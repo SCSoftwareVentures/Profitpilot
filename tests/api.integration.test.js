@@ -91,7 +91,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
         ))
       ORDER BY c.relname
     `);
-    assert.equal(protectedTables.rowCount,19,"the exhaustive fixture must cover every tenant-owned/root identity table");
+    assert.equal(protectedTables.rowCount,20,"the exhaustive fixture must cover every tenant-owned/root identity and payroll evidence table");
     for(const {relname} of protectedTables.rows){
       const tableQuery=`SELECT count(*)::int AS count FROM public."${relname.replaceAll('"','""')}"`;
       const tenantCCount=await withTenant("33333333-3333-4333-8333-333333333333","isolation-tenant-c",client=>client.query(tableQuery));
@@ -99,6 +99,14 @@ test("authenticated API enforces tenant membership, role permissions and import 
       assert.equal(tenantCCount.rows[0].count,relname==="tenant_memberships"?2:1,`tenant C must see only its own fixture rows in ${relname}`);
       assert.equal(tenantDCount.rows[0].count,1,`tenant D must see only its own fixture row in ${relname}`);
     }
+    const sourceLedger=await withTenant("33333333-3333-4333-8333-333333333333","isolation-tenant-c",client=>client.query("SELECT amount,currency FROM payroll_source_rows"));
+    assert.equal(sourceLedger.rowCount,1,"tenant-scoped payroll source-row ledger must be visible to its own tenant");
+    assert.equal(sourceLedger.rows[0].amount,"100.00");
+    assert.equal(sourceLedger.rows[0].currency,"AUD");
+    await assert.rejects(()=>withTenant("33333333-3333-4333-8333-333333333333","isolation-tenant-c",client=>client.query("INSERT INTO payroll_source_rows(tenant_id,payroll_pool_id,raw_import_row_id,source_row_key,row_sha256,amount,currency) VALUES ($1,$2,$3,'runtime-attempt',$4,1,'AUD')",["33333333-3333-4333-8333-333333333333","16161616-1616-4616-8616-161616161616","14141414-1414-4414-8414-141414141414","a".repeat(64)])),/permission denied/i,"runtime role must not write payroll source evidence");
+    await assert.rejects(()=>admin.query("UPDATE payroll_source_rows SET amount=99 WHERE id='30303030-3030-4030-8030-303030303030'"),/immutable/i,"payroll source rows must be immutable");
+    await assert.rejects(()=>admin.query("INSERT INTO allocation_lines(tenant_id,allocation_run_id,site_id,bucket_type,amount,source_ref,payroll_source_row_id) VALUES ('33333333-3333-4333-8333-333333333333','18181818-1818-4818-8818-181818181818','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','direct',0.01,'over-allocation-test','30303030-3030-4030-8030-303030303030')"),/exceeds source payroll row amount/i,"source-row allocations must never exceed the original row amount");
+
     await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("UPDATE users SET email='changed@example.invalid' WHERE auth_subject='ci-api-analyst'")),/permission denied/i,"the runtime role must not update identity records");
     const rawClient=await appPool.connect();
     try{
