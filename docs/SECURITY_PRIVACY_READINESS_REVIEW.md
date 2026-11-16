@@ -217,3 +217,12 @@ The earlier development-mode/plaintext smoke-test note above is superseded by th
 - The same CI run also applied migration 013, passed the tenant/FK audit, and passed direct-SQL role and signed payroll-actor tests.
 
 Verified CI run **#43982827602** passed both Node.js 22 and PostgreSQL 16 jobs on exact implementation head `ead10a236e33684c25c5c7613d1c5a2fbeb883fd`. This proves the prototype can enforce and establish a verified TLS connection in the ephemeral CI environment. It does not verify the selected managed production database, production certificate rotation, private networking or production secret custody.
+
+
+## Database-enforced invoice decision integrity — 17 November 2026
+
+Migration 014 adds a database-side decision guard and same-transaction audit trigger for invoice-match reviews. It requires a valid signed tenant context, binds the reviewer ID to the signed active user with reviewer/admin/owner membership, rejects mutation of candidate evidence and identity fields, permits only candidate/held to confirmed/rejected/held transitions, prevents changes after a final decision, and requires a bounded audit reason. The AFTER UPDATE trigger records the old/new decision and reason in `audit_events` in the same transaction.
+
+The API sets the reason transaction-locally and no longer inserts a duplicate audit event. PostgreSQL integration tests cover successful API decision/audit creation, direct-SQL reviewer impersonation denial, evidence mutation denial, final-decision immutability and missing-reason denial. CI applies migration 014 after migration 013. **Exact-head CI for migration 014 is pending until the latest branch-push workflow completes; the earlier CI pass does not verify this migration.**
+
+This is a database-enforced prototype control, not independent security assurance. Payroll ingestion remains disabled, and the outstanding production controls and release gates above remain mandatory.
