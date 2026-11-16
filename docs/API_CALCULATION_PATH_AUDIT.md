@@ -144,3 +144,15 @@ Every test above is **PROPOSED / NOT RUN**. The current CI result must not be de
 8. Run on one combined, reviewed commit; obtain independent accounting and security review.
 
 No application code, SQL, migrations, live data or production changes are authorised by this audit. Synthetic test data only.
+
+## 6. Security-branch implementation update — 17 November 2026
+
+The static findings above describe the earlier reviewed API/schema state. PR #25 has since advanced independently to head `ce66bcf6f9a705532313ce6e71892839a3b55344`, which passed CI run #43971209376. On that separate branch:
+
+- Migration 010 now supplies a tenant-scoped immutable payroll source-row ledger and append-only source-linked allocation lines, with per-row over-allocation protection.
+- Migration 011 enforces source/pool totals, currency, reviewer authority, per-row completeness, summary reconciliation, zero residual, source-linked line totals and immutable confirmed runs.
+- Payroll source-row inserts are constrained to raw evidence from the same tenant's payroll import batch as the pool.
+- The API intentionally blocks payroll row ingestion; the normalizer is a pure helper only. There is no complete privacy-safe payroll parser/import, allocation-review or reviewer-confirmation API.
+- The calculation route now uses the migrated allocation ledger and cent-based decimal arithmetic for the calculation output, rejects partial confirmed payroll and invoice service-period overlaps, and stores the result as incomplete with contribution/margin withheld.
+
+This is not closure of the proposed API-CALC suite. The contract tax-basis model, full source completeness and reconciliation, other cost categories, credits/reversals, restatement/idempotency, complete payroll workflow and the API-CALC-T01–T14 acceptance tests remain unproven or incomplete. The PR #25 and PR #26 branches have not been combined or merged. Do not treat the PR #25 CI pass as execution of the proposed financial acceptance suite.
