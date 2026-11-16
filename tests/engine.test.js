@@ -34,7 +34,7 @@ test("amount-only match remains low-confidence and unconfirmed",()=>{const r=mat
 test("match candidate always needs human confirmation",()=>assert.equal(matchInvoice({site:"A",date:"2026-11-05",amount:"100.00"},{id:"c",site:"A",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).requiresHumanConfirmation,true));
 test("metrics aggregate totals and margin",()=>{const r=aggregateMetrics([{revenue:"1000.00",cost:"600.00"},{revenue:"500.00",cost:"250.00"}]);assert.deepEqual([r.revenue,r.cost,r.contribution,r.margin],["1500.00","850.00","650.00","43.33"]);});
 
-test("money rounds decimal half-cents consistently, including negative values",()=>{
+test("money accepts exact cent values and preserves negative values",()=>{
   assert.equal(Number.isNaN(money("1.005")),true);
   assert.equal(Number.isNaN(money("2.675")),true);
   assert.equal(money("-1.00"),"-1.00");
@@ -107,6 +107,7 @@ test("invoice validation uses strict decimal syntax without Number coercion",()=
   for(const amount of ["0","0.00","1e2","0x10","1,000.00","1.234","Infinity","-1"])
     assert.equal(validateInvoiceRows([{...base,amount}])[0].status,"held",amount);
   assert.equal(validateInvoiceRows([{...base,amount:"100.00"}])[0].status,"pending_review");
+  assert.equal(validateInvoiceRows([{...base,amount:"1000000000000.00"}])[0].status,"held");
 });
 
 test("money preserves the full supported PostgreSQL numeric(14,2) range exactly",()=>{
@@ -124,7 +125,7 @@ test("contract aggregation blocks mixed currencies, tax bases and reporting peri
   assert.equal(mixedTax.complete,false);
   const mixedPeriod=aggregateMetrics([{...common,revenue:"100.00",cost:"50.00"},{...common,periodStart:"2026-10-01",periodEnd:"2026-10-31",revenue:"100.00",cost:"50.00"}]);
   assert.equal(mixedPeriod.complete,false);
-  assert.equal(aggregateMetrics([{...common,revenue:"100.00",cost:"50.00"},{...common,revenue:"100.00",cost:"50.00"}]).contribution,100);
+  assert.equal(aggregateMetrics([{...common,revenue:"100.00",cost:"50.00"},{...common,revenue:"100.00",cost:"50.00"}]).contribution,"100.00");
 });
 
 
