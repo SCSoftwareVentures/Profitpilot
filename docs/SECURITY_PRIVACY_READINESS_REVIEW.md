@@ -182,3 +182,13 @@ No signatures or approvals are implied by this document.
 **Australian legal/privacy approval:** not obtained.  
 **Independent penetration test:** not performed.  
 **Customer data, pilot and production:** not authorised.
+
+
+## Additional defence-in-depth findings — 17 November 2026
+
+A static review of the current combined candidate identified two production security gaps that should be closed before any real-data environment:
+
+1. **Database TLS fails open by default.** `server/db.js` sets PostgreSQL SSL to `false` unless `DATABASE_SSL` is exactly `true`. Production configuration must fail closed when TLS is absent or invalid; require verified TLS and an approved CA configuration in production, with a negative startup/connection test when TLS is disabled. The current code does not establish production database transport security.
+2. **Reviewer authority is enforced at the HTTP layer for invoice-match decisions.** The `profitpilot_app` role has `UPDATE` on `match_reviews`, while the current database RLS policy is tenant-scoped and does not independently prove that the signed actor is a reviewer/admin/owner. The Express route checks the membership role, but a compromised application process or SQL injection could use the shared database role to bypass that route-level check. Before production, enforce actor-role authority in a database policy or narrowly scoped stored procedure tied to the verified signed tenant/subject context, and add direct-SQL analyst-denial tests. The payroll confirmation trigger similarly validates the submitted `reviewer_id`'s membership role but does not independently bind that reviewer to the signed actor; this must be addressed before any runtime write grant or payroll confirmation API is enabled.
+
+These are static findings, not evidence of an observed exploit. The repository remains a prototype and must not receive real customer, employee, payroll or invoice data.
