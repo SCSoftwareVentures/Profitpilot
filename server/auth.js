@@ -17,7 +17,7 @@ export function authRequired(){
     jwks=createRemoteJWKSet(c.url,{timeoutDuration:5000,cacheMaxAge:300000,cooldownDuration:0});
     jwksUrl=c.url.href;
    }
-   const token=req.headers.authorization?.match(/^Bearer\\s+([^\\s]+)$/i)?.[1];
+   const token=req.headers.authorization?.match(/^Bearer\s+([^\s]+)$/i)?.[1];
    if(!token)return res.status(401).json({error:"Authentication required"});
    const {payload}=await jwtVerify(token,jwks,{
     issuer:c.issuer,
