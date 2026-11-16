@@ -97,6 +97,6 @@ This addendum supersedes earlier statements in this document that all-table data
 - JWT validation requires `exp`, `iat` and `sub`, limits token age to 15 minutes, restricts signing algorithms and requires HTTPS JWKS in production. CI tests expiry, stale tokens and JWKS key publication/rotation.
 - Request rate limiting, HMAC key overlap/revocation, forged/expired/non-member tenant contexts and pooled connection cleanup have CI coverage.
 - The npm lockfile is committed and CI/Docker use `npm ci`; production dependency audit runs in CI.
-- Latest review-branch CI run **#212** passed. This remains ephemeral test evidence, not independent security certification.
+- Latest review-branch CI run **#226** passed for commit `b5ada13b6c70dbac09114378ce7fb847388bb6c3`. This remains ephemeral test evidence, not independent security certification.
 
 Still not implemented or verified: private object storage and secure file lifecycle, malware scanning, production identity-provider/MFA configuration, managed production HMAC secret custody and recovery exercises, distributed rate limiting, production backup/restore, privacy impact/legal review, independent penetration test and remediation retest. Do not use real customer or employee information until these gates are completed and explicitly approved.
