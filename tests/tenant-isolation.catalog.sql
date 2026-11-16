@@ -105,6 +105,13 @@ BEGIN
      OR has_table_privilege('profitpilot_app','public.tenant_memberships','UPDATE')
      OR has_table_privilege('profitpilot_app','public.tenant_memberships','DELETE')
   THEN RAISE EXCEPTION 'Runtime role has forbidden identity, tenant or membership write privileges'; END IF;
+  IF has_table_privilege('profitpilot_app','public.payroll_source_rows','INSERT')
+     OR has_table_privilege('profitpilot_app','public.payroll_source_rows','UPDATE')
+     OR has_table_privilege('profitpilot_app','public.payroll_source_rows','DELETE')
+     OR has_table_privilege('profitpilot_app','public.allocation_lines','INSERT')
+     OR has_table_privilege('profitpilot_app','public.allocation_lines','UPDATE')
+     OR has_table_privilege('profitpilot_app','public.allocation_lines','DELETE')
+  THEN RAISE EXCEPTION 'Runtime role must remain read-only on the payroll evidence ledger'; END IF;
   IF has_table_privilege('profitpilot_app','public.import_batches','DELETE')
      OR has_table_privilege('profitpilot_app','public.raw_import_rows','DELETE')
      OR has_table_privilege('profitpilot_app','public.mapping_decisions','DELETE')
