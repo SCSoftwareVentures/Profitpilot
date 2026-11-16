@@ -35,7 +35,7 @@
 ## Current automated test coverage
 The Node test suite covers money rounding, CSV parsing, quoted fields, escaped quotes, CRLF, malformed row widths/headings, invalid dates, invoice validation, payroll reconciliation, over-allocation, negative allocation, human confirmation and contract aggregation.
 
-**Execution status (16 November 2026):** the 19 test cases were executed locally using Node.js v22. The exact engine and test-suite source retrieved from the repository were run with `node --test`: **19 passed, 0 failed**. This is a local test result, not a GitHub-hosted Actions run. The GitHub Actions workflow and a pull-request trigger were committed, but the connected GitHub Actions run lookup returned no workflow runs or status checks; hosted CI therefore remains unverified. The invoice-date regular expression was also corrected after source review and the 19-test suite passed against the corrected implementation.
+**Execution status (16 November 2026):** the 19 test cases were executed locally using Node.js v22. The exact engine and test-suite source retrieved from the repository were run with `node --test`: **19 passed, 0 failed**. This is a local test result, not a GitHub-hosted Actions run. The GitHub Actions workflow was expanded to trigger on every branch push, pull requests to main and manual dispatch. A dedicated pull request and a subsequent main-branch workflow update were used to exercise triggers; GitHub returned no workflow runs or status checks for either commit. The workflow configuration is committed, but hosted Actions execution remains unverified and may be disabled or restricted in repository settings; that setting is not exposed by the connected GitHub operations. The invoice-date regular expression was also corrected after source review and the 19-test suite passed against the corrected implementation.
 
 ## Known implementation limits — not defects to conceal
 1. No production environment, API host, database instance or identity provider is configured.
@@ -47,7 +47,7 @@ The Node test suite covers money rounding, CSV parsing, quoted fields, escaped q
 7. The match decision endpoint assumes candidate rows already exist; candidate generation and evidence scoring are not fully implemented.
 8. The calculation endpoint includes confirmed customer invoice lines and confirmed site labour allocation lines only. Other costs are excluded; output is explicitly marked incomplete and is not audited profit.
 9. Calculation source selection and approval lifecycle need further review, including credit notes, invoice reversals, tax conversion, currency conversion, restatements and duplicate source data.
-10. No real PostgreSQL migration execution, Docker build, Node test execution, browser test, native Excel/Sheets test or security test has been performed in this environment.
+10. The 19-case Node.js 22 engine test suite has been executed locally and passed. No full dependency-install CI run, real PostgreSQL migration execution, Docker build, browser test, native Excel/Sheets test or security test has been performed.
 11. The local Compose runtime role uses a fixed development-only password. Do not deploy this configuration to a shared or production environment. Change the role bootstrap and secret handling before any shared deployment.
 12. API CORS, identity configuration, TLS, backups, monitoring, secrets, data retention, incident response and operational controls require environment-specific setup.
 
