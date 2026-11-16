@@ -91,3 +91,21 @@ test("payroll normalizer rejects empty and oversized batches",()=>{
   assert.throws(()=>normalizePayrollRows([]),/1–10000/);
   assert.throws(()=>normalizePayrollRows(Array(10001).fill({})),/1–10000/);
 });
+
+test("invoice matcher requires customer, contract, site, service period, currency and tax-basis evidence",()=>{
+  const contract={id:"contract-1",customerId:"customer-1",siteId:"site-1",periodStart:"2026-11-01",periodEnd:"2026-11-30",currency:"AUD",taxBasis:"gst_exclusive"};
+  const row={customer_id:"customer-1",contract_id:"contract-1",site_id:"site-1",service_period_start:"2026-11-01",service_period_end:"2026-11-30",amount:"100.00",currency:"AUD",tax_basis:"gst_exclusive"};
+  const result=matchInvoice(row,contract);
+  assert.equal(result.confidence,"HIGH");
+  assert.equal(result.requiresHumanConfirmation,true);
+  assert.equal(result.decision,"candidate");
+  assert.equal(matchInvoice({...row,site_id:undefined},contract).confidence,"MEDIUM");
+  assert.equal(matchInvoice({...row,currency:"NZD"},contract).evidence.currency,false);
+  assert.equal(matchInvoice({...row,tax_basis:"unknown"},contract).evidence.taxBasis,false);
+});
+test("invoice validation uses strict decimal syntax without Number coercion",()=>{
+  const base={invoice_id:"1",site:"A",date:"2026-11-01"};
+  for(const amount of ["0","0.00","1e2","0x10","1,000.00","1.234","Infinity","-1"])
+    assert.equal(validateInvoiceRows([{...base,amount}])[0].status,"held",amount);
+  assert.equal(validateInvoiceRows([{...base,amount:"100.00"}])[0].status,"pending_review");
+});
