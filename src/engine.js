@@ -93,7 +93,6 @@ export function parseCsv(text) {
 export function validateInvoiceRows(rows){
   return rows.map((r,i)=>{
     const amountText=String(r.amount??"").trim();
-    const amount=Number(amountText);
     const errors=[];
     if(typeof r.invoice_id!=="string"||!r.invoice_id.trim())errors.push("Missing invoice_id");
     if(typeof r.site!=="string"||!r.site.trim())errors.push("Missing site");
@@ -119,13 +118,18 @@ export function allocatePayroll({pool,direct=[],approved=[],nonSite=0,excluded=0
   return {pool:safe(p),direct:safe(d),approvedAllocated:safe(a),nonSite:safe(n),excluded:safe(e),unallocated:safe(residual),siteTotals:Object.fromEntries(Object.entries(siteCents).map(([k,v])=>[k,fromCents(v)])),reconciles:valid&&d+a+n+e+residual===p,errors:valid?[]:["Invalid monetary input, negative bucket or allocation exceeds eligible payroll pool"]};
 }
 export function matchInvoice(row,contract){
-  const identity=typeof row.site==="string"&&row.site.trim()!==""&&row.site===contract.site;
-  const period=isIsoDate(row.date)&&isIsoDate(contract.periodStart)&&isIsoDate(contract.periodEnd)&&row.date>=contract.periodStart&&row.date<=contract.periodEnd;
+  const customer=typeof row.customer_id==="string"&&row.customer_id.length>0&&row.customer_id===contract.customerId;
+  const contractIdentity=typeof row.contract_id==="string"&&row.contract_id.length>0&&row.contract_id===contract.id;
+  const site=typeof row.site_id==="string"&&row.site_id.length>0&&row.site_id===contract.siteId;
+  const period=isIsoDate(row.service_period_start)&&isIsoDate(row.service_period_end)&&isIsoDate(contract.periodStart)&&isIsoDate(contract.periodEnd)&&row.service_period_start>=contract.periodStart&&row.service_period_end<=contract.periodEnd&&row.service_period_end>=row.service_period_start;
   const amountCents=decimalCents(row.amount);
   const amount=amountCents!==null&&amountCents>0n;
-  const evidence=[identity,period,amount].filter(Boolean).length;
-  const confidence=identity&&period&&amount?"MEDIUM":identity&&amount?"LOW":"UNMATCHED";
-  return {contractId:contract.id,confidence,evidence:{identity,period,amount},requiresHumanConfirmation:true};
+  const currency=typeof row.currency==="string"&&row.currency===contract.currency;
+  const taxBasis=["gst_inclusive","gst_exclusive","no_gst"].includes(row.tax_basis)&&row.tax_basis===contract.taxBasis;
+  const evidence={customer,contract:contractIdentity,site,servicePeriod:period,amount,currency,taxBasis};
+  const complete=Object.values(evidence).every(Boolean);
+  const confidence=complete?"HIGH":Object.values(evidence).filter(Boolean).length>=5?"MEDIUM":Object.values(evidence).some(Boolean)?"LOW":"UNMATCHED";
+  return {contractId:contract.id,confidence,evidence,requiresHumanConfirmation:true,decision:"candidate"};
 }
 export function summariseContracts(contracts){
   return contracts.map(c=>{
