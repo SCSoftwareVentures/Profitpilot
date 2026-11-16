@@ -64,6 +64,9 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'CI Customer A','active') ON CONFLICT(id) DO NOTHING",[contractA,tenantA,businessA]);
     await admin.query("INSERT INTO businesses(id,tenant_id,name) VALUES ($1,$2,'CI Business B') ON CONFLICT(id) DO NOTHING",[businessB,tenantB]);
     await admin.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'CI Customer B','active') ON CONFLICT(id) DO NOTHING",[contractB,tenantB,businessB]);
+    const partialSite="abababab-abab-4bab-8bab-abababababab";
+    await admin.query("INSERT INTO sites(id,tenant_id,business_id,name) VALUES ($1,$2,$3,'CI partial-period site') ON CONFLICT(id) DO NOTHING",[partialSite,tenantA,businessA]);
+    await admin.query("INSERT INTO contract_versions(id,tenant_id,contract_id,version_no,effective_from,price,currency,billing_basis,approved_by,approved_at) VALUES ('acacacac-acac-4cac-8cac-acacacacacac',$1,$2,1,'2026-02-15',100,'AUD','monthly',$3,now()) ON CONFLICT(id) DO NOTHING",[tenantA,contractA,userA]);
     await assert.rejects(()=>admin.query("INSERT INTO import_batches(id,tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by) VALUES ($1,$2,'payroll','CI permission','uploaded',$3,'cross-tenant.csv',$4)",["cccccccc-cccc-4ccc-8ccc-cccccccccccc",tenantA,"d".repeat(64),userC]),/foreign key constraint/i,"a user who belongs only to tenant B must not be recorded as the creator of a tenant A import");
 
     const noToken=await request("/v1/me");
@@ -164,6 +167,9 @@ test("authenticated API enforces tenant membership, role permissions and import 
 
     const invalidTenant=await request("/v1/tenants/not-a-uuid/contracts",{subject:"ci-api-analyst"});
     assert.equal(invalidTenant.status,400);
+    const partialContractPeriod=await request(`/v1/tenants/${tenantA}/calculations`,{subject:"ci-api-analyst",method:"POST",body:{contractId:contractA,siteId:partialSite,periodStart:"2026-02-01",periodEnd:"2026-02-28"}});
+    assert.equal(partialContractPeriod.status,422);
+    assert.match((await partialContractPeriod.json()).error,/No matching contract\/site and effective contract version/,"a contract version that starts mid-period must not be treated as covering the full calculation period");
 
     const invalidDate=await request(`/v1/tenants/${tenantA}/imports`,{
       subject:"ci-api-analyst",method:"POST",
