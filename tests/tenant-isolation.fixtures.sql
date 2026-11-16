@@ -29,8 +29,8 @@ VALUES
 
 INSERT INTO import_batches(id,tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by)
 VALUES
- ('12121212-1212-4212-8212-121212121212','33333333-3333-4333-8333-333333333333','customer_invoice','fixture permission C','uploaded',repeat('1',64),'fixture-c.csv','55555555-5555-4555-8555-555555555555'),
- ('13131313-1313-4313-8313-131313131313','44444444-4444-4444-8444-444444444444','customer_invoice','fixture permission D','uploaded',repeat('2',64),'fixture-d.csv','66666666-6666-4666-8666-666666666666');
+ ('12121212-1212-4212-8212-121212121212','33333333-3333-4333-8333-333333333333','customer_invoice','fixture permission C','registered',repeat('1',64),'fixture-c.csv','55555555-5555-4555-8555-555555555555'),
+ ('13131313-1313-4313-8313-131313131313','44444444-4444-4444-8444-444444444444','customer_invoice','fixture permission D','registered',repeat('2',64),'fixture-d.csv','66666666-6666-4666-8666-666666666666');
 INSERT INTO raw_import_rows(id,tenant_id,batch_id,row_number,payload) VALUES
  ('14141414-1414-4414-8414-141414141414','33333333-3333-4333-8333-333333333333','12121212-1212-4212-8212-121212121212',1,'{"invoice_id":"C-1"}'),
  ('15151515-1515-4515-8515-151515151515','44444444-4444-4444-8444-444444444444','13131313-1313-4313-8313-131313131313',1,'{"invoice_id":"D-1"}');
