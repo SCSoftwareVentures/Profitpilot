@@ -1,59 +1,74 @@
 # ProfitPilot — Project Status
 
 **Baseline:** V8.6.1 Master Product Blueprint, dated 16 November 2026  
-**Repository:** working public project repository  
-**Status:** product validation specification plus a partial API/database implementation scaffold; not a production application
+**Repository:** public working project repository; synthetic fixtures only  
+**Status:** extensive product/validation/security/financial specification plus a partial API/database scaffold; not a complete or deployed application
 
 ## Current product decision
 
 ProfitPilot's overall vision is a business operations and customer transaction-management platform. Its initial beachhead remains contract economics reconciliation and exception control for Australian independent commercial cleaning contractors with recurring multi-site B2B contracts.
 
-The first delivery mode is a concierge validation service using secure, authorised data and manual/scripted reconciliation. The initial analysis unit is contract × site × service period.
+The first delivery mode is concierge validation using authorised data and an approved secure handling route. The initial analysis unit is contract × site × service period × calculation version.
+
+## Latest verified repository position — 16 November 2026
+
+- PR #25 security branch: 17178768002b978d6f5bd76f0192b2bbff7a4355; open, draft and unmerged.
+- PR #25 CI run #310 passed Node.js 22 dependency/syntax/unit checks and PostgreSQL migrations, tenant/RLS, authenticated API, container-build and health checks.
+- PR #26 product blueprint branch: 4ca08f6418cc498cd0e5db05565403ac837e75a7; open, draft and unmerged.
+- PR #26 CI run #343 passed Node.js 22 syntax/unit checks and PostgreSQL migration/RLS, authenticated API, container-build and health checks.
+- The PRs are sibling branches against main commit 55d1403c0dc34ac26a9bdb58107662754f34a8e3. The CI runs are separate; neither proves a combined candidate.
+- Neither PR has been merged. No production environment or customer pilot is established.
 
 ## Current repository contents
 
-- Product overview and scope
-- G0–G6 validation gates
-- Architecture and data-control principles
-- Staged roadmap and initial risk register
-- Static landing-page HTML concept
-- Express API scaffold with JWT/JWKS authentication, tenant membership and role checks
-- PostgreSQL schema, tenant RLS migration and ordered initialization scripts
-- Import row persistence, invoice validation decisions, human-reviewed match decisions and evidence-gated calculation endpoints
-- Node.js 22 engine tests and GitHub Actions CI
-- PostgreSQL 16 schema/migration execution and HMAC-signed tenant RLS tests
-- Authenticated HTTP API tests for membership, role restrictions, date validation and import idempotency
-- Cross-tenant contract read/write negative tests, raw-GUC spoof rejection, HMAC signature/expiry/membership negative tests, private-key access denial, same-tenant actor foreign-key enforcement and pooled tenant-context cleanup test
-- Production Docker image build and running-container database health smoke test
+- Product overview, market hypothesis and G0–G6 validation gates.
+- G0 concierge pack, G1 customer interview guide, competitive scorecard and concierge execution playbook.
+- Six differentiator product blueprint and shared platform foundations.
+- MVP product requirements, workflow specification and iPhone-first acceptance/screen design.
+- Architecture, data dictionary, threat model and release/test plan.
+- Financial engine audit, decimal data contract, technical design, schema/migration specification and remediation backlog.
+- Payroll source-row allocation ledger design.
+- Synthetic financial test oracle, executable acceptance plan and test traceability matrix.
+- Data classification/privacy/tenant governance and security readiness review.
+- Branch integration/migration reconciliation and master completion register.
+- Static landing-page and dashboard concepts.
+- Partial Express API, PostgreSQL schema/migrations, JWT/JWKS auth, tenant membership/role controls and RLS scaffold.
+- Node.js 22 tests, PostgreSQL CI, authenticated API integration checks and Docker health smoke test on the security review branch.
 
 ## What is not established
 
-- Customer demand or willingness to pay
-- Repeatable lawful access to customer data
-- Production-grade native application implementation
-- Production deployment, exhaustive tenant-isolation assessment and independent security certification
-- Excel or Google Sheets equivalence for the audit workbook
-- Live integrations
-- Legal/privacy clearance
-- Payment-provider approval or safeguarded-funds structure
-- Production security or operational readiness
+- G0–G4 customer, data-feasibility, commercial and usability evidence.
+- G5 signed build authorisation.
+- Combined integration of PR #25 and PR #26.
+- Complete financial engine or executable financial acceptance suite.
+- Production-grade original-file upload/storage, malware scanning, retention and deletion.
+- Configured production identity provider/MFA, managed secrets, distributed rate limiting and operational recovery.
+- Independent penetration test and security remediation retest.
+- Legal/privacy clearance, accounting/payroll/tax policy approvals.
+- Live integrations or customer data processing.
+- Production deployment, customer support readiness or positive unit economics.
+- G6 paid software-pilot exit.
+
+## Critical technical findings
+
+- The reviewed API calculation route references allocation_lines, while the reviewed schema does not define the required row-level ledger.
+- The API calculation path still uses JavaScript Number and toFixed for money.
+- Payroll persistence is aggregate-oriented and cannot demonstrate source-row caps and provenance.
+- Contribution may still be emitted when important inputs are incomplete.
+- Tenant-bound relationship integrity must be verified on the combined candidate.
+- Import metadata registration is not a binary upload or secure file lifecycle.
+- The in-process limiter is not a shared production rate-limit control.
+
+See the master completion register, financial test traceability matrix and branch integration report for closure evidence.
 
 ## Build-control rule
 
-Do not treat repository setup, HTML concepts, documentation, or technical preparation as authorisation to build the SaaS.
+Do not treat repository setup, CI, documentation, HTML concepts or technical preparation as authorisation to build the SaaS.
 
-Software build remains blocked until G0–G4 and competitive preconditions pass and G5 records an explicit signed GO with named technical ownership, legal/privacy plan, delivery capacity and approved budget.
+Software build remains blocked until G0–G4 and competitive preconditions pass and G5 records explicit signed GO with named technical ownership, legal/privacy plan, delivery capacity and approved budget.
 
 G6 is a post-build paid software-pilot exit gate.
 
-## Immediate next work
-
-1. Prepare and run G0 data-feasibility and competitive-proof work.
-2. Obtain at least five complete, authorised export sets from at least three unrelated businesses.
-3. Use the G0 pilot pack to control scope, permissions, data minimisation, source lineage and effort measurement.
-4. Produce one-site contract variance bridges and record pass/fail evidence.
-5. Stop or pivot if no lawful, repeatable source path exists.
-
 ## Repository safety
 
-This repository is public at the time this status file was written. Never commit customer exports, employee-identifiable records, confidential contracts, credentials, API keys, payment secrets or private source documents. Keep any real pilot data in an appropriately authorised, secure environment under documented terms.
+This repository is public. Never commit customer exports, employee-identifiable records, confidential contracts, credentials, API keys, payment secrets or private source documents. Use synthetic fixtures only. Real pilot data must remain in an approved private environment under written authority and documented handling controls.
