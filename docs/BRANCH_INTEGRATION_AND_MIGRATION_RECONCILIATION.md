@@ -192,3 +192,8 @@ The exact combined branch passes the repository's configured automated CI. The b
 - Production identity/MFA/provisioning/recovery, managed secret custody/KMS, shared rate limiting/trusted proxy, database TLS, backups/restore, monitoring and incident response.
 - Independent penetration test/remediation retest, Australian privacy/legal review and qualified accounting/payroll/tax policy approval.
 - G0–G4 customer/data/commercial/usability evidence, signed G5 GO and post-build G6 paid-pilot exit.
+
+
+### Latest reconciled branch head and CI — 17 November 2026
+
+After the documentation reconciliation, PR #27 branch `integration/pr25-pr26-validation` advanced to `688d50bb5e3b45479f48f9cf7bb20e5897750291`. CI run **#43980939798** passed on that exact head. Node.js 22 and PostgreSQL 16 jobs both passed. The Node.js job reported 45 passed, 1 skipped and 0 failed (46 total); PostgreSQL migrations/RLS, tenant/FK catalogue audit, authenticated API integration, production image build and restricted-container health checks passed. This closes the exact-head configured-CI checkpoint for the documentation-reconciled combined candidate. It does not close the full financial acceptance suite or any independent, customer, legal/privacy or production release gate.
