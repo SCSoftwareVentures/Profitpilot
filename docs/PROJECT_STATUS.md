@@ -21,9 +21,9 @@ The first delivery mode is a concierge validation service using secure, authoris
 - PostgreSQL schema, tenant RLS migration and ordered initialization scripts
 - Import row persistence, invoice validation decisions, human-reviewed match decisions and evidence-gated calculation endpoints
 - Node.js 22 engine tests and GitHub Actions CI
-- PostgreSQL 16 schema/migration execution and RLS tests
+- PostgreSQL 16 schema/migration execution and HMAC-signed tenant RLS tests
 - Authenticated HTTP API tests for membership, role restrictions, date validation and import idempotency
-- Cross-tenant contract read/write negative tests and pooled tenant-context cleanup test
+- Cross-tenant contract read/write negative tests, raw-GUC spoof rejection and pooled tenant-context cleanup test
 - Production Docker image build and running-container database health smoke test
 
 ## What is not established
