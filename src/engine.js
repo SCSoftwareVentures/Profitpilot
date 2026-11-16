@@ -171,7 +171,7 @@ export function normalizePayrollRows(rows){
     const [whole,fraction=""]=amountText.split(".");
     const canonicalAmount=String(BigInt(whole))+"."+fraction.padEnd(2,"0");
     const canonical={sourceRowKey:key,amount:canonicalAmount,currency};
-    const rowSha256=createHash("sha256").update([key,canonicalAmount,currency].join("\\n"),"utf8").digest("hex");
+    const rowSha256=createHash("sha256").update([key,canonicalAmount,currency].join("\n"),"utf8").digest("hex");
     return {rowNumber:index+1,status:"pending_review",record:canonical,rowSha256,errors:[]};
   });
 }
