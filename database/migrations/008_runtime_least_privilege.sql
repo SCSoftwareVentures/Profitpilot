@@ -2,6 +2,7 @@
 -- The runtime API must never be able to grant or modify tenant membership/identity.
 BEGIN;
 REVOKE INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public FROM profitpilot_app;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE INSERT,UPDATE,DELETE ON TABLES FROM profitpilot_app;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO profitpilot_app;
 
 -- Explicit writes used by implemented API routes only.
