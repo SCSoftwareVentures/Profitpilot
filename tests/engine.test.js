@@ -116,14 +116,14 @@ test("money rejects amounts whose cent representation cannot be safely returned 
 
 test("contract aggregation blocks mixed currencies, tax bases and reporting periods",()=>{
   const common={currency:"AUD",taxBasis:"gst_exclusive",periodStart:"2026-11-01",periodEnd:"2026-11-30"};
-  const mixedCurrency=aggregateMetrics([{...common,revenue:100,cost:50},{...common,currency:"NZD",revenue:100,cost:50}]);
+  const mixedCurrency=aggregateMetrics([{...common,revenue:"100.00",cost:"50.00"},{...common,currency:"NZD",revenue:"100.00",cost:"50.00"}]);
   assert.equal(mixedCurrency.complete,false);
   assert.equal(mixedCurrency.contribution,null);
-  const mixedTax=aggregateMetrics([{...common,revenue:100,cost:50},{...common,taxBasis:"gst_inclusive",revenue:100,cost:50}]);
+  const mixedTax=aggregateMetrics([{...common,revenue:"100.00",cost:"50.00"},{...common,taxBasis:"gst_inclusive",revenue:"100.00",cost:"50.00"}]);
   assert.equal(mixedTax.complete,false);
-  const mixedPeriod=aggregateMetrics([{...common,revenue:100,cost:50},{...common,periodStart:"2026-10-01",periodEnd:"2026-10-31",revenue:100,cost:50}]);
+  const mixedPeriod=aggregateMetrics([{...common,revenue:"100.00",cost:"50.00"},{...common,periodStart:"2026-10-01",periodEnd:"2026-10-31",revenue:"100.00",cost:"50.00"}]);
   assert.equal(mixedPeriod.complete,false);
-  assert.equal(aggregateMetrics([{...common,revenue:100,cost:50},{...common,revenue:100,cost:50}]).contribution,100);
+  assert.equal(aggregateMetrics([{...common,revenue:"100.00",cost:"50.00"},{...common,revenue:"100.00",cost:"50.00"}]).contribution,100);
 });
 
 
