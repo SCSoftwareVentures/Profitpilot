@@ -164,3 +164,10 @@ This is not closure of the proposed API-CALC suite. The contract tax-basis model
 PR #25 now adds `contract_versions.tax_basis` (migration 012; legacy default `unknown`). The calculation route requires the confirmed invoice tax basis to be singular, known, in the contract currency and equal to the effective approved contract version's tax basis. Unknown or mismatched basis blocks the calculation. The pure prototype aggregation helper also refuses to combine records when currency, tax basis or reporting-period metadata is mixed or incomplete.
 
 PR #25 head `ff354de4418b4d471ca0e8cd881af4f9acf5ef78` passed CI run #43973502209. This does not close the remaining financial acceptance gaps: full revenue/source completeness, credit notes and reversals, restatement, source manifests, customer/contract identity mapping from actual invoice imports, full payroll mapping/allocation/reviewer workflow, other cost categories, and API-CALC-T01–T14 remain unproven or incomplete. The PR #25/#26 combined candidate has not been tested.
+
+
+## 8. Payroll currency alignment and negative API regression — 17 November 2026
+
+The calculation route now checks payroll allocation currency as well as invoice currency against the effective contract version. It rejects mixed payroll currencies and any payroll currency that differs from the contract currency. A synthetic API integration fixture creates a valid source-row payroll pool and confirmed site allocation in USD against an AUD contract, then verifies the calculation is blocked. A separate complete synthetic fixture verifies invoice GST-basis mismatch is also blocked.
+
+PR #25 head `ce168020eb49667616e5c36f1cc9b324f92c22b5` passed CI run #43974141222. These are targeted negative integration cases, not the complete calculation acceptance suite, accounting policy approval or independent audit.
