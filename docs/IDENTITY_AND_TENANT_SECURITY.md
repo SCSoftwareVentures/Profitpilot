@@ -2,7 +2,7 @@
 
 **Status:** partial implementation scaffold. The API includes JWT/JWKS verification, tenant membership checks, role middleware, transaction-scoped tenant context and a PostgreSQL RLS migration. The schema and migrations were executed against an ephemeral PostgreSQL 16 service in GitHub Actions, and a basic RLS isolation check passed under the restricted runtime role. They have not been tested in a production environment or independently security-tested. Secure file storage is not implemented.
 
-The current RLS context is a server-set PostgreSQL custom setting (`app.tenant_id`). This provides defence against accidentally unscoped queries and has been tested for row filtering, cross-tenant writes and transaction-pool cleanup. It is **not** an independent security boundary against a compromised application process or arbitrary SQL execution under `profitpilot_app`: PostgreSQL permits that role to set custom GUC values. Production threat modelling must explicitly accept the API process as trusted for tenant-context selection or replace this mechanism with a cryptographically authenticated context / stronger database role boundary. Do not describe the current RLS implementation as protecting against a malicious or fully compromised runtime role.
+Tenant RLS now uses a short-lived HMAC-signed transaction context containing the tenant ID, verified identity subject, expiry, nonce and key ID. The API signs this context with `TENANT_CONTEXT_HMAC_SECRET`; PostgreSQL validates it in `private.current_tenant_id()` and independently checks active tenant membership. The validator is a locked-down `SECURITY DEFINER` function owned by a `NOLOGIN BYPASSRLS` role; its signing-key table is in a private schema inaccessible to `profitpilot_app`. CI proves that setting `app.tenant_id` alone does not grant rows, while a correctly signed context does, and verifies that cross-tenant reads/writes remain blocked and context is cleared after transaction completion. This improves protection against arbitrary SQL under the application database role **provided the signing secret remains confidential**. A compromised API process or leaked HMAC secret can still forge tenant contexts. The migration creates a `BYPASSRLS` role and therefore requires a suitably privileged database migration administrator; production key provisioning, rotation and recovery procedures remain to be operationalised.
 
 ## Identity boundary
 Use a managed identity provider with OIDC/OAuth 2.0 Authorization Code + PKCE for browser clients. The application must not store raw passwords. Require MFA for privileged users; provide secure recovery, session revocation, rate limiting and account lifecycle controls.
@@ -31,7 +31,7 @@ Separate high-impact actions such as membership changes, exports, baseline appro
 - Log authorization denials and sensitive exports without logging secrets or unnecessary personal data.
 
 ## PostgreSQL row-level security deployment pattern
-The tenant RLS migration enables and forces row-level security on tenant-owned tables using transaction-local `app.tenant_id`. The migration and policies passed an ephemeral PostgreSQL 16 CI integration run; production deployment and broader adversarial isolation tests remain outstanding. Before any shared or production deployment:
+The tenant RLS migration enables and forces row-level security on tenant-owned tables using `private.current_tenant_id()`, which validates a short-lived HMAC-signed transaction context and active membership. PostgreSQL 16 CI tests passed for valid context, raw-GUC spoof rejection, cross-tenant row isolation, cross-tenant write rejection and pooled-context cleanup. Production deployment, key rotation/recovery and broader all-table adversarial isolation tests remain outstanding. Before any shared or production deployment:
 1. Define a server-only transaction-local tenant context.
 2. Set it only after verifying identity and membership.
 3. Ensure pooled connections cannot leak context between requests.
@@ -51,7 +51,7 @@ USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
 WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
 ```
 
-Do not copy this blindly into production. Missing or invalid context must deny access, and the application role must not be able to set arbitrary tenant context without a trusted server authorization step.
+Do not copy this blindly into production. Missing, expired, forged or membership-invalid context must deny access. Keep the signing key out of source control and inaccessible to the database runtime role. The API process is trusted with this secret; protect it accordingly.
 
 ## File and import security
 - Private object storage, not public repository or browser local storage.
