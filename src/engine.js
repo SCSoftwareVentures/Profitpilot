@@ -91,12 +91,13 @@ export function parseCsv(text) {
 }
 export function validateInvoiceRows(rows){
   return rows.map((r,i)=>{
-    const amount=Number(r.amount);
+    const amountText=String(r.amount??"").trim();
+    const amount=Number(amountText);
     const errors=[];
-    if(!r.invoice_id)errors.push("Missing invoice_id");
-    if(!r.site)errors.push("Missing site");
+    if(typeof r.invoice_id!=="string"||!r.invoice_id.trim())errors.push("Missing invoice_id");
+    if(typeof r.site!=="string"||!r.site.trim())errors.push("Missing site");
     if(!isIsoDate(r.date))errors.push("Invalid date (expected a real YYYY-MM-DD date)");
-    if(!r.amount||!Number.isFinite(amount)||amount<=0)errors.push("Amount must be greater than zero");
+    if(!/^\\d+(?:\\.\\d{1,2})?$/.test(amountText)||!Number.isFinite(amount)||amount<=0)errors.push("Amount must be a positive decimal with at most two fractional digits");
     return {rowNumber:r.__rowNumber||i+2,record:r,errors,status:errors.length?"held":"pending_review"};
   });
 }
