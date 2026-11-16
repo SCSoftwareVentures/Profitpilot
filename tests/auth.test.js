@@ -42,6 +42,8 @@ test("JWT validation requires expiry, issued-at, bounded age and supports JWKS k
  }
  try{
   assert.equal((await verify(await signed(first.privateKey,"key-one"))).status,200);
+  const longSubject=await new SignJWT({}).setProtectedHeader({alg:"RS256",kid:"key-one"}).setIssuer(issuer).setAudience(audience).setSubject("s".repeat(256)).setIssuedAt().setExpirationTime("5m").sign(first.privateKey);
+  assert.equal((await verify(longSubject)).status,401,"overlong identity subjects must be rejected");
   assert.equal((await verify(await signed(first.privateKey,"key-one",{exp:"-10s"}))).status,401,"expired access tokens must be rejected");
   assert.equal((await verify(await signed(first.privateKey,"key-one",{exp:null}))).status,401,"tokens without exp must be rejected");
   assert.equal((await verify(await signed(first.privateKey,"key-one",{iat:false}))).status,401,"tokens without iat must be rejected");
