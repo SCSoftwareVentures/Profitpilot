@@ -18,8 +18,10 @@ BEGIN
   IF NEW.status <> 'confirmed' THEN
     RETURN NEW;
   END IF;
-  IF TG_OP='UPDATE' AND OLD.status='confirmed' THEN
-    RAISE EXCEPTION 'Confirmed payroll allocation runs are immutable' USING ERRCODE='55000';
+  IF TG_OP='UPDATE' THEN
+    IF OLD.status='confirmed' THEN
+      RAISE EXCEPTION 'Confirmed payroll allocation runs are immutable' USING ERRCODE='55000';
+    END IF;
   END IF;
 
   SELECT * INTO pool
