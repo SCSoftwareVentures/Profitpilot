@@ -24,8 +24,33 @@ ALTER TABLE payroll_source_rows ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payroll_source_rows FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON payroll_source_rows
  USING(tenant_id=private.current_tenant_id()) WITH CHECK(tenant_id=private.current_tenant_id());
+CREATE FUNCTION private.validate_payroll_source_row_provenance()
+RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public,private AS $
+DECLARE pool_batch uuid; raw_batch uuid; batch_type text;
+BEGIN
+ SELECT pp.batch_id,ib.source_type INTO pool_batch,batch_type
+ FROM payroll_pools pp
+ JOIN import_batches ib ON ib.tenant_id=pp.tenant_id AND ib.id=pp.batch_id
+ WHERE pp.tenant_id=NEW.tenant_id AND pp.id=NEW.payroll_pool_id
+ FOR KEY SHARE OF pp,ib;
+ IF NOT FOUND OR batch_type<>'payroll' THEN
+  RAISE EXCEPTION 'Payroll source rows must belong to a payroll import batch' USING ERRCODE='23514';
+ END IF;
+ SELECT batch_id INTO raw_batch FROM raw_import_rows
+ WHERE tenant_id=NEW.tenant_id AND id=NEW.raw_import_row_id
+ FOR KEY SHARE;
+ IF NOT FOUND OR raw_batch<>pool_batch THEN
+  RAISE EXCEPTION 'Payroll source row evidence must originate from the same payroll pool import batch' USING ERRCODE='23514';
+ END IF;
+ RETURN NEW;
+END;
+$;
+CREATE TRIGGER payroll_source_rows_validate_provenance
+BEFORE INSERT ON payroll_source_rows
+FOR EACH ROW EXECUTE FUNCTION private.validate_payroll_source_row_provenance();
+
 CREATE FUNCTION private.reject_payroll_source_row_mutation()
-RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public,private AS $$
+RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public,private AS $
 BEGIN RAISE EXCEPTION 'Payroll source rows are immutable; create a corrected source version' USING ERRCODE='55000'; END;
 $$;
 CREATE TRIGGER payroll_source_rows_immutable BEFORE UPDATE OR DELETE ON payroll_source_rows
