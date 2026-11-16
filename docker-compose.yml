@@ -18,6 +18,7 @@ services:
       - ./database/migrations/003_allocation_lines.sql:/docker-entrypoint-initdb.d/005-allocation-lines.sql:ro
       - ./database/migrations/004_import_validation.sql:/docker-entrypoint-initdb.d/006-import-validation.sql:ro
       - ./database/migrations/005_prevent_duplicate_confirmations.sql:/docker-entrypoint-initdb.d/007-confirmation-uniqueness.sql:ro
+      - ./database/migrations/006_tenant_actor_membership_fks.sql:/docker-entrypoint-initdb.d/008-tenant-actor-fks.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
