@@ -1,0 +1,20 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ProfitPilot engine tests</title><style>body{font:15px system-ui;max-width:850px;margin:35px auto;padding:0 18px;background:#f5f8f6;color:#17231f}h1{font-size:25px}.box{background:white;border:1px solid #e1e9e4;border-radius:12px;padding:18px}li{padding:7px 0;border-bottom:1px solid #edf1ee}.pass{color:#176b52}.fail{color:#a44c46}.muted{color:#718078;font-size:13px}</style></head><body><h1>ProfitPilot calculation engine — test runner</h1><p class="muted">Synthetic fixtures only. Browser-executed tests; not production certification.</p><div class="box"><p id="summary">Running tests…</p><ol id="results"></ol></div><script type="module">
+import {parseCsv,validateInvoiceRows,allocatePayroll,matchInvoice,aggregateMetrics,money} from "../src/engine.js";
+const tests=[];
+const test=(name,fn)=>tests.push({name,fn});
+const eq=(a,b)=>JSON.stringify(a)===JSON.stringify(b);
+test("Money rounds to two decimal places",()=>money(10.126)===10.13);
+test("CSV parses ordinary rows",()=>parseCsv("invoice_id,site,date,amount\nI1,North,2026-11-01,100").length===1);
+test("CSV preserves commas inside quoted fields",()=>parseCsv('invoice_id,site,date,amount,description\nI1,North,2026-11-01,100,"cleaning, deep"')[0].description==="cleaning, deep");
+test("CSV rejects unclosed quoted field",()=>{try{parseCsv('a,b\n"oops,1');return false}catch{return true}});
+test("CSV rejects duplicate headings",()=>{try{parseCsv("a,a\n1,2");return false}catch{return true}});
+test("Invoice validation holds missing site",()=>validateInvoiceRows([{invoice_id:"I1",date:"2026-11-01",amount:"50"}])[0].status==="held");
+test("Invoice validation accepts structurally valid row",()=>validateInvoiceRows([{invoice_id:"I1",site:"North",date:"2026-11-01",amount:"50"}])[0].status==="pending_review");
+test("Payroll allocation reconciles source pool",()=>allocatePayroll({pool:1000,direct:[{site:"North",amount:400}],approved:[{site:"South",amount:300}],nonSite:200,excluded:50}).reconciles);
+test("Payroll allocation rejects over-allocation",()=>!allocatePayroll({pool:100,direct:[{site:"North",amount:120}]}).reconciles);
+test("Invoice match remains a human-review candidate",()=>matchInvoice({site:"North",date:"2026-11-05",amount:200},{id:"C1",site:"North",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).requiresHumanConfirmation);
+test("Amount alone cannot create a medium/high match",()=>matchInvoice({site:"",date:"",amount:200},{id:"C1",site:"North",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).confidence==="UNMATCHED");
+test("Contract metrics aggregate deterministically",()=>{const m=aggregateMetrics([{revenue:1000,cost:600},{revenue:500,cost:250}]);return m.revenue===1500&&m.cost===850&&m.contribution===650&&m.margin===43.33});
+let passed=0;const list=document.querySelector("#results");for(const t of tests){let ok=false,detail="";try{ok=!!t.fn()}catch(e){detail=e.message}if(ok)passed++;const li=document.createElement("li");li.className=ok?"pass":"fail";li.textContent=(ok?"PASS — ":"FAIL — ")+t.name+(detail?" ("+detail+")":"");list.append(li)}
+document.querySelector("#summary").textContent=passed+" / "+tests.length+" tests passed in this browser session.";
+</script></body></html>
