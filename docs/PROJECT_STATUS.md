@@ -2,7 +2,7 @@
 
 **Baseline:** V8.6.1 Master Product Blueprint, dated 16 November 2026  
 **Repository:** working public project repository  
-**Status:** validation specification and documentation foundation; not a production application
+**Status:** product validation specification plus a partial API/database implementation scaffold; not a production application
 
 ## Current product decision
 
@@ -17,12 +17,17 @@ The first delivery mode is a concierge validation service using secure, authoris
 - Architecture and data-control principles
 - Staged roadmap and initial risk register
 - Static landing-page HTML concept
+- Express API scaffold with JWT/JWKS authentication, tenant membership and role checks
+- PostgreSQL schema, tenant RLS migration and ordered initialization scripts
+- Import row persistence, invoice validation decisions, human-reviewed match decisions and evidence-gated calculation endpoints
+- Node.js 22 automated test suite and GitHub Actions CI
 
 ## What is not established
 
 - Customer demand or willingness to pay
 - Repeatable lawful access to customer data
-- Native application implementation
+- Production-grade native application implementation
+- Executed PostgreSQL migration and tenant-isolation integration evidence
 - Excel or Google Sheets equivalence for the audit workbook
 - Live integrations
 - Legal/privacy clearance
