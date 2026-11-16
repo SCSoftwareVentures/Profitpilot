@@ -33,7 +33,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
   process.env.AUTH_ISSUER=issuer;
   process.env.AUTH_AUDIENCE=audience;
   process.env.AUTH_JWKS_URL=`http://127.0.0.1:${jwksAddress.port}/.well-known/jwks.json`;
-  process.env.TENANT_CONTEXT_HMAC_SECRET="0123456789abcdef".repeat(4);
+  if(!process.env.TENANT_CONTEXT_HMAC_SECRET)throw new Error("CI tenant context signing key is required");
   const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL});
   const [{default:app},{pool:appPool,withTenant}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);
   const api=createServer(app);
