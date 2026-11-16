@@ -107,6 +107,12 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await assert.rejects(()=>admin.query("UPDATE payroll_source_rows SET amount=99 WHERE id='30303030-3030-4030-8030-303030303030'"),/immutable/i,"payroll source rows must be immutable");
     await assert.rejects(()=>admin.query("INSERT INTO allocation_lines(tenant_id,allocation_run_id,site_id,bucket_type,amount,source_ref,payroll_source_row_id) VALUES ('33333333-3333-4333-8333-333333333333','18181818-1818-4818-8818-181818181818','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','direct',0.01,'over-allocation-test','30303030-3030-4030-8030-303030303030')"),/exceeds source payroll row amount/i,"source-row allocations must never exceed the original row amount");
 
+    await assert.rejects(()=>admin.query("UPDATE allocation_runs SET status='confirmed' WHERE id='18181818-1818-4818-8818-181818181818'"),/Allocation line totals do not reconcile|residual is non-zero/i,"a payroll run with non-zero residual or mismatched summary must not be confirmed");
+    await assert.rejects(()=>admin.query("UPDATE allocation_runs SET direct_amount=100,residual_amount=0,status='confirmed' WHERE id='18181818-1818-4818-8818-181818181818'"),/reviewer, admin or owner/i,"payroll confirmation must require an authorised reviewer");
+    await admin.query("UPDATE allocation_runs SET direct_amount=100,residual_amount=0,reviewer_id='77777777-7777-4777-8777-777777777777' WHERE id='18181818-1818-4818-8818-181818181818'");
+    await admin.query("UPDATE allocation_runs SET status='confirmed' WHERE id='18181818-1818-4818-8818-181818181818'");
+    await assert.rejects(()=>admin.query("INSERT INTO allocation_runs(id,tenant_id,payroll_pool_id,method_version,status,residual_amount) VALUES ('32323232-3232-4232-8232-323232323232','33333333-3333-4333-8333-333333333333','16161616-1616-4616-8616-161616161616','fixture-duplicate','confirmed',0)"),/one_confirmed_allocation_run_per_payroll_pool|duplicate key/i,"a payroll pool must not have two confirmed allocation runs");
+
     await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("UPDATE users SET email='changed@example.invalid' WHERE auth_subject='ci-api-analyst'")),/permission denied/i,"the runtime role must not update identity records");
     const rawClient=await appPool.connect();
     try{
