@@ -5,6 +5,7 @@ services:
       POSTGRES_DB: profitpilot
       POSTGRES_USER: profitpilot_admin
       POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Set POSTGRES_ADMIN_PASSWORD}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD}
       TENANT_CONTEXT_HMAC_SECRET: ${TENANT_CONTEXT_HMAC_SECRET:?Set TENANT_CONTEXT_HMAC_SECRET}
     ports:
       - "127.0.0.1:5432:5432"
@@ -28,7 +29,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 8080
-      DATABASE_URL: postgres://profitpilot_app:local-dev-only-change-this@db:5432/profitpilot
+      DATABASE_URL: postgres://profitpilot_app:${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD}@db:5432/profitpilot
       DATABASE_SSL: "false"
       TENANT_CONTEXT_HMAC_SECRET: ${TENANT_CONTEXT_HMAC_SECRET:?Set TENANT_CONTEXT_HMAC_SECRET}
       CORS_ORIGIN: ${CORS_ORIGIN:?Set CORS_ORIGIN}
