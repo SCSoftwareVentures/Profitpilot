@@ -14,7 +14,7 @@ This guide is for a developer with Node.js 22, Docker Compose and a local termin
 2. Generate three independent random values, each at least 32 bytes encoded as hexadecimal: `POSTGRES_ADMIN_PASSWORD`, `POSTGRES_APP_PASSWORD` and `TENANT_CONTEXT_HMAC_SECRET`.
 3. Set `DATABASE_URL` to use the same `POSTGRES_APP_PASSWORD` for local Node.js execution.
 4. Configure `AUTH_ISSUER`, `AUTH_AUDIENCE`, `AUTH_JWKS_URL` and `CORS_ORIGIN` for your identity provider and local client.
-5. Review the SQL schema and ordered initialization/migration scripts. The migration creates a `NOLOGIN BYPASSRLS` context-validator owner and therefore requires a privileged database administrator.
+5. Review the SQL schema and ordered initialization/migration scripts, including migrations 010–012 for payroll source-row provenance, confirmation integrity and explicit contract tax basis. The migrations create a `NOLOGIN BYPASSRLS` context-validator owner and therefore require a privileged database administrator.
 6. Start the database and API using Docker Compose.
 7. Check the health endpoint at `/health`.
 8. Provision a user and tenant membership using a reviewed administrative process before making authenticated requests.
