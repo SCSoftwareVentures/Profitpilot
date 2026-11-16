@@ -238,3 +238,20 @@ PR #25 remains separate from this product/documentation branch. Its current revi
 Changes now present on PR #25 include the tenant-scoped immutable payroll source-row ledger, append-only allocation lines with per-source-row over-allocation protection, confirmation-time source/pool/currency/summary/reviewer reconciliation, rejection of legacy unlinked allocation lines, and a database provenance guard tying payroll evidence to the same payroll import batch. Payroll ingestion remains blocked in the API until privacy-safe mapping and reviewer workflow exist. The calculation route uses cent-based decimal arithmetic, blocks partial payroll and invoice service-period overlaps, and deliberately withholds definitive contribution/margin because the cost model remains incomplete.
 
 **Evidence boundary:** this is a passing CI result on PR #25 alone. It does not validate a combined PR #25/#26 candidate, the proposed full financial acceptance/property suites, a production environment, independent penetration testing, privacy/legal clearance, customer discovery or commercial gates. PR #25 and PR #26 remain open drafts; neither is merged. G0–G4 evidence remains outstanding and G5 remains DEFERRED / NOT AUTHORISED.
+
+
+
+## 17. PR #25 import replay, financial basis and migration verification — 17 November 2026
+
+PR #25 head `ff354de4418b4d471ca0e8cd881af4f9acf5ef78` passed hosted CI run #43973502209. Node.js 22 and PostgreSQL 16 jobs both passed on the exact head.
+
+Verified additions:
+- Import registration checksum reuse compares source type, file name, source period and permission reference; mismatches return conflict.
+- Parsed-row ingestion supports explicit source row offsets for multi-request chunks, locks the batch during ingestion, and rejects changed content at existing row numbers while allowing identical JSONB retries.
+- Strict invoice amount parsing avoids Number coercion; prototype monetary conversion rejects values outside safe cent representation.
+- Invoice matcher confidence no longer grants medium confidence from weak partial identity alone; human confirmation remains mandatory.
+- Prototype aggregate metrics reject missing or mixed currency, tax basis and reporting periods.
+- Contract versions have explicit tax-basis metadata. Migration 012 safely adds the field for existing schema states, and calculations require invoice tax basis to match the contract version.
+- CI and local Compose initialization include the new migration sequence.
+
+Evidence boundary remains unchanged: PR #25 alone passed CI. PR #25/#26 have not been combined. The full financial acceptance suite, private object storage, production identity/MFA, managed key custody, shared rate limiting, independent penetration test, legal/privacy/accounting approval and G0–G5 validation remain open. G5 is DEFERRED / NOT AUTHORISED.
