@@ -20,14 +20,18 @@ The first delivery mode is a concierge validation service using secure, authoris
 - Express API scaffold with JWT/JWKS authentication, tenant membership and role checks
 - PostgreSQL schema, tenant RLS migration and ordered initialization scripts
 - Import row persistence, invoice validation decisions, human-reviewed match decisions and evidence-gated calculation endpoints
-- Node.js 22 automated test suite and GitHub Actions CI, including PostgreSQL 16 migration execution and a basic tenant RLS integration check
+- Node.js 22 engine tests and GitHub Actions CI
+- PostgreSQL 16 schema/migration execution and RLS tests
+- Authenticated HTTP API tests for membership, role restrictions, date validation and import idempotency
+- Cross-tenant contract read/write negative tests and pooled tenant-context cleanup test
+- Production Docker image build and running-container database health smoke test
 
 ## What is not established
 
 - Customer demand or willingness to pay
 - Repeatable lawful access to customer data
 - Production-grade native application implementation
-- Executed PostgreSQL migration and tenant-isolation integration evidence
+- Production deployment, exhaustive tenant-isolation assessment and independent security certification
 - Excel or Google Sheets equivalence for the audit workbook
 - Live integrations
 - Legal/privacy clearance
