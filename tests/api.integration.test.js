@@ -14,6 +14,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
   const userB="44444444-4444-4444-8444-444444444444";
   const businessA="55555555-5555-4555-8555-555555555555";
   const contractA="66666666-6666-4666-8666-666666666666";
+  const businessB="77777777-7777-4777-8777-777777777777";
+  const contractB="88888888-8888-4888-8888-888888888888";
   const {publicKey,privateKey}=await generateKeyPair("RS256");
   const jwk=await exportJWK(publicKey);
   jwk.kid="profitpilot-ci-key";
@@ -32,7 +34,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
   process.env.AUTH_AUDIENCE=audience;
   process.env.AUTH_JWKS_URL=`http://127.0.0.1:${jwksAddress.port}/.well-known/jwks.json`;
   const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL});
-  const [{default:app},{pool:appPool}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);
+  const [{default:app},{pool:appPool,withTenant}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);
   const api=createServer(app);
   await new Promise(resolve=>api.listen(0,"127.0.0.1",resolve));
   const apiAddress=api.address();
@@ -54,6 +56,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES ($1,$2,'analyst','active'),($1,$3,'read_only','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status='active'",[tenantA,userA,userB]);
     await admin.query("INSERT INTO businesses(id,tenant_id,name) VALUES ($1,$2,'CI Business A') ON CONFLICT(id) DO NOTHING",[businessA,tenantA]);
     await admin.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'CI Customer A','active') ON CONFLICT(id) DO NOTHING",[contractA,tenantA,businessA]);
+    await admin.query("INSERT INTO businesses(id,tenant_id,name) VALUES ($1,$2,'CI Business B') ON CONFLICT(id) DO NOTHING",[businessB,tenantB]);
+    await admin.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'CI Customer B','active') ON CONFLICT(id) DO NOTHING",[contractB,tenantB,businessB]);
 
     const noToken=await request("/v1/me");
     assert.equal(noToken.status,401,"requests without a bearer token must be rejected");
@@ -63,6 +67,9 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const ownBody=await own.json();
     assert.equal(ownBody.items.length,1);
     assert.equal(ownBody.items[0].id,contractA);
+    const scopedRows=await withTenant(tenantA,client=>client.query("SELECT id FROM contracts ORDER BY id"));
+    assert.deepEqual(scopedRows.rows.map(row=>row.id),[contractA],"database RLS must hide tenant B contract rows even from a tenant A scoped connection");
+    await assert.rejects(()=>withTenant(tenantA,client=>client.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'RLS write probe','active')",["99999999-9999-4999-8999-999999999999",tenantB,businessB])),/row-level security/i,"RLS WITH CHECK must reject cross-tenant writes");
 
     const otherTenant=await request(`/v1/tenants/${tenantB}/contracts`,{subject:"ci-api-analyst"});
     assert.equal(otherTenant.status,403,"a tenant A member must not access tenant B");
@@ -76,9 +83,12 @@ test("authenticated API enforces tenant membership, role permissions and import 
     });
     assert.equal(invalidDate.status,400,"impossible calendar dates must be rejected");
 
-    const importBody={sourceType:"payroll",fileName:"payroll.csv",sha256:"b".repeat(64),permissionReference:"CI permission",periodStart:"2026-02-01",periodEnd:"2026-02-28"};
+    const importBody={sourceType:"payroll",fileName:"payroll.csv",sha256:"b".repeat(64),permissionReference:"CI permission",periodStart:"2026-02-01",periodEnd:"2026-02-28",tenantId:tenantB};
     const created=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-analyst",method:"POST",body:importBody});
     assert.equal(created.status,201);
+    const createdBody=await created.json();
+    const storedBatch=await admin.query("SELECT tenant_id FROM import_batches WHERE id=$1",[createdBody.batch.id]);
+    assert.equal(storedBatch.rows[0].tenant_id,tenantA,"client-supplied tenant identifiers must not override the authenticated path tenant");
     const duplicate=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-analyst",method:"POST",body:importBody});
     assert.equal(duplicate.status,200);
     assert.equal((await duplicate.json()).idempotent,true);
@@ -88,6 +98,10 @@ test("authenticated API enforces tenant membership, role permissions and import 
       body:{...importBody,sha256:"c".repeat(64)}
     });
     assert.equal(readerWrite.status,403,"read_only members must not create imports");
+
+    await admin.query("UPDATE tenant_memberships SET status='revoked' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);
+    const revoked=await request(`/v1/tenants/${tenantA}/contracts`,{subject:"ci-api-analyst"});
+    assert.equal(revoked.status,403,"revoked memberships must lose access immediately");
   }finally{
     await new Promise(resolve=>api.close(resolve));
     await admin.end();
