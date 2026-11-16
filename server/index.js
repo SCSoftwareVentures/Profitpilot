@@ -111,7 +111,7 @@ app.post("/v1/tenants/:tenantId/calculations",membership,requireRole("owner","ad
   if(Number(revenue.rows[0].tax_basis_count)!==1||Number(revenue.rows[0].currency_count)!==1||revenue.rows[0].unknown_tax_basis||revenue.rows[0].invoice_currency!==base.rows[0].currency)return {error:"Mixed, unknown or mismatched invoice tax/currency basis. Resolve source basis before calculating."};
   const parseCents=value=>{
    const text=String(value);
-   if(!/^-?\\d+(?:\\.\\d{1,2})?$/.test(text))throw new Error("Database returned a non-canonical monetary value");
+   if(!/^-?\d+(?:\.\d{1,2})?$/.test(text))throw new Error("Database returned a non-canonical monetary value");
    const negative=text.startsWith("-");
    const unsigned=negative?text.slice(1):text;
    const [whole,fraction=""]=unsigned.split(".");
