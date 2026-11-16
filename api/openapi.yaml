@@ -102,7 +102,7 @@ paths:
                   minItems: 1
                   maxItems: 200
                   items:
-                    oneOf:
+                    anyOf:
                       - { $ref: '#/components/schemas/InvoiceSourceRow' }
                       - { type: object, additionalProperties: true }
       responses:
