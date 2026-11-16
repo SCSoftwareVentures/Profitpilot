@@ -17,7 +17,7 @@ CREATE INDEX allocation_lines_site_run_idx ON allocation_lines(tenant_id,site_id
 ALTER TABLE allocation_lines ENABLE ROW LEVEL SECURITY;
 ALTER TABLE allocation_lines FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON allocation_lines
- USING(tenant_id=nullif(current_setting('app.tenant_id',true),'')::uuid)
- WITH CHECK(tenant_id=nullif(current_setting('app.tenant_id',true),'')::uuid);
+ USING(tenant_id=private.current_tenant_id())
+ WITH CHECK(tenant_id=private.current_tenant_id());
 GRANT SELECT,INSERT,UPDATE,DELETE ON allocation_lines TO profitpilot_app;
 COMMIT;
