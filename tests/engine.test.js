@@ -24,3 +24,23 @@ test("negative allocation is rejected",()=>assert.equal(allocatePayroll({pool:10
 test("amount-only match is unmatched",()=>assert.equal(matchInvoice({amount:100},{site:"A",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).confidence,"UNMATCHED"));
 test("match candidate always needs human confirmation",()=>assert.equal(matchInvoice({site:"A",date:"2026-11-05",amount:100},{id:"c",site:"A",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).requiresHumanConfirmation,true));
 test("metrics aggregate totals and margin",()=>{const r=aggregateMetrics([{revenue:1000,cost:600},{revenue:500,cost:250}]);assert.deepEqual([r.revenue,r.cost,r.contribution,r.margin],[1500,850,650,43.33]);});
+
+test("money rounds decimal half-cents consistently, including negative values",()=>{
+  assert.equal(money("1.005"),1.01);
+  assert.equal(money("2.675"),2.68);
+  assert.equal(money("-1.005"),-1.01);
+});
+test("money rejects non-finite and malformed inputs",()=>{
+  assert.equal(Number.isNaN(money("not-money")),true);
+  assert.equal(Number.isNaN(money(Infinity)),true);
+});
+test("payroll allocation sums decimal amounts without binary floating drift",()=>{
+  const result=allocatePayroll({pool:"0.30",direct:[{site:"A",amount:"0.10"},{site:"A",amount:"0.20"}]});
+  assert.equal(result.reconciles,true);
+  assert.equal(result.direct,0.30);
+  assert.equal(result.siteTotals.A,0.30);
+});
+test("contract aggregation preserves cents over repeated decimal values",()=>{
+  const result=aggregateMetrics([{revenue:"0.10",cost:"0.03"},{revenue:"0.20",cost:"0.06"}]);
+  assert.deepEqual([result.revenue,result.cost,result.contribution,result.margin],[0.30,0.09,0.21,70]);
+});
