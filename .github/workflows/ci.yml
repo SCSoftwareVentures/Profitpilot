@@ -140,3 +140,33 @@ jobs:
           docker logs profitpilot-api-ci
           docker rm -f profitpilot-api-ci
           exit 1
+
+  commit-lockfile:
+    name: Generate and commit npm lockfile
+    if: github.event_name == 'push' && github.ref == 'refs/heads/security/exhaustive-hardening'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout security branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+          persist-credentials: true
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Generate lockfile with npm resolver
+        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Commit lockfile only when not already tracked
+        run: |
+          if ! git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "Add npm dependency lockfile"
+            git push origin "HEAD:$GITHUB_REF_NAME"
+          else
+            echo "package-lock.json is already committed"
+          fi
