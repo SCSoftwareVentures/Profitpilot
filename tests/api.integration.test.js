@@ -218,6 +218,10 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(created.status,201);
     const createdBody=await created.json();
     assert.equal(createdBody.batch.status,"registered","metadata-only import registration must not claim the binary file was uploaded or stored");
+    const blockedPayrollRows=await request(`/v1/tenants/${tenantA}/imports/${createdBody.batch.id}/rows`,{subject:"ci-api-analyst",method:"POST",body:{rows:[{source_row_key:"synthetic-row",amount:"100.00",currency:"AUD"}]}});
+    assert.equal(blockedPayrollRows.status,422,"payroll row ingestion must remain blocked until privacy-safe mapping and reviewer workflow are implemented");
+    const payrollRowsPersisted=await admin.query("SELECT count(*)::int AS count FROM raw_import_rows WHERE batch_id=$1",[createdBody.batch.id]);
+    assert.equal(payrollRowsPersisted.rows[0].count,0,"blocked payroll rows must not be persisted in the generic raw-row table");
     const storedBatch=await admin.query("SELECT tenant_id FROM import_batches WHERE id=$1",[createdBody.batch.id]);
     assert.equal(storedBatch.rows[0].tenant_id,tenantA,"client-supplied tenant identifiers must not override the authenticated path tenant");
     const duplicate=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-analyst",method:"POST",body:importBody});
