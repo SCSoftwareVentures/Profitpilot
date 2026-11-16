@@ -55,8 +55,8 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requireRole("o
   // Preflight every row number before writing any row. A retry is idempotent
   // only when the persisted payload is byte-for-byte equivalent as JSON data.
   for(let i=0;i<rows.length;i++){
-   const existing=await client.query("SELECT payload FROM raw_import_rows WHERE tenant_id=$1 AND batch_id=$2 AND row_number=$3",[req.membership.tenantId,req.params.batchId,i+1]);
-   if(existing.rowCount&&JSON.stringify(existing.rows[0].payload)!==JSON.stringify(rows[i]))
+   const existing=await client.query("SELECT payload = $4::jsonb AS same FROM raw_import_rows WHERE tenant_id=$1 AND batch_id=$2 AND row_number=$3",[req.membership.tenantId,req.params.batchId,i+1,JSON.stringify(rows[i])]);
+   if(existing.rowCount&&!existing.rows[0].same)
     return {status:409,error:"A source row number already exists with different content. Register a corrected source version rather than overwriting import evidence."};
   }
   let inserted=0;
