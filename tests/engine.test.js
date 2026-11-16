@@ -53,3 +53,8 @@ test("contract aggregation preserves cents over repeated decimal values",()=>{
   const result=aggregateMetrics([{revenue:"0.10",cost:"0.03"},{revenue:"0.20",cost:"0.06"}]);
   assert.deepEqual([result.revenue,result.cost,result.contribution,result.margin],[0.30,0.09,0.21,70]);
 });
+
+test("invoice matcher rejects hexadecimal and non-finite amount syntax",()=>{
+  assert.equal(matchInvoice({site:"A",date:"2026-11-05",amount:"0x10"},{id:"c",site:"A",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).confidence,"UNMATCHED");
+  assert.equal(matchInvoice({site:"A",date:"2026-11-05",amount:"Infinity"},{id:"c",site:"A",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).confidence,"UNMATCHED");
+});
