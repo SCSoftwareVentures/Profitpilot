@@ -83,3 +83,5 @@ The API/database are implementation scaffolds, not a deployed service. The brows
 Software implementation remains blocked until G0–G4 and competitive preconditions are evidenced and G5 records an explicit signed GO with named technical ownership, legal/privacy plan, delivery capacity and approved budget. A passing CI run or completed design document does not substitute for those approvals.
 
 No merge, deployment, live customer-data intake or payment activity is authorised by the documents.
+ 
+**Current hardening review:** Draft PR #28 (`hardening/financial-security-followup`) targets the combined PR #27 branch, not `main`. The implementation and TLS verification head `30f0c9fa8937eea5fed537162750a5b7caafeb40` passed CI run #43983253747 (Node.js 22 and PostgreSQL 16). The current branch has a subsequent OpenAPI/error-schema documentation correction at `c031d73b89961c520df68ad33a82db388694d847`; exact-head CI for that latest documentation update is pending. This remains a prototype hardening PR, not release approval.
