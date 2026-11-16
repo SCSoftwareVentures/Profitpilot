@@ -58,10 +58,26 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requireRole("o
  }catch(e){next(e);}});
 
 app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
- const result=await withTenant(req.membership.tenantId,async c=>{const r=await c.query("UPDATE import_batches SET status='review' WHERE id=$1 AND tenant_id=$2 AND status IN ('uploaded','failed') RETURNING id,status",[req.params.batchId,req.membership.tenantId]);return r.rows[0]||null;});
- if(!result)return res.status(404).json({error:"Batch not found or not eligible for validation"});
- res.status(202).json({batch:result,message:"Upload transport and isolated parser worker must be configured before production validation."});
+ const result=await withTenant(req.membership.tenantId,async client=>{
+  const batch=await client.query("SELECT id,status,source_type FROM import_batches WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
+  if(!batch.rowCount)return {status:404,error:"Import batch not found"};
+  if(!["customer_invoice","supplier_invoice"].includes(batch.rows[0].source_type))return {status:422,error:"This validator currently supports invoice CSV rows only; payroll validation is not implemented."};
+  const raw=await client.query("SELECT id,row_number,payload FROM raw_import_rows WHERE batch_id=$1 AND tenant_id=$2 ORDER BY row_number",[req.params.batchId,req.membership.tenantId]);
+  if(!raw.rowCount)return {status:422,error:"No persisted import rows found. Ingest rows before validation."};
+  const checked=validateInvoiceRows(raw.rows.map(r=>({...r.payload,__rowNumber:String(r.row_number)})));
+  let valid=0,held=0;
+  for(let i=0;i<raw.rows.length;i++){
+   const item=checked[i],row=raw.rows[i],decision=item.errors.length?"held":"candidate";
+   if(decision==="held")held++;else valid++;
+   await client.query("INSERT INTO mapping_decisions(tenant_id,raw_row_id,target_type,target_id,decision,confidence,method_version,reason) VALUES($1,$2,'invoice_row',NULL,$3,'LOW','invoice-validator-0.1.0',$4) ON CONFLICT(tenant_id,raw_row_id,method_version) DO UPDATE SET decision=EXCLUDED.decision,reason=EXCLUDED.reason",[req.membership.tenantId,row.id,decision,item.errors.join("; ")||"Structural validation passed; requires mapping and human review"]);
+  }
+  await client.query("UPDATE import_batches SET status='review' WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
+  return {status:200,batchId:req.params.batchId,total:raw.rowCount,validCandidateRows:valid,heldRows:held,automaticallyAccepted:0};
+ });
+ if(result.error)return res.status(result.status).json({error:result.error});
+ const {status,...body}=result;res.status(status).json(body);
  }catch(e){next(e);}});
+
 app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requireRole("owner","admin","reviewer"),async(req,res,next)=>{try{
  const {decision,reason}=req.body||{};
  if(!["confirmed","rejected","held"].includes(decision)||typeof reason!=="string"||reason.trim().length<3||reason.length>2000)return res.status(400).json({error:"Decision and reason are required"});
