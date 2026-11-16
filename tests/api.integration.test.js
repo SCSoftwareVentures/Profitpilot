@@ -251,6 +251,20 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(mismatchedTaxCalculation.status,422);
     assert.match((await mismatchedTaxCalculation.json()).error,/contract-mismatched invoice tax\/currency basis/,"otherwise complete inputs with invoice tax basis different from the approved contract version must be blocked");
 
+    const payrollRawUsd="f9f9f9f9-f9f9-49f9-89f9-f9f9f9f9f9f9";
+    const payrollPoolUsd="abababab-abab-4bab-8bab-abababababab";
+    const payrollSourceUsd="acacacac-acac-4cac-8cac-acacacacacac";
+    const allocationRunUsd="adadadad-adad-4dad-8dad-adadadadadad";
+    await admin.query("INSERT INTO raw_import_rows(id,tenant_id,batch_id,row_number,payload) VALUES ($1,$2,$3,2,'{}'::jsonb) ON CONFLICT(id) DO NOTHING",[payrollRawUsd,tenantA,payrollBatch]);
+    await admin.query("INSERT INTO payroll_pools(id,tenant_id,batch_id,period_start,period_end,total_amount,currency,source_ref) VALUES ($1,$2,$3,'2026-03-01','2026-03-31',10,'USD','CI mismatched currency pool') ON CONFLICT(id) DO NOTHING",[payrollPoolUsd,tenantA,payrollBatch]);
+    await admin.query("INSERT INTO payroll_source_rows(id,tenant_id,payroll_pool_id,raw_import_row_id,source_row_key,row_sha256,amount,currency) VALUES ($1,$2,$3,$4,'march-payroll-usd',repeat('b',64),10,'USD') ON CONFLICT(id) DO NOTHING",[payrollSourceUsd,tenantA,payrollPoolUsd,payrollRawUsd]);
+    await admin.query("INSERT INTO allocation_runs(id,tenant_id,payroll_pool_id,method_version,status,direct_amount,allocated_amount,non_site_amount,excluded_amount,residual_amount,reviewer_id) VALUES ($1,$2,$3,'CI-currency-gate-usd','draft',10,0,0,0,0,$4) ON CONFLICT(id) DO NOTHING",[allocationRunUsd,tenantA,payrollPoolUsd,reviewerUser]);
+    await admin.query("INSERT INTO allocation_lines(tenant_id,allocation_run_id,site_id,bucket_type,amount,source_ref,payroll_source_row_id) VALUES ($1,$2,$3,'direct',10,'CI USD source row',$4)",[tenantA,allocationRunUsd,calculationSite,payrollSourceUsd]);
+    await admin.query("UPDATE allocation_runs SET status='confirmed' WHERE id=$1",[allocationRunUsd]);
+    const mismatchedPayrollCurrency=await request(`/v1/tenants/${tenantA}/calculations`,{subject:"ci-api-analyst",method:"POST",body:{contractId:contractA,siteId:calculationSite,periodStart:"2026-03-01",periodEnd:"2026-03-31"}});
+    assert.equal(mismatchedPayrollCurrency.status,422);
+    assert.match((await mismatchedPayrollCurrency.json()).error,/payroll allocation currency/,"payroll source currency must match the contract currency before aggregation");
+
     const importBody={sourceType:"payroll",fileName:"payroll.csv",sha256:"b".repeat(64),permissionReference:"CI permission",periodStart:"2026-02-01",periodEnd:"2026-02-28",tenantId:tenantB};
     const created=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-analyst",method:"POST",body:importBody});
     assert.equal(created.status,201);
