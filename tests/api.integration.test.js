@@ -80,6 +80,22 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.deepEqual(ownIdentityRows.rows.map(row=>row.auth_subject),["ci-api-analyst"],"a signed subject may read only its own global identity row");
     const unscopedIdentityRows=await appPool.query("SELECT auth_subject FROM users");
     assert.equal(unscopedIdentityRows.rowCount,0,"the runtime role must not enumerate global identities without signed context");
+    const protectedTables=await admin.query(`
+      SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+      WHERE n.nspname='public' AND c.relkind IN ('r','p')
+        AND (c.relname IN ('tenants','users') OR EXISTS (
+          SELECT 1 FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attname='tenant_id' AND a.attnum>0 AND NOT a.attisdropped
+        ))
+      ORDER BY c.relname
+    `);
+    assert.equal(protectedTables.rowCount,19,"the exhaustive fixture must cover every tenant-owned/root identity table");
+    for(const {relname} of protectedTables.rows){
+      const tableQuery=`SELECT count(*)::int AS count FROM public."${relname.replaceAll('"','""')}"`;
+      const tenantCCount=await withTenant("33333333-3333-4333-8333-333333333333","isolation-tenant-c",client=>client.query(tableQuery));
+      const tenantDCount=await withTenant("44444444-4444-4444-8444-444444444444","isolation-tenant-d",client=>client.query(tableQuery));
+      assert.equal(tenantCCount.rows[0].count,relname==="tenant_memberships"?2:1,`tenant C must see only its own fixture rows in ${relname}`);
+      assert.equal(tenantDCount.rows[0].count,1,`tenant D must see only its own fixture row in ${relname}`);
+    }
     await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("UPDATE users SET email='changed@example.invalid' WHERE auth_subject='ci-api-analyst'")),/permission denied/i,"the runtime role must not update identity records");
     const rawClient=await appPool.connect();
     try{
@@ -139,6 +155,12 @@ test("authenticated API enforces tenant membership, role permissions and import 
 
     const otherTenant=await request(`/v1/tenants/${tenantB}/contracts`,{subject:"ci-api-analyst"});
     assert.equal(otherTenant.status,403,"a tenant A member must not access tenant B");
+    const crossTenantCalculation=await request("/v1/tenants/33333333-3333-4333-8333-333333333333/calculations/29292929-2929-4929-8929-292929292929",{subject:"isolation-tenant-c"});
+    assert.equal(crossTenantCalculation.status,404,"a tenant member must not retrieve another tenant's calculation object by ID");
+    const crossTenantBatch=await request("/v1/tenants/33333333-3333-4333-8333-333333333333/imports/13131313-1313-4313-8313-131313131313/rows",{subject:"isolation-tenant-c",method:"POST",body:{rows:[{invoice_id:"D-1"}]}});
+    assert.equal(crossTenantBatch.status,404,"a tenant member must not append rows to another tenant's import batch");
+    const crossTenantMatch=await request("/v1/tenants/33333333-3333-4333-8333-333333333333/matches/25252525-2525-4525-8525-252525252525/decision",{subject:"isolation-reviewer-c",method:"POST",body:{decision:"confirmed",reason:"cross-tenant object test"}});
+    assert.equal(crossTenantMatch.status,404,"a reviewer must not decide another tenant's match object by ID");
 
     const invalidTenant=await request("/v1/tenants/not-a-uuid/contracts",{subject:"ci-api-analyst"});
     assert.equal(invalidTenant.status,400);
