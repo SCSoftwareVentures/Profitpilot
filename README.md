@@ -39,6 +39,15 @@ Further product, validation, architecture, roadmap and risk documentation will b
 - [Core calculation specification](docs/CORE_CALCULATION_SPEC.md)
 - [Core UX workflows](docs/UX_WORKFLOWS.md)
 
+## Application prototype and implementation
+
+
+- [Identity and tenant security plan](docs/IDENTITY_AND_TENANT_SECURITY.md)
+- [PostgreSQL schema scaffold](database/schema.sql)
+- [Prototype calculation/import engine](src/engine.js)
+- [Interactive application prototype](app/index.html)
+- [Browser test runner](tests/index.html)
+
 ## Visual prototypes
 
 - [Simplified dashboard concept](demo/dashboard.html) — responsive static HTML with fictional placeholder figures; no live data or connected services.
