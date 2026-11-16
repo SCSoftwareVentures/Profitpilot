@@ -351,3 +351,16 @@ CI run **#43982827602** passed on exact implementation head `ead10a236e33684c25c
 The subsequent OpenAPI-only documentation updates do not change application code; their exact-head CI is tracked by the current branch run. PR #28 remains draft and unmerged.
 
 The full financial acceptance plan and all nontechnical release gates remain outstanding. Payroll ingestion remains disabled; no real customer or employee data is authorised.
+
+ 
+### 22. Database-enforced invoice decision integrity — 17 November 2026
+
+Migration 014 extends the previous reviewer-role controls:
+- candidate/held invoice decisions may transition only to confirmed/rejected/held; final decisions are immutable;
+- invoice, contract, site, service-period, confidence and evidence identity fields cannot be rewritten during a decision update;
+- the signed tenant actor must be the recorded reviewer and hold active reviewer/admin/owner membership;
+- a bounded, non-empty audit reason is mandatory;
+- the database writes the audit event in the same transaction as the decision, so a failed audit insert rolls back the decision;
+- the API now supplies the transaction-local audit reason rather than independently writing a second audit event.
+
+PostgreSQL integration coverage checks direct-SQL audit creation, final-decision immutability, evidence-tampering denial and missing-reason denial. Migration 014 is included in CI after migrations 012 and 013. Exact-head CI for this newest migration and the test additions must pass before this control is considered verified. The earlier passing CI run predates migration 014 and must not be cited as evidence for it.
