@@ -44,12 +44,41 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requireRol
  res.status(202).json({batch:result,message:"Upload transport and isolated parser worker must be configured before production validation."});
  }catch(e){next(e);}});
 app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requireRole("owner","admin","reviewer"),async(req,res,next)=>{try{
- const {decision,reason}=req.body||{};if(!["confirmed","rejected","held"].includes(decision)||typeof reason!=="string"||reason.trim().length<3||reason.length>2000)return res.status(400).json({error:"Decision and reason are required"});
- res.status(501).json({error:"Match decision persistence requires the match candidate table migration; no decision was recorded."});
+ const {decision,reason}=req.body||{};
+ if(!["confirmed","rejected","held"].includes(decision)||typeof reason!=="string"||reason.trim().length<3||reason.length>2000)return res.status(400).json({error:"Decision and reason are required"});
+ const result=await withTenant(req.membership.tenantId,async client=>{
+  const user=await client.query("SELECT id FROM users WHERE auth_subject=$1",[req.identity.subject]);
+  if(!user.rowCount)throw Object.assign(new Error("User identity is not provisioned in this tenant database"),{status:403});
+  const updated=await client.query("UPDATE match_reviews SET decision=$1,reviewer_id=$2,reviewed_at=now() WHERE id=$3 AND tenant_id=$4 AND decision IN ('candidate','held') RETURNING id,decision,reviewed_at",[decision,user.rows[0].id,req.params.matchId,req.membership.tenantId]);
+  if(!updated.rowCount)return null;
+  await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'invoice_match_decision','match_review',$3,$4,$5)",[req.membership.tenantId,user.rows[0].id,req.params.matchId,reason.trim(),JSON.stringify({decision})]);
+  return updated.rows[0];
+ });
+ if(!result)return res.status(404).json({error:"Review candidate not found or already finalised"});
+ res.status(201).json({decision:result});
  }catch(e){next(e);}});
+
 app.post("/v1/tenants/:tenantId/calculations",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
- res.status(501).json({error:"Calculation persistence endpoint awaits immutable input/run migration. No calculation was recorded."});
+ const {contractId,siteId,periodStart,periodEnd}=req.body||{};
+ if(!/^[0-9a-f-]{36}$/i.test(contractId||"")||!/^[0-9a-f-]{36}$/i.test(siteId||"")||!/^\\d{4}-\\d{2}-\\d{2}$/.test(periodStart||"")||!/^\\d{4}-\\d{2}-\\d{2}$/.test(periodEnd||"")||periodEnd<periodStart)return res.status(400).json({error:"Valid contract, site and period are required"});
+ const result=await withTenant(req.membership.tenantId,async client=>{
+  const base=await client.query("SELECT c.id,cv.version_no,cv.currency FROM contracts c JOIN contract_versions cv ON cv.contract_id=c.id AND cv.tenant_id=c.tenant_id JOIN sites s ON s.id=$2 AND s.tenant_id=c.tenant_id WHERE c.id=$1 AND c.tenant_id=$3 AND cv.effective_from <= $5::date AND (cv.effective_to IS NULL OR cv.effective_to >= $4::date)",[contractId,siteId,req.membership.tenantId,periodStart,periodEnd]);
+  if(!base.rowCount)return {error:"No matching contract/site and effective contract version for this period"};
+  const revenue=await client.query("SELECT COALESCE(SUM(il.amount),0)::numeric(14,2) AS amount,COUNT(*)::int AS line_count,COUNT(DISTINCT i.tax_basis)::int AS tax_basis_count,COUNT(DISTINCT i.currency)::int AS currency_count FROM match_reviews mr JOIN invoice_lines il ON il.id=mr.invoice_line_id AND il.tenant_id=mr.tenant_id JOIN invoices i ON i.id=il.invoice_id AND i.tenant_id=il.tenant_id WHERE mr.tenant_id=$1 AND mr.contract_id=$2 AND mr.site_id=$3 AND mr.decision='confirmed' AND i.direction='customer' AND i.invoice_date BETWEEN $4::date AND $5::date",[req.membership.tenantId,contractId,siteId,periodStart,periodEnd]);
+  const costs=await client.query("SELECT COALESCE(SUM(al.amount),0)::numeric(14,2) AS amount,COUNT(*)::int AS line_count FROM allocation_lines al JOIN allocation_runs ar ON ar.id=al.allocation_run_id AND ar.tenant_id=al.tenant_id JOIN payroll_pools pp ON pp.id=ar.payroll_pool_id AND pp.tenant_id=ar.tenant_id WHERE al.tenant_id=$1 AND al.site_id=$2 AND al.bucket_type IN ('direct','approved_allocated') AND ar.status='confirmed' AND pp.period_start <= $4::date AND pp.period_end >= $3::date",[req.membership.tenantId,siteId,periodStart,periodEnd]);
+  if(!Number(revenue.rows[0].line_count)||!Number(costs.rows[0].line_count))return {error:"Insufficient evidence: confirmed invoice lines and confirmed site allocation lines are both required"};
+  if(Number(revenue.rows[0].tax_basis_count)!==1||Number(revenue.rows[0].currency_count)!==1)return {error:"Mixed or unknown invoice tax/currency basis. Resolve source basis before calculating."};
+  const rev=Number(revenue.rows[0].amount),cost=Number(costs.rows[0].amount);
+  const outputs={revenue:rev,deliveryCost:cost,contribution:Number((rev-cost).toFixed(2)),marginPercent:rev?Number(((rev-cost)/rev*100).toFixed(2)):null,currency:base.rows[0].currency,invoiceLineCount:Number(revenue.rows[0].line_count),allocationLineCount:Number(costs.rows[0].line_count),taxBasisCount:1,limitations:["Management contribution only; not statutory or audited profit.","Only confirmed invoice matches and confirmed direct/approved site allocation lines are included.","Other delivery costs, non-site costs and unallocated payroll are excluded unless separately included in source records."]};
+  const user=await client.query("SELECT id FROM users WHERE auth_subject=$1",[req.identity.subject]);if(!user.rowCount)throw Object.assign(new Error("User identity is not provisioned in this tenant database"),{status:403});
+  const saved=await client.query("INSERT INTO calculation_runs(tenant_id,contract_id,site_id,period_start,period_end,formula_version,inputs,outputs,completeness,created_by) VALUES($1,$2,$3,$4,$5,'0.1.0',$6,$7,'incomplete',$8) RETURNING id,created_at",[req.membership.tenantId,contractId,siteId,periodStart,periodEnd,JSON.stringify({contractVersion:base.rows[0].version_no,invoiceLineCount:outputs.invoiceLineCount,allocationLineCount:outputs.allocationLineCount}),JSON.stringify(outputs),user.rows[0].id]);
+  await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'calculation_created','calculation_run',$3,'Versioned management contribution calculation',$4)",[req.membership.tenantId,user.rows[0].id,saved.rows[0].id,JSON.stringify({formulaVersion:"0.1.0",periodStart,periodEnd})]);
+  return {id:saved.rows[0].id,createdAt:saved.rows[0].created_at,outputs};
+ });
+ if(result.error)return res.status(422).json({error:result.error});
+ res.status(201).json(result);
  }catch(e){next(e);}});
+
 app.use((err,req,res,next)=>{const id=randomUUID();process.stderr.write(JSON.stringify({event:"request_error",id,message:err.message})+"\n");res.status(500).json({error:"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
 if(process.env.NODE_ENV!=="test")app.listen(port,()=>process.stdout.write("ProfitPilot API listening on "+port+"\n"));
