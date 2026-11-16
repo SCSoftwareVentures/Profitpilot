@@ -33,6 +33,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
   process.env.AUTH_ISSUER=issuer;
   process.env.AUTH_AUDIENCE=audience;
   process.env.AUTH_JWKS_URL=`http://127.0.0.1:${jwksAddress.port}/.well-known/jwks.json`;
+  process.env.TENANT_CONTEXT_HMAC_SECRET="0123456789abcdef".repeat(4);
   const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL});
   const [{default:app},{pool:appPool,withTenant}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);
   const api=createServer(app);
@@ -67,11 +68,19 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const ownBody=await own.json();
     assert.equal(ownBody.items.length,1);
     assert.equal(ownBody.items[0].id,contractA);
-    const scopedRows=await withTenant(tenantA,client=>client.query("SELECT id FROM contracts ORDER BY id"));
+    const scopedRows=await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT id FROM contracts ORDER BY id"));
     assert.deepEqual(scopedRows.rows.map(row=>row.id),[contractA],"database RLS must hide tenant B contract rows even from a tenant A scoped connection");
+    const rawClient=await appPool.connect();
+    try{
+      await rawClient.query("BEGIN");
+      await rawClient.query("SELECT set_config('app.tenant_id',$1,true)",[tenantB]);
+      const forged=await rawClient.query("SELECT id FROM contracts");
+      assert.equal(forged.rowCount,0,"a raw custom GUC must not grant tenant access without a valid server HMAC");
+      await rawClient.query("ROLLBACK");
+    }finally{rawClient.release();}
     const afterCommit=await appPool.query("SELECT current_setting('app.tenant_id',true) AS tenant_id");
     assert.ok(afterCommit.rows[0].tenant_id===null||afterCommit.rows[0].tenant_id==="","tenant context must not leak after a transaction returns its pooled connection");
-    await assert.rejects(()=>withTenant(tenantA,client=>client.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'RLS write probe','active')",["99999999-9999-4999-8999-999999999999",tenantB,businessB])),/row-level security/i,"RLS WITH CHECK must reject cross-tenant writes");
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'RLS write probe','active')",["99999999-9999-4999-8999-999999999999",tenantB,businessB])),/row-level security/i,"RLS WITH CHECK must reject cross-tenant writes");
 
     const otherTenant=await request(`/v1/tenants/${tenantB}/contracts`,{subject:"ci-api-analyst"});
     assert.equal(otherTenant.status,403,"a tenant A member must not access tenant B");
