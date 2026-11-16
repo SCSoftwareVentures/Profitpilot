@@ -2,6 +2,7 @@
 // Deterministic demo logic only. Do not use with real payroll/customer data.
 function decimalCents(value){
   const text=typeof value==="number"?(Number.isFinite(value)?String(value):""):typeof value==="string"?value.trim():"";
+  if(text.length>128)return null;
   const match=text.match(/^([+-]?)(\\d+)(?:\\.(\\d*))?(?:e([+-]?\\d+))?$/i);
   if(!match)return null;
   const exponent=Number(match[4]||0);
@@ -9,6 +10,7 @@ function decimalCents(value){
   const fraction=match[3]||"";
   const digits=BigInt((match[2]+fraction).replace(/^0+(?=\\d)/,""));
   const scale=fraction.length-exponent;
+  if(Math.abs(scale)>100)return null;
   let cents;
   if(scale<=2)cents=digits*10n**BigInt(2-scale);
   else{
@@ -76,7 +78,7 @@ export function allocatePayroll({pool,direct=[],approved=[],nonSite=0,excluded=0
   const p=decimalCents(pool),d=sumCents(direct.map(x=>x.amount??0)),a=sumCents(approved.map(x=>x.amount??0)),n=decimalCents(nonSite),e=decimalCents(excluded);
   const validInputs=[p,d,a,n,e].every(x=>x!==null);
   const residual=validInputs?p-d-a-n-e:null;
-  const siteCents={};
+  const siteCents=Object.create(null);
   let sitesValid=true;
   for(const x of [...direct,...approved]){
     const amount=decimalCents(x.amount??0);
