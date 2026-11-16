@@ -78,6 +78,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/003_allocation_lines.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/004_import_validation.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/005_prevent_duplicate_confirmations.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/006_tenant_actor_membership_fks.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:
