@@ -146,3 +146,13 @@ No merge, deployment, production feature build, live-data access, payment activi
 PR #25 has advanced to `ce66bcf6f9a705532313ce6e71892839a3b55344` and passed CI run #43971209376. The tested branch now contains migrations 010/011 for source-row payroll provenance and confirmation integrity, the calculation route's migrated allocation-line query and decimal-cent arithmetic, and explicit blocking of partial payroll and invoice service-period overlaps. Payroll row ingestion remains deliberately disabled; the API does not yet expose the complete payroll mapping/allocation/reviewer workflow.
 
 This supersedes the earlier static description of the missing allocation_lines ledger and Number-based calculation arithmetic for the PR #25 head. It does not supersede the combined-candidate requirements in this report. PR #25 and PR #26 remain separate draft branches, and no full financial acceptance suite, combined-branch test, independent security review or production operation has been completed.
+
+
+
+## 9. PR #25 latest migration and ingestion evidence — 17 November 2026
+
+PR #25 head `ff354de4418b4d471ca0e8cd881af4f9acf5ef78` passed CI run #43973502209, including migrations 002–012, tenant/RLS/FK catalogue audit, restricted runtime role, authenticated API integration, production image build and restricted-container health check.
+
+Migration 012 introduces explicit contract-version tax-basis metadata and defaults legacy versions to `unknown`; calculation creation blocks unknown or invoice-mismatched tax basis. Local Compose initialization now mounts migrations 010–012, and CI applies migration 012. Import registration and parsed-row ingestion now reject conflicting checksum metadata and changed row replays, support stable row offsets across chunks, and serialize writes per batch.
+
+This is a PR #25 branch result only. It does not establish that the two PR branches compose cleanly. Keep the combined-candidate requirements above: one reviewed commit SHA, migration execution, full RLS/IDOR/FK suite, full financial acceptance suite, role matrix and independent security/accounting review. Both PRs remain separate drafts; no merge or deployment is authorised.
