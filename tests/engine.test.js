@@ -8,6 +8,8 @@ test("CSV supports quoted commas",()=>assert.equal(parseCsv('a,b\n1,"two,three"'
 test("CSV supports escaped quotes",()=>assert.equal(parseCsv('a\n"say ""hi"""')[0].a,'say "hi"'));
 test("CSV rejects unclosed quote",()=>assert.throws(()=>parseCsv('a\n"bad')));
 test("CSV rejects duplicate headings",()=>assert.throws(()=>parseCsv("a,a\n1,2")));
+test("CSV rejects inconsistent row widths",()=>assert.throws(()=>parseCsv("a,b\n1")));
+test("CSV rejects empty headings",()=>assert.throws(()=>parseCsv(",b\n1,2")));
 test("CSV handles CRLF",()=>assert.equal(parseCsv("a,b\r\n1,2\r\n").length,1));
 test("invoice missing required fields is held",()=>assert.equal(validateInvoiceRows([{invoice_id:"1",date:"2026-11-01",amount:"3"}])[0].status,"held"));
 test("invoice valid row remains pending human review",()=>assert.equal(validateInvoiceRows([{invoice_id:"1",site:"A",date:"2026-11-01",amount:"3"}])[0].status,"pending_review"));
