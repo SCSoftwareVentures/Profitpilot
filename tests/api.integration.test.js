@@ -208,6 +208,10 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(crossTenantMatch.status,404,"a reviewer must not decide another tenant's match object by ID");
     const analystDecision=await request("/v1/tenants/33333333-3333-4333-8333-333333333333/matches/24242424-2424-4424-8424-242424242424/decision",{subject:"isolation-tenant-c",method:"POST",body:{decision:"confirmed",reason:"analyst role escalation test"}});
     assert.equal(analystDecision.status,403,"an analyst must not exercise reviewer-only invoice decision authority");
+    const analystDirectDecision=await withTenant("33333333-3333-4333-8333-333333333333","isolation-tenant-c",client=>client.query("UPDATE match_reviews SET decision='confirmed',reviewer_id='55555555-5555-4555-8555-555555555555' WHERE id='24242424-2424-4424-8424-242424242424' RETURNING id"));
+    assert.equal(analystDirectDecision.rowCount,0,"database RLS must block analyst direct-SQL invoice decision even if the application route is bypassed");
+    const reviewerDirectDecision=await withTenant("33333333-3333-4333-8333-333333333333","isolation-reviewer-c",client=>client.query("UPDATE match_reviews SET decision='confirmed',reviewer_id='77777777-7777-4777-8777-777777777777' WHERE id='24242424-2424-4424-8424-242424242424' RETURNING id"));
+    assert.equal(reviewerDirectDecision.rowCount,1,"database RLS must permit an authenticated tenant reviewer to decide an invoice match");
 
     const invalidTenant=await request("/v1/tenants/not-a-uuid/contracts",{subject:"ci-api-analyst"});
     assert.equal(invalidTenant.status,400);
