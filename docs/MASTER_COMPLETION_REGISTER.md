@@ -215,3 +215,8 @@ A static Express/OpenAPI comparison is recorded in [API Contract Conformance Aud
 PR #26 latest head: `a72c03386b08cf4c18ef42573bf1b790c81be211`. Workflow run #355 completed successfully on that exact commit. Both configured jobs passed: Verify (Node.js 22) and PostgreSQL migrations/tenant RLS. PR #25 remains a separate open draft at `17178768002b978d6f5bd76f0192b2bbff7a4355`; neither PR is merged. No combined candidate has been validated.
 
 A standalone synthetic HTML owner demonstration was provided in the conversation. It is not connected to the API or database and is not a deployed product. It does not test authentication, tenant isolation, import processing, persistence or the full financial engine. Its output must not be used as business accounting evidence.
+
+
+## 14. CI run #357 — 17 November 2026
+
+The latest documentation refresh commit `e5fdf2ae84247b0dde84a7f79df0e31649da3cb6` completed CI run #357 successfully. Both configured jobs passed: Verify (Node.js 22) and PostgreSQL migrations/tenant RLS. The PostgreSQL job completed migration/schema checks, restricted runtime role RLS checks, authenticated API integration tests, production container image build and health endpoint verification. This is a configured CI pass on the PR #26 branch only. It does not prove full financial-engine correctness, independent security assurance, combined PR integration, production readiness or G0–G5 completion. PR #25 and PR #26 remain open draft pull requests and neither has been merged.

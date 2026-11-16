@@ -98,3 +98,8 @@ Added `docs/API_CONTRACT_CONFORMANCE_AUDIT.md`, a static comparison of the Expre
 ## Owner test environment note — 17 November 2026
 
 A separate downloadable HTML owner demonstration was supplied in the conversation. It is a local, standalone synthetic calculator and evidence-threshold walkthrough. It is not connected to this repository's API/database, does not implement authentication, tenant isolation, imports or persistence, and is not evidence that the financial engine has passed acceptance. Do not use real customer or employee information in it.
+
+
+## Latest CI confirmation — 17 November 2026
+
+The documentation refresh commit `e5fdf2ae84247b0dde84a7f79df0e31649da3cb6` completed ProfitPilot CI run #357 successfully. Both configured jobs passed: Verify (Node.js 22) and PostgreSQL migrations/tenant RLS. The PostgreSQL job completed schema/migration checks, restricted-role tenant RLS verification, authenticated API integration tests, production-image build and container health check. This remains PR #26 branch-only evidence; it does not validate a combined PR #25/#26 candidate or the proposed full financial acceptance suite.
