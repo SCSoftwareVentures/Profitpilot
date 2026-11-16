@@ -27,8 +27,8 @@ paths:
     parameters:
       - $ref: '#/components/parameters/TenantId'
     post:
-      summary: Create an import batch from an authorised source file
-      description: Server must verify membership, permission basis, file checksum, limits and idempotency.
+      summary: Register import metadata for an authorised source (no binary file is uploaded or stored)
+      description: Records caller-supplied metadata and checksum only. It does not receive, verify or store file bytes; status is registered until a secure upload pipeline exists.
       requestBody:
         required: true
         content:
@@ -44,7 +44,7 @@ paths:
                 periodStart: { type: string, format: date }
                 periodEnd: { type: string, format: date }
       responses:
-        "201": { description: Batch created or idempotent existing batch returned }
+        "201": { description: Import metadata registered; no binary object stored }
         "400": { description: Invalid metadata }
         "403": { description: Permission or role not sufficient }
         "409": { description: Conflicting duplicate or period }
@@ -54,7 +54,7 @@ paths:
       - $ref: '#/components/parameters/BatchId'
     post:
       summary: Persist parsed invoice row objects for a source batch
-      description: Accepts 1–200 JSON row objects per request. Client-side parsing only; raw file upload/storage is not implemented.
+      description: Accepts 1–200 parsed JSON row objects per request. This endpoint does not upload or store the original binary file.
       responses:
         "201": { description: Rows persisted; duplicates are idempotently ignored }
         "400": { description: Invalid row payload }
@@ -67,7 +67,7 @@ paths:
     post:
       summary: Validate source rows and produce held/review candidates
       responses:
-        "202": { description: Invoice rows structurally validated into candidate/held states; payroll validation is not yet supported }
+        "200": { description: Invoice rows structurally validated into candidate/held states; payroll validation is not yet supported }
         "403": { description: Not authorised }
         "404": { description: Batch not found in this tenant }
   /tenants/{tenantId}/matches/{matchId}/decision:
@@ -93,7 +93,7 @@ paths:
       responses:
         "201": { description: Decision appended }
         "403": { description: Reviewer role required }
-        "409": { description: Match state changed; refresh required }
+        "404": { description: Review candidate not found in this tenant or already finalised }
   /tenants/{tenantId}/calculations:
     parameters:
       - $ref: '#/components/parameters/TenantId'
