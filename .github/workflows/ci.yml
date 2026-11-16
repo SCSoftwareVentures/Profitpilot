@@ -30,21 +30,11 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-      - name: Generate reproducible dependency lockfile
-        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
 
       - name: Audit resolved production dependencies
         run: npm audit --omit=dev --audit-level=high
-
-      - name: Retain generated lockfile for repository commit
-        uses: actions/upload-artifact@v4
-        with:
-          name: profitpilot-npm-lockfile
-          path: package-lock.json
-          if-no-files-found: error
-          retention-days: 1
 
       - name: Syntax checks
         run: npm run check
@@ -119,7 +109,7 @@ jobs:
         env:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
-          npm install --no-audit --no-fund
+          npm ci --no-audit --no-fund
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/api.integration.test.js
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" psql "postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.runtime.sql
 
@@ -148,32 +138,3 @@ jobs:
           docker rm -f profitpilot-api-ci
           exit 1
 
-  commit-lockfile:
-    name: Generate and commit npm lockfile
-    if: github.event_name == 'push' && github.ref == 'refs/heads/security/exhaustive-hardening'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checkout security branch
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.ref }}
-          persist-credentials: true
-      - name: Set up Node.js 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Generate lockfile with npm resolver
-        run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
-      - name: Commit lockfile only when not already tracked
-        run: |
-          if ! git ls-files --error-unmatch package-lock.json >/dev/null 2>&1; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add package-lock.json
-            git commit -m "Add npm dependency lockfile"
-            git push origin "HEAD:$GITHUB_REF_NAME"
-          else
-            echo "package-lock.json is already committed"
-          fi
