@@ -181,6 +181,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const created=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-analyst",method:"POST",body:importBody});
     assert.equal(created.status,201);
     const createdBody=await created.json();
+    assert.equal(createdBody.batch.status,"registered","metadata-only import registration must not claim the binary file was uploaded or stored");
     const storedBatch=await admin.query("SELECT tenant_id FROM import_batches WHERE id=$1",[createdBody.batch.id]);
     assert.equal(storedBatch.rows[0].tenant_id,tenantA,"client-supplied tenant identifiers must not override the authenticated path tenant");
     const duplicate=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-analyst",method:"POST",body:importBody});
