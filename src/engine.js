@@ -15,8 +15,12 @@ export function parseCsv(text) {
   row.push(cell);if(row.some(v=>v.trim()!==""))rows.push(row);
   if(!rows.length) return [];
   const headers=rows.shift().map(v=>v.trim());
+  if(headers.some(h=>!h)) throw new Error("CSV contains an empty column heading.");
   if(new Set(headers).size!==headers.length) throw new Error("CSV contains duplicate column headings.");
-  return rows.map((cells,index)=>Object.fromEntries(headers.map((h,i)=>[h,(cells[i]??"").trim()]).concat([["__rowNumber",String(index+2)]])));
+  return rows.map((cells,index)=>{
+    if(cells.length!==headers.length) throw new Error("CSV row "+(index+2)+" has "+cells.length+" cells; expected "+headers.length+".");
+    return Object.fromEntries(headers.map((h,i)=>[h,cells[i].trim()]).concat([["__rowNumber",String(index+2)]]));
+  });
 }
 export function validateInvoiceRows(rows){
   return rows.map((r,i)=>{
@@ -24,7 +28,7 @@ export function validateInvoiceRows(rows){
     const errors=[];
     if(!r.invoice_id)errors.push("Missing invoice_id");
     if(!r.site)errors.push("Missing site");
-    if(!r.date||Number.isNaN(Date.parse(r.date)))errors.push("Invalid date");
+    if(!r.date||!/^\\d{4}-\\d{2}-\\d{2}$/.test(r.date)||Number.isNaN(Date.parse(r.date))||new Date(r.date).toISOString().slice(0,10)!==r.date)errors.push("Invalid date (expected a real YYYY-MM-DD date)");
     if(!r.amount||!Number.isFinite(amount)||amount<=0)errors.push("Amount must be greater than zero");
     return {rowNumber:r.__rowNumber||i+2,record:r,errors,status:errors.length?"held":"pending_review"};
   });
