@@ -88,6 +88,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/006_tenant_actor_membership_fks.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/007_users_self_rls.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/008_runtime_least_privilege.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/009_import_metadata_status.sql
 
       - name: Audit every tenant-scoped table and tenant-to-tenant foreign key
         env:
