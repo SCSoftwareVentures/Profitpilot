@@ -156,3 +156,11 @@ The static findings above describe the earlier reviewed API/schema state. PR #25
 - The calculation route now uses the migrated allocation ledger and cent-based decimal arithmetic for the calculation output, rejects partial confirmed payroll and invoice service-period overlaps, and stores the result as incomplete with contribution/margin withheld.
 
 This is not closure of the proposed API-CALC suite. The contract tax-basis model, full source completeness and reconciliation, other cost categories, credits/reversals, restatement/idempotency, complete payroll workflow and the API-CALC-T01–T14 acceptance tests remain unproven or incomplete. The PR #25 and PR #26 branches have not been combined or merged. Do not treat the PR #25 CI pass as execution of the proposed financial acceptance suite.
+
+
+
+## 7. Contract tax basis and aggregation follow-up — 17 November 2026
+
+PR #25 now adds `contract_versions.tax_basis` (migration 012; legacy default `unknown`). The calculation route requires the confirmed invoice tax basis to be singular, known, in the contract currency and equal to the effective approved contract version's tax basis. Unknown or mismatched basis blocks the calculation. The pure prototype aggregation helper also refuses to combine records when currency, tax basis or reporting-period metadata is mixed or incomplete.
+
+PR #25 head `ff354de4418b4d471ca0e8cd881af4f9acf5ef78` passed CI run #43973502209. This does not close the remaining financial acceptance gaps: full revenue/source completeness, credit notes and reversals, restatement, source manifests, customer/contract identity mapping from actual invoice imports, full payroll mapping/allocation/reviewer workflow, other cost categories, and API-CALC-T01–T14 remain unproven or incomplete. The PR #25/#26 combined candidate has not been tested.
