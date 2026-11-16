@@ -108,6 +108,9 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT secret FROM private.tenant_context_keys")),/permission denied/i,"runtime role must not read the tenant signing key");
     const roleAudit=await admin.query("SELECT rolbypassrls,rolsuper,rolcanlogin FROM pg_roles WHERE rolname='profitpilot_app'");
     assert.deepEqual(roleAudit.rows[0],{rolbypassrls:false,rolsuper:false,rolcanlogin:true},"runtime role must remain login-capable but must not bypass RLS or be superuser");
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("UPDATE tenant_memberships SET role='owner' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA])),/permission denied/i,"ordinary API runtime sessions must not be able to self-promote or alter tenant memberships");
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("UPDATE tenants SET legal_name='tampered' WHERE id=$1",[tenantA])),/permission denied/i,"ordinary API runtime sessions must not alter tenant ownership records");
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("DELETE FROM import_batches WHERE tenant_id=$1",[tenantA])),/permission denied/i,"the runtime role must not delete source import records");
     const primarySecret=process.env.TENANT_CONTEXT_HMAC_SECRET;
     const primaryKeyId=process.env.TENANT_CONTEXT_HMAC_KEY_ID||"primary";
     const secondarySecret=randomBytes(32).toString("hex");
