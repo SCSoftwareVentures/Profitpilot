@@ -20,6 +20,7 @@ services:
       - ./database/migrations/005_prevent_duplicate_confirmations.sql:/docker-entrypoint-initdb.d/007-confirmation-uniqueness.sql:ro
       - ./database/migrations/006_tenant_actor_membership_fks.sql:/docker-entrypoint-initdb.d/008-tenant-actor-fks.sql:ro
       - ./database/migrations/007_users_self_rls.sql:/docker-entrypoint-initdb.d/009-users-self-rls.sql:ro
+      - ./database/migrations/008_runtime_least_privilege.sql:/docker-entrypoint-initdb.d/010-runtime-least-privilege.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
