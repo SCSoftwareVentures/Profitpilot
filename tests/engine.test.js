@@ -14,6 +14,12 @@ test("CSV rejects duplicate headings",()=>assert.throws(()=>parseCsv("a,a\n1,2")
 test("CSV rejects inconsistent row widths",()=>assert.throws(()=>parseCsv("a,b\n1")));
 test("CSV rejects empty headings",()=>assert.throws(()=>parseCsv(",b\n1,2")));
 test("CSV handles CRLF",()=>assert.equal(parseCsv("a,b\r\n1,2\r\n").length,1));
+test("CSV accepts a UTF-8 BOM before the first heading",()=>assert.equal(parseCsv("\uFEFFinvoice_id,site,date,amount\n1,A,2026-11-01,3")[0].invoice_id,"1"));
+test("CSV rejects quotes embedded in unquoted fields",()=>assert.throws(()=>parseCsv('a,b\n1,ab"cd'),/quote inside an unquoted field/));
+test("CSV rejects data after a closing quoted field",()=>assert.throws(()=>parseCsv('a\n"safe"tail'),/after a closing quote/));
+test("CSV preserves newlines inside quoted fields",()=>assert.equal(parseCsv('a,b\n1,"line one\nline two"')[0].b,"line one\nline two"));
+test("CSV rejects case-insensitive duplicate headings",()=>assert.throws(()=>parseCsv("Invoice_ID,invoice_id\n1,2"),/duplicate column headings/));
+test("CSV rejects non-text input",()=>assert.throws(()=>parseCsv(null),/must be text/));
 test("invoice missing required fields is held",()=>assert.equal(validateInvoiceRows([{invoice_id:"1",date:"2026-11-01",amount:"3"}])[0].status,"held"));
 test("invoice valid row remains pending human review",()=>assert.equal(validateInvoiceRows([{invoice_id:"1",site:"A",date:"2026-11-01",amount:"3"}])[0].status,"pending_review"));
 test("negative invoice is held",()=>assert.equal(validateInvoiceRows([{invoice_id:"1",site:"A",date:"2026-11-01",amount:"-3"}])[0].status,"held"));
