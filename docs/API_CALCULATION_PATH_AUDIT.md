@@ -194,3 +194,13 @@ The earlier findings API-CALC-01 and API-CALC-02 are superseded for this combine
 5. **Acceptance evidence:** targeted authenticated API regression cases and the configured Node/PostgreSQL CI pass do not execute the full API-CALC-T01–T14 set or the broader DEC/TAX/PAY/PAYLED/INV/CON/VAR/IMP and property-based suites. Those remain NOT RUN as a complete suite.
 
 Do not represent the calculation output as audited profit, complete margin, tax advice or payroll processing. Keep payroll ingestion disabled and preserve the G5/release gate.
+
+
+## 10. Additional exact-money boundary review — 17 November 2026
+
+A further static review of `src/engine.js` and the import-validation route identified a source-boundary issue that is not covered by the earlier API calculation arithmetic finding:
+
+- `validateInvoiceRows` converts `r.amount` to text with `String(...)`; `decimalCents` accepts JavaScript numbers; and `normalizePayrollRows` accepts finite JavaScript-number amounts. JSON request parsing can already round numeric tokens before these helpers receive them. A large or high-precision source amount can therefore be changed before canonical decimal parsing. Require canonical decimal strings at the API boundary, or adopt a lossless JSON-number parser that preserves the original token. Add regression tests for numeric JSON amounts, values beyond the safe integer range, exponent notation and cent-boundary values.
+- The prototype helper `fromCents` converts BigInt cents to JavaScript Number, and `money` returns that Number. Its safe-integer-cent bound does not guarantee that every cent increment remains representable in dollar units at large magnitudes. Keep this helper explicitly demo-only; authoritative API, export and persistence paths must retain canonical decimal strings end to end.
+
+These findings do not invalidate the separate API calculation route's current BigInt-cent subtraction and decimal-string output. They do mean the broader import/engine boundary is not yet proven exact. The complete deterministic/property acceptance suite remains NOT RUN.
