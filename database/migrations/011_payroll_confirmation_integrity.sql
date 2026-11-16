@@ -94,7 +94,7 @@ END;
 $$;
 
 CREATE TRIGGER allocation_runs_validate_confirmation
-BEFORE INSERT OR UPDATE OF status ON allocation_runs
+BEFORE INSERT OR UPDATE ON allocation_runs
 FOR EACH ROW
 EXECUTE FUNCTION private.validate_payroll_allocation_confirmation();
 
