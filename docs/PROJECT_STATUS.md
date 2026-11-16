@@ -103,3 +103,10 @@ A separate downloadable HTML owner demonstration was supplied in the conversatio
 ## Latest CI confirmation — 17 November 2026
 
 The documentation refresh commit `e5fdf2ae84247b0dde84a7f79df0e31649da3cb6` completed ProfitPilot CI run #357 successfully. Both configured jobs passed: Verify (Node.js 22) and PostgreSQL migrations/tenant RLS. The PostgreSQL job completed schema/migration checks, restricted-role tenant RLS verification, authenticated API integration tests, production-image build and container health check. This remains PR #26 branch-only evidence; it does not validate a combined PR #25/#26 candidate or the proposed full financial acceptance suite.
+
+
+## Latest CI and ownership update — 17 November 2026
+
+The current PR #26 head `5faa5957493c7f8349300895e0d4b5dc3d61cc08` completed ProfitPilot CI run #359 successfully. Both configured jobs passed. This confirms the current documentation-branch checks only; it does not test a combined PR #25/#26 candidate or execute the proposed full financial acceptance suite.
+
+The project owner named **Sammy Chehade** as technical owner. This records the designation only; acceptance, delivery capacity, budget and other accountable specialist owners remain unverified. G0–G4 remain unevidenced and G5 remains deferred/not authorised. No implementation, merge, deployment or live-data permission is implied.
