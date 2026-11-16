@@ -101,3 +101,18 @@ The following evidence applies to the review branch only. It does not describe `
 6. Independent penetration testing and remediation retest, privacy impact assessment, Australian legal/privacy review, backup restore exercise and incident-response tabletop remain outstanding.
 
 **Release decision remains unchanged:** prototype engineering foundation only; no real customer information, private pilot or production use approved.
+
+
+### Final regression pass update — 16 November 2026 (PR #25 review branch)
+The latest commit `b70ecc2ce9664551efb2c8f33e9be2235db3c18c` passed hosted CI run **#292**: Node.js 22 locked install, production dependency audit, syntax checks, unit tests, PostgreSQL 16 migrations, catalogue audit, two-tenant/all-table visibility tests, authenticated API tests, Docker build and restricted-container health check.
+
+Additional regressions corrected in this pass:
+- Binary floating-point rounding and aggregation drift in monetary helper calculations; replaced with bounded decimal-to-cents arithmetic and explicit cent rounding tests.
+- Contract-version selection that previously allowed a version to cover only part of the requested calculation period; now requires full-period coverage and has an API regression test.
+- Invoice amount parsing that could accept JavaScript numeric forms such as hexadecimal; now requires positive decimal syntax with at most two fractional digits.
+- Invoice matching now requires a valid ISO date and nonblank site identity.
+- The API previously labelled metadata registration as `uploaded` despite not receiving/storing binary bytes; status is now `registered`, migration 009 converts existing metadata-only rows, and the OpenAPI contract explicitly says no binary file is stored.
+- Container runtime is now exercised with read-only filesystem, dropped capabilities, no-new-privileges, bounded PIDs and restricted temporary storage.
+- Runtime-role catalogue audit now also checks that the role has no memberships and owns no application objects/schemas.
+
+This evidence supersedes the earlier CI run references for the current review branch. It remains automated CI, not an independent security assessment.
