@@ -72,5 +72,22 @@ BEGIN
         fk.source_table,fk.target_table;
     END IF;
   END LOOP;
+  IF has_table_privilege('profitpilot_app','public.tenants','INSERT')
+     OR has_table_privilege('profitpilot_app','public.tenants','UPDATE')
+     OR has_table_privilege('profitpilot_app','public.tenants','DELETE')
+     OR has_table_privilege('profitpilot_app','public.users','INSERT')
+     OR has_table_privilege('profitpilot_app','public.users','UPDATE')
+     OR has_table_privilege('profitpilot_app','public.users','DELETE')
+     OR has_table_privilege('profitpilot_app','public.tenant_memberships','INSERT')
+     OR has_table_privilege('profitpilot_app','public.tenant_memberships','UPDATE')
+     OR has_table_privilege('profitpilot_app','public.tenant_memberships','DELETE')
+  THEN RAISE EXCEPTION 'Runtime role has forbidden identity, tenant or membership write privileges'; END IF;
+  IF has_table_privilege('profitpilot_app','public.import_batches','DELETE')
+     OR has_table_privilege('profitpilot_app','public.raw_import_rows','DELETE')
+     OR has_table_privilege('profitpilot_app','public.mapping_decisions','DELETE')
+     OR has_table_privilege('profitpilot_app','public.match_reviews','DELETE')
+     OR has_table_privilege('profitpilot_app','public.calculation_runs','DELETE')
+     OR has_table_privilege('profitpilot_app','public.audit_events','DELETE')
+  THEN RAISE EXCEPTION 'Runtime role has an unapproved destructive delete privilege'; END IF;
   RAISE NOTICE 'Tenant catalog audit passed: % tenant-scoped/root tables checked; tenant-to-tenant foreign keys inspected.',checked;
 END $$;
