@@ -50,19 +50,19 @@ BEFORE INSERT ON payroll_source_rows
 FOR EACH ROW EXECUTE FUNCTION private.validate_payroll_source_row_provenance();
 
 CREATE FUNCTION private.reject_payroll_source_row_mutation()
-RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public,private AS $
+RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public,private AS $immut$
 BEGIN RAISE EXCEPTION 'Payroll source rows are immutable; create a corrected source version' USING ERRCODE='55000'; END;
-$$;
+$immut$;
 CREATE TRIGGER payroll_source_rows_immutable BEFORE UPDATE OR DELETE ON payroll_source_rows
  FOR EACH ROW EXECUTE FUNCTION private.reject_payroll_source_row_mutation();
 CREATE FUNCTION private.reject_allocation_line_mutation()
-RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public,private AS $$
+RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public,private AS $appendonly$
 BEGIN RAISE EXCEPTION 'Allocation lines are append-only; create a superseding allocation run' USING ERRCODE='55000'; END;
-$$;
+$appendonly$;
 CREATE TRIGGER allocation_lines_immutable BEFORE UPDATE OR DELETE ON allocation_lines
  FOR EACH ROW EXECUTE FUNCTION private.reject_allocation_line_mutation();
 CREATE FUNCTION private.validate_payroll_allocation_line()
-RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public,private AS $$
+RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public,private AS $allocvalidate$
 DECLARE src payroll_source_rows%ROWTYPE; run allocation_runs%ROWTYPE; used numeric(14,2);
 BEGIN
  IF NEW.payroll_source_row_id IS NULL THEN
@@ -90,7 +90,7 @@ BEGIN
  END IF;
  RETURN NEW;
 END;
-$$;
+$allocvalidate$;
 CREATE TRIGGER allocation_lines_validate_source BEFORE INSERT ON allocation_lines
  FOR EACH ROW EXECUTE FUNCTION private.validate_payroll_allocation_line();
 REVOKE INSERT,UPDATE,DELETE ON payroll_source_rows,allocation_lines FROM profitpilot_app;
