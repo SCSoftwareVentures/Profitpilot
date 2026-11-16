@@ -151,6 +151,11 @@ jobs:
             echo 'PROFITPILOT_CA'
           } >> "$GITHUB_ENV"
 
+      - name: Verify PostgreSQL TLS certificate validation
+        env:
+          DATABASE_SSL_TEST_URL: postgresql://profitpilot_app:${{ env.POSTGRES_APP_PASSWORD }}@127.0.0.1:5432/profitpilot
+        run: node --test tests/db-tls.integration.test.js
+
       - name: Start production-mode container and verify database TLS health endpoint
         env:
           CORS_ORIGIN: https://ci.invalid
