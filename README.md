@@ -48,6 +48,14 @@ Further product, validation, architecture, roadmap and risk documentation will b
 - [Interactive application prototype](app/index.html)
 - [Browser test runner](tests/index.html)
 
+## API, test fixtures and release controls
+
+
+- [Core API contract (OpenAPI)](api/openapi.yaml)
+- [Fictional development seed data](database/seed_demo.sql)
+- [Synthetic invoice CSV fixture](tests/fixtures/invoices_demo.csv)
+- [QA verification matrix and release gates](docs/VERIFICATION_MATRIX.md)
+
 ## Visual prototypes
 
 - [Simplified dashboard concept](demo/dashboard.html) — responsive static HTML with fictional placeholder figures; no live data or connected services.
