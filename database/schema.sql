@@ -41,6 +41,7 @@ CREATE TABLE contract_versions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id uuid NOT NULL,
   contract_id uuid NOT NULL, version_no integer NOT NULL, effective_from date NOT NULL,
   effective_to date, price numeric(14,2) NOT NULL CHECK(price>=0), currency char(3) NOT NULL DEFAULT 'AUD',
+  tax_basis text NOT NULL DEFAULT 'unknown' CHECK(tax_basis IN ('gst_inclusive','gst_exclusive','no_gst','unknown')),
   billing_basis text NOT NULL, scope jsonb NOT NULL DEFAULT '{}'::jsonb, source_ref text,
   approved_by uuid REFERENCES users(id), approved_at timestamptz,
   FOREIGN KEY (tenant_id,contract_id) REFERENCES contracts(tenant_id,id),
