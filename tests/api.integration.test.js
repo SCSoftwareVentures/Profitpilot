@@ -165,6 +165,12 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("UPDATE tenant_memberships SET status='revoked' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);
     const revoked=await request(`/v1/tenants/${tenantA}/contracts`,{subject:"ci-api-analyst"});
     assert.equal(revoked.status,403,"revoked memberships must lose access immediately");
+    let rateLimited=false;
+    for(let i=0;i<105&&!rateLimited;i++){
+      const response=await request("/v1/me");
+      rateLimited=response.status===429;
+    }
+    assert.equal(rateLimited,true,"the API must enforce its configured per-client request limit");
   }finally{
     await new Promise(resolve=>api.close(resolve));
     await admin.end();
