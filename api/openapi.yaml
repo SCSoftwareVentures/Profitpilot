@@ -202,7 +202,7 @@ components:
   schemas:
     ErrorResponse:
       type: object
-      required: [error, reference]
+      required: [error]
       properties:
         error: { type: string }
         code: { type: string, description: Stable machine-readable error code when supplied by the route }
