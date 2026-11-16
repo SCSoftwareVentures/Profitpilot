@@ -177,3 +177,20 @@ The documentation reconciliation advanced PR #27 branch `integration/pr25-pr26-v
 - **PostgreSQL migrations and tenant RLS:** completed successfully, including migration application, tenant/FK catalogue audit, restricted-role RLS checks, authenticated API integration, production image build and restricted-container health check.
 
 This verifies the current combined candidate plus documentation reconciliation on its exact head. It does not execute the full financial acceptance plan or satisfy independent assurance, customer validation or G0–G5 release gates. PR #27 remains draft and unmerged.
+
+ 
+## Hardening follow-up — 17 November 2026
+
+Draft PR #28 `hardening/financial-security-followup` is correctly based on the combined PR #27 branch `integration/pr25-pr26-validation`, preserving PR #27 as the combined review candidate and isolating follow-up changes. It remains draft and unmerged.
+
+Implemented on the hardening branch:
+- exact decimal-string-only parsing/formatting in the prototype financial engine, including numeric(14,2) bounds and rejection of JSON numeric amounts;
+- production database TLS fail-closed configuration with verified certificate validation;
+- migration 013 database-enforced reviewer authority and signed-actor payroll confirmation identity;
+- direct SQL role-boundary tests, payroll actor-substitution tests, and 500 deterministic property cases with seed 0x5eed1234;
+- PostgreSQL CI now enables TLS on its ephemeral server, verifies a trusted CA, rejects an untrusted CA, and runs the API container in production mode against verified TLS;
+- OpenAPI schemas and response contracts now describe exact money strings and the current partial API surface.
+
+CI run **#43983253747** passed on exact implementation/documentation head `30f0c9fa8937eea5fed537162750a5b7caafeb40`. Node.js and PostgreSQL jobs both succeeded, including migrations 002–013, 20-table tenant/FK audit, restricted-role RLS, authenticated API integration, production image build, TLS trust/rejection tests and production-mode health check. The latest OpenAPI error-schema correction is commit `c031d73b89961c520df68ad33a82db388694d847`; its exact-head CI is pending.
+
+The product remains **NOT COMPLETE**. Payroll ingestion stays disabled; the full financial acceptance plan, private file lifecycle, production operations, independent security/accounting/legal reviews, customer validation G0–G4 and signed G5 build approval remain outstanding. No merge, deployment, real-data intake or payment activity is authorised.
