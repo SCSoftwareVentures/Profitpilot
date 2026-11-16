@@ -6,6 +6,7 @@ services:
       POSTGRES_USER: profitpilot_admin
       POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Set POSTGRES_ADMIN_PASSWORD}
       TENANT_CONTEXT_HMAC_SECRET: ${TENANT_CONTEXT_HMAC_SECRET:?Set TENANT_CONTEXT_HMAC_SECRET}
+      TENANT_CONTEXT_HMAC_SECRET: ${TENANT_CONTEXT_HMAC_SECRET:?Set TENANT_CONTEXT_HMAC_SECRET}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
@@ -13,6 +14,7 @@ services:
       - ./database/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
       - ./database/init/002-runtime-role.sql:/docker-entrypoint-initdb.d/002-runtime-role.sql:ro
       - ./database/migrations/002_tenant_rls.sql:/docker-entrypoint-initdb.d/003-tenant-rls.sql:ro
+      - ./database/init/003-tenant-context-key.sql:/docker-entrypoint-initdb.d/004-tenant-context-key.sql:ro
       - ./database/init/003-tenant-context-key.sql:/docker-entrypoint-initdb.d/004-tenant-context-key.sql:ro
       - ./database/migrations/003_allocation_lines.sql:/docker-entrypoint-initdb.d/005-allocation-lines.sql:ro
       - ./database/migrations/004_import_validation.sql:/docker-entrypoint-initdb.d/006-import-validation.sql:ro
@@ -30,6 +32,7 @@ services:
       PORT: 8080
       DATABASE_URL: postgres://profitpilot_app:local-dev-only-change-this@db:5432/profitpilot
       DATABASE_SSL: "false"
+      TENANT_CONTEXT_HMAC_SECRET: ${TENANT_CONTEXT_HMAC_SECRET:?Set TENANT_CONTEXT_HMAC_SECRET}
       TENANT_CONTEXT_HMAC_SECRET: ${TENANT_CONTEXT_HMAC_SECRET:?Set TENANT_CONTEXT_HMAC_SECRET}
       CORS_ORIGIN: ${CORS_ORIGIN:?Set CORS_ORIGIN}
       AUTH_ISSUER: ${AUTH_ISSUER:?Set AUTH_ISSUER}
