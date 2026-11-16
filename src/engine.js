@@ -2,28 +2,21 @@ import {createHash} from "node:crypto";
 // ProfitPilot prototype calculation and import engine.
 // Deterministic demo logic only. Do not use with real payroll/customer data.
 function decimalCents(value){
-  const text=typeof value==="number"?(Number.isFinite(value)?String(value):""):typeof value==="string"?value.trim():"";
-  if(text.length>128)return null;
-  const match=text.match(/^([+-]?)(\d+)(?:\.(\d*))?(?:e([+-]?\d+))?$/i);
-  if(!match)return null;
-  const exponent=Number(match[4]||0);
-  if(!Number.isInteger(exponent)||Math.abs(exponent)>100)return null;
-  const fraction=match[3]||"";
-  const digits=BigInt((match[2]+fraction).replace(/^0+(?=\d)/,""));
-  const scale=fraction.length-exponent;
-  if(Math.abs(scale)>100)return null;
-  let cents;
-  if(scale<=2)cents=digits*10n**BigInt(2-scale);
-  else{
-    const divisor=10n**BigInt(scale-2);
-    const quotient=digits/divisor;
-    const remainder=digits%divisor;
-    cents=quotient+(remainder*2n>=divisor?1n:0n);
-  }
-  if(cents>BigInt(Number.MAX_SAFE_INTEGER))return null;
-  return match[1]==="-"?-cents:cents;
+  if(typeof value!=="string"||value.length>15)return null;
+  const text=value;
+  if(!/^-?(?:0|[1-9]\\d*)(?:\\.\\d{1,2})?$/.test(text))return null;
+  const negative=text.startsWith("-");
+  const unsigned=negative?text.slice(1):text;
+  const [whole,fraction=""]=unsigned.split(".");
+  const cents=BigInt(whole)*100n+BigInt((fraction+"00").slice(0,2));
+  // Match PostgreSQL numeric(14,2): twelve integer digits and two cents digits.
+  if(cents>99999999999999n)return null;
+  return negative?-cents:cents;
 }
-const fromCents=cents=>Number(cents)/100;
+const fromCents=cents=>{
+  const negative=cents<0n,absolute=negative?-cents:cents;
+  return (negative?"-":"")+String(absolute/100n)+"."+String(absolute%100n).padStart(2,"0");
+};
 function sumCents(values){
   let total=0n;
   for(const value of values){const cents=decimalCents(value);if(cents===null)return null;total+=cents;}
@@ -93,7 +86,7 @@ export function parseCsv(text) {
 }
 export function validateInvoiceRows(rows){
   return rows.map((r,i)=>{
-    const amountText=String(r.amount??"").trim();
+    const amountText=typeof r.amount==="string"?r.amount:"";
     const errors=[];
     if(typeof r.invoice_id!=="string"||!r.invoice_id.trim())errors.push("Missing invoice_id");
     if(typeof r.site!=="string"||!r.site.trim())errors.push("Missing site");
@@ -102,14 +95,14 @@ export function validateInvoiceRows(rows){
     return {rowNumber:r.__rowNumber||i+2,record:r,errors,status:errors.length?"held":"pending_review"};
   });
 }
-export function allocatePayroll({pool,direct=[],approved=[],nonSite=0,excluded=0}){
-  const p=decimalCents(pool),d=sumCents(direct.map(x=>x.amount??0)),a=sumCents(approved.map(x=>x.amount??0)),n=decimalCents(nonSite),e=decimalCents(excluded);
+export function allocatePayroll({pool,direct=[],approved=[],nonSite="0.00",excluded="0.00"}){
+  const p=decimalCents(pool),d=sumCents(direct.map(x=>x.amount??"0.00")),a=sumCents(approved.map(x=>x.amount??"0.00")),n=decimalCents(nonSite),e=decimalCents(excluded);
   const validInputs=[p,d,a,n,e].every(x=>x!==null);
   const residual=validInputs?p-d-a-n-e:null;
   const siteCents=Object.create(null);
   let sitesValid=true;
   for(const x of [...direct,...approved]){
-    const amount=decimalCents(x.amount??0);
+    const amount=decimalCents(x.amount??"0.00");
     if(amount===null){sitesValid=false;continue;}
     const key=String(x.site??"");
     siteCents[key]=(siteCents[key]||0n)+amount;
@@ -175,7 +168,7 @@ export function normalizePayrollRows(rows){
     const errors=[];
     if(!row||typeof row!=="object"||Array.isArray(row))return {rowNumber:index+1,status:"held",record:null,errors:["Row must be an object"]};
     const key=typeof row.source_row_key==="string"?row.source_row_key.trim():"";
-    const amountText=typeof row.amount==="string"?row.amount.trim():typeof row.amount==="number"&&Number.isFinite(row.amount)?String(row.amount):"";
+    const amountText=typeof row.amount==="string"?row.amount:"";
     const currency=typeof row.currency==="string"?row.currency.trim().toUpperCase():"";
     if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(key))errors.push("source_row_key must be an opaque stable key (1–128 safe characters)");
     if(!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(amountText))errors.push("amount must be a non-negative decimal with at most two fractional digits");
