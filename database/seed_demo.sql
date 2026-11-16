@@ -1,0 +1,21 @@
+-- Fictional seed data for local development only.
+-- Apply only after creating an isolated development database and test tenant.
+-- Never load this fixture into production.
+BEGIN;
+INSERT INTO tenants (id,legal_name,status) VALUES
+('10000000-0000-4000-8000-000000000001','Sample Cleaning Co — DEMO','active');
+INSERT INTO users (id,auth_subject,email,status) VALUES
+('20000000-0000-4000-8000-000000000001','demo|alex','alex.demo@example.invalid','active');
+INSERT INTO tenant_memberships (tenant_id,user_id,role,status) VALUES
+('10000000-0000-4000-8000-000000000001','20000000-0000-4000-8000-000000000001','owner','active');
+INSERT INTO businesses (id,tenant_id,name) VALUES
+('30000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','Sample Cleaning Co');
+INSERT INTO sites (id,tenant_id,business_id,name) VALUES
+('40000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Riverside Offices'),
+('40000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Northside Retail'),
+('40000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Harbour Strata');
+INSERT INTO contracts (id,tenant_id,business_id,customer_name,status) VALUES
+('50000000-0000-4000-8000-000000000001','10000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Riverside Offices','active'),
+('50000000-0000-4000-8000-000000000002','10000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Northside Retail','active'),
+('50000000-0000-4000-8000-000000000003','10000000-0000-4000-8000-000000000001','30000000-0000-4000-8000-000000000001','Harbour Strata','active');
+COMMIT;
