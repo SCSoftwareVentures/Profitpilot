@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {money,parseCsv,validateInvoiceRows,allocatePayroll,matchInvoice,aggregateMetrics,isIsoDate} from "../src/engine.js";
+import {money,parseCsv,validateInvoiceRows,allocatePayroll,matchInvoice,aggregateMetrics,isIsoDate,normalizePayrollRows} from "../src/engine.js";
 
 test("money uses cent precision",()=>assert.equal(money(10.126),10.13));
 test("ISO date accepts a valid calendar date",()=>assert.equal(isIsoDate("2026-11-16"),true));
@@ -57,4 +57,37 @@ test("contract aggregation preserves cents over repeated decimal values",()=>{
 test("invoice matcher rejects hexadecimal and non-finite amount syntax",()=>{
   assert.equal(matchInvoice({site:"A",date:"2026-11-05",amount:"0x10"},{id:"c",site:"A",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).confidence,"UNMATCHED");
   assert.equal(matchInvoice({site:"A",date:"2026-11-05",amount:"Infinity"},{id:"c",site:"A",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).confidence,"UNMATCHED");
+});
+
+
+test("payroll normalizer emits canonical cents, currency and deterministic row hash",()=>{
+  const rows=normalizePayrollRows([{source_row_key:"row-001",amount:"12.3",currency:"aud",employee_name:"Synthetic Person",bank_account:"DO-NOT-RETAIN"}]);
+  assert.equal(rows[0].status,"pending_review");
+  assert.deepEqual(rows[0].record,{sourceRowKey:"row-001",amount:"12.30",currency:"AUD"});
+  assert.equal(rows[0].rowSha256.length,64);
+  assert.equal(JSON.stringify(rows[0]).includes("Synthetic Person"),false);
+  assert.equal(JSON.stringify(rows[0]).includes("DO-NOT-RETAIN"),false);
+});
+test("payroll normalizer holds malformed money, currency and unsafe row keys",()=>{
+  const rows=normalizePayrollRows([
+    {source_row_key:"row-a",amount:"1.234",currency:"AUD"},
+    {source_row_key:"row-b",amount:"-1.00",currency:"AUD"},
+    {source_row_key:"row-c",amount:"1.00",currency:"AU"},
+    {source_row_key:"../employee-name",amount:"1.00",currency:"AUD"}
+  ]);
+  assert.deepEqual(rows.map(x=>x.status),["held","held","held","held"]);
+  assert.ok(rows.every(x=>x.record===null&&x.rowSha256===undefined));
+});
+test("payroll normalizer holds duplicate source keys in a batch",()=>{
+  const rows=normalizePayrollRows([
+    {source_row_key:"same",amount:"1.00",currency:"AUD"},
+    {source_row_key:"same",amount:"2.00",currency:"AUD"}
+  ]);
+  assert.equal(rows[0].status,"pending_review");
+  assert.equal(rows[1].status,"held");
+  assert.match(rows[1].errors[0],/Duplicate/);
+});
+test("payroll normalizer rejects empty and oversized batches",()=>{
+  assert.throws(()=>normalizePayrollRows([]),/1–10000/);
+  assert.throws(()=>normalizePayrollRows(Array(10001).fill({})),/1–10000/);
 });
