@@ -6,7 +6,7 @@ import rateLimit from "express-rate-limit";
 import {randomUUID,createHash} from "node:crypto";
 import {withTenant,health} from "./db.js";
 import {authRequired,requireRole} from "./auth.js";
-import {parseCsv,validateInvoiceRows} from "../src/engine.js";
+import {parseCsv,validateInvoiceRows,isIsoDate} from "../src/engine.js";
 
 const app=express();
 app.disable("x-powered-by");
@@ -31,7 +31,7 @@ app.get("/v1/tenants/:tenantId/contracts",membership,async(req,res,next)=>{try{c
 app.post("/v1/tenants/:tenantId/imports",membership,requireRole("owner","admin","analyst"),async(req,res,next)=>{
  try{
   const {sourceType,fileName,sha256,permissionReference,periodStart,periodEnd}=req.body||{};
-  if(!["payroll","customer_invoice","supplier_invoice"].includes(sourceType)||typeof fileName!=="string"||fileName.length>255||!/^[a-f0-9]{64}$/i.test(sha256||"")||typeof permissionReference!=="string"||!permissionReference.trim()||!/^\d{4}-\d{2}-\d{2}$/.test(periodStart||"")||!/^\d{4}-\d{2}-\d{2}$/.test(periodEnd||"")||periodEnd<periodStart)return res.status(400).json({error:"Invalid import metadata"});
+  if(!["payroll","customer_invoice","supplier_invoice"].includes(sourceType)||typeof fileName!=="string"||fileName.length>255||!/^[a-f0-9]{64}$/i.test(sha256||"")||typeof permissionReference!=="string"||!permissionReference.trim()||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodEnd<periodStart)return res.status(400).json({error:"Invalid import metadata"});
   const id=randomUUID();
   const result=await withTenant(req.membership.tenantId,async c=>c.query("INSERT INTO import_batches(id,tenant_id,source_type,source_period_start,source_period_end,permission_ref,status,file_sha256,file_name,created_by) SELECT $1,$2,$3,$4,$5,$6,'uploaded',$7,$8,u.id FROM users u WHERE u.auth_subject=$9 ON CONFLICT(tenant_id,file_sha256) DO NOTHING RETURNING id,status",[id,req.membership.tenantId,sourceType,periodStart,periodEnd,permissionReference.trim(),sha256.toLowerCase(),fileName,req.identity.subject]));
   if(!result.rowCount){const old=await withTenant(req.membership.tenantId,async c=>c.query("SELECT id,status FROM import_batches WHERE tenant_id=$1 AND file_sha256=$2",[req.membership.tenantId,sha256.toLowerCase()]));return res.status(200).json({batch:old.rows[0],idempotent:true});}
@@ -95,7 +95,7 @@ app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requireRol
 
 app.post("/v1/tenants/:tenantId/calculations",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
  const {contractId,siteId,periodStart,periodEnd}=req.body||{};
- if(!/^[0-9a-f-]{36}$/i.test(contractId||"")||!/^[0-9a-f-]{36}$/i.test(siteId||"")||!/^\\d{4}-\\d{2}-\\d{2}$/.test(periodStart||"")||!/^\\d{4}-\\d{2}-\\d{2}$/.test(periodEnd||"")||periodEnd<periodStart)return res.status(400).json({error:"Valid contract, site and period are required"});
+ if(!/^[0-9a-f-]{36}$/i.test(contractId||"")||!/^[0-9a-f-]{36}$/i.test(siteId||"")||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodEnd<periodStart)return res.status(400).json({error:"Valid contract, site and period are required"});
  const result=await withTenant(req.membership.tenantId,async client=>{
   const base=await client.query("SELECT c.id,cv.version_no,cv.currency FROM contracts c JOIN contract_versions cv ON cv.contract_id=c.id AND cv.tenant_id=c.tenant_id JOIN sites s ON s.id=$2 AND s.tenant_id=c.tenant_id AND s.business_id=c.business_id WHERE c.id=$1 AND c.tenant_id=$3 AND cv.approved_at IS NOT NULL AND cv.approved_by IS NOT NULL AND cv.effective_from <= $5::date AND (cv.effective_to IS NULL OR cv.effective_to >= $4::date)",[contractId,siteId,req.membership.tenantId,periodStart,periodEnd]);
   if(!base.rowCount)return {error:"No matching contract/site and effective contract version for this period"};

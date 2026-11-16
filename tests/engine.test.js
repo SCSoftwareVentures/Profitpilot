@@ -1,8 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {money,parseCsv,validateInvoiceRows,allocatePayroll,matchInvoice,aggregateMetrics} from "../src/engine.js";
+import {money,parseCsv,validateInvoiceRows,allocatePayroll,matchInvoice,aggregateMetrics,isIsoDate} from "../src/engine.js";
 
 test("money uses cent precision",()=>assert.equal(money(10.126),10.13));
+test("ISO date accepts a valid calendar date",()=>assert.equal(isIsoDate("2026-11-16"),true));
+test("ISO date accepts leap day only in leap years",()=>{assert.equal(isIsoDate("2024-02-29"),true);assert.equal(isIsoDate("2025-02-29"),false);});
+test("ISO date rejects impossible and malformed dates",()=>{assert.equal(isIsoDate("2026-02-31"),false);assert.equal(isIsoDate("16-11-2026"),false);});
 test("CSV parses standard records",()=>assert.equal(parseCsv("a,b\n1,2").length,1));
 test("CSV supports quoted commas",()=>assert.equal(parseCsv('a,b\n1,"two,three"')[0].b,"two,three"));
 test("CSV supports escaped quotes",()=>assert.equal(parseCsv('a\n"say ""hi"""')[0].a,'say "hi"'));
