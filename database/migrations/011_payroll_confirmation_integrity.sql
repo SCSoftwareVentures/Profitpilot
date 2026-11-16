@@ -12,6 +12,8 @@ DECLARE
   source_total numeric(14,2);
   source_currency_count bigint;
   incomplete_rows bigint;
+  unlinked_lines bigint;
+  line_total numeric(14,2);
   line_totals record;
   reviewer_role text;
 BEGIN
@@ -58,6 +60,18 @@ BEGIN
     ),0)<>s.amount;
   IF incomplete_rows<>0 THEN
     RAISE EXCEPTION 'Every payroll source row must be fully represented in the allocation run' USING ERRCODE='23514';
+  END IF;
+
+  -- Historical allocation lines may predate the source-row ledger and have a
+  -- NULL source link. They must never be silently carried into a newly
+  -- confirmed evidence-backed run.
+  SELECT count(*) FILTER (WHERE payroll_source_row_id IS NULL),
+         COALESCE(sum(amount),0)
+    INTO unlinked_lines,line_total
+  FROM allocation_lines
+  WHERE tenant_id=NEW.tenant_id AND allocation_run_id=NEW.id;
+  IF unlinked_lines<>0 OR line_total<>source_total THEN
+    RAISE EXCEPTION 'Every confirmed allocation line must be source-linked and total exactly to the payroll pool' USING ERRCODE='23514';
   END IF;
 
   SELECT
