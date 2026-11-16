@@ -46,10 +46,14 @@ INSERT INTO allocation_runs(id,tenant_id,payroll_pool_id,method_version,status,r
 VALUES
  ('18181818-1818-4818-8818-181818181818','33333333-3333-4333-8333-333333333333','16161616-1616-4616-8616-161616161616','fixture-1','draft',100),
  ('19191919-1919-4919-8919-191919191919','44444444-4444-4444-8444-444444444444','17171717-1717-4717-8717-171717171717','fixture-1','draft',100);
-INSERT INTO allocation_lines(tenant_id,allocation_run_id,site_id,bucket_type,amount,source_ref)
+INSERT INTO payroll_source_rows(id,tenant_id,payroll_pool_id,raw_import_row_id,source_row_key,row_sha256,amount,currency)
 VALUES
- ('33333333-3333-4333-8333-333333333333','18181818-1818-4818-8818-181818181818','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','direct',100,'fixture-C-line'),
- ('44444444-4444-4444-8444-444444444444','19191919-1919-4919-8919-191919191919','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','direct',100,'fixture-D-line');
+ ('30303030-3030-4030-8030-303030303030','33333333-3333-4333-8333-333333333333','16161616-1616-4616-8616-161616161616','14141414-1414-4414-8414-141414141414','fixture-C-row',repeat('3',64),100,'AUD'),
+ ('31313131-3131-4131-8131-313131313131','44444444-4444-4444-8444-444444444444','17171717-1717-4717-8717-171717171717','15151515-1515-4515-8515-151515151515','fixture-D-row',repeat('4',64),100,'AUD');
+INSERT INTO allocation_lines(tenant_id,allocation_run_id,site_id,bucket_type,amount,source_ref,payroll_source_row_id)
+VALUES
+ ('33333333-3333-4333-8333-333333333333','18181818-1818-4818-8818-181818181818','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','direct',100,'fixture-C-line','30303030-3030-4030-8030-303030303030'),
+ ('44444444-4444-4444-8444-444444444444','19191919-1919-4919-8919-191919191919','bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb','direct',100,'fixture-D-line','31313131-3131-4131-8131-313131313131');
 INSERT INTO invoices(id,tenant_id,direction,invoice_number,invoice_date,total_amount,currency,tax_basis,source_ref)
 VALUES
  ('20202020-2020-4020-8020-202020202020','33333333-3333-4333-8333-333333333333','customer','C-INV-1','2026-01-15',100,'AUD','no_gst','fixture-C-invoice'),
