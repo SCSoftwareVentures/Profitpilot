@@ -1,3 +1,4 @@
+import {createHash} from "node:crypto";
 // ProfitPilot prototype calculation and import engine.
 // Deterministic demo logic only. Do not use with real payroll/customer data.
 function decimalCents(value){
@@ -142,4 +143,35 @@ export function aggregateMetrics(contracts){
   const contribution=revenue-cost;
   const margin=revenue?ratioCents(contribution*10000n,revenue):null;
   return {revenue:fromCents(revenue),cost:fromCents(cost),contribution:fromCents(contribution),margin:margin===null?null:fromCents(margin),contracts:rows};
+}
+
+
+/**
+ * Normalize a deliberately minimal payroll source-row contract.
+ * Only opaque source keys, decimal amounts and ISO currency codes survive.
+ * Employee names, bank details, tax identifiers and arbitrary source columns
+ * are never copied into the normalized result.
+ */
+export function normalizePayrollRows(rows){
+  if(!Array.isArray(rows))throw new TypeError("Payroll rows must be an array.");
+  if(rows.length<1||rows.length>10000)throw new RangeError("Payroll batch must contain 1–10000 rows.");
+  const seen=new Set();
+  return rows.map((row,index)=>{
+    const errors=[];
+    if(!row||typeof row!=="object"||Array.isArray(row))return {rowNumber:index+1,status:"held",record:null,errors:["Row must be an object"]};
+    const key=typeof row.source_row_key==="string"?row.source_row_key.trim():"";
+    const amountText=typeof row.amount==="string"?row.amount.trim():typeof row.amount==="number"&&Number.isFinite(row.amount)?String(row.amount):"";
+    const currency=typeof row.currency==="string"?row.currency.trim().toUpperCase():"";
+    if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(key))errors.push("source_row_key must be an opaque stable key (1–128 safe characters)");
+    if(!/^(?:0|[1-9]\\d*)(?:\\.\\d{1,2})?$/.test(amountText))errors.push("amount must be a non-negative decimal with at most two fractional digits");
+    if(!/^[A-Z]{3}$/.test(currency))errors.push("currency must be a three-letter ISO-style code");
+    if(key&&seen.has(key))errors.push("Duplicate source_row_key within this batch");
+    if(key)seen.add(key);
+    if(errors.length)return {rowNumber:index+1,status:"held",record:null,errors};
+    const [whole,fraction=""]=amountText.split(".");
+    const canonicalAmount=String(BigInt(whole))+"."+fraction.padEnd(2,"0");
+    const canonical={sourceRowKey:key,amount:canonicalAmount,currency};
+    const rowSha256=createHash("sha256").update([key,canonicalAmount,currency].join("\\n"),"utf8").digest("hex");
+    return {rowNumber:index+1,status:"pending_review",record:canonical,rowSha256,errors:[]};
+  });
 }
