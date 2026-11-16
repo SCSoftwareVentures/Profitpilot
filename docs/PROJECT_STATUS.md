@@ -167,3 +167,13 @@ This closes the previously open **combined automated CI** checkpoint only. It do
 ### Release gates
 
 G0–G4 customer/data/commercial/usability evidence remains NOT EVIDENCED. G5 remains DEFERRED / NOT AUTHORISED: the signed decision, budget, delivery capacity, legal/privacy plan and accountable specialist approvals are absent. G6 has not started. No merge, deployment, real-data intake, customer pilot or payment activity is authorised. Preserve the public-repository synthetic-data-only rule.
+
+
+## Latest combined-candidate documentation CI — 17 November 2026
+
+The documentation reconciliation advanced PR #27 branch `integration/pr25-pr26-validation` to exact head `688d50bb5e3b45479f48f9cf7bb20e5897750291`. CI run **#43980939798** completed successfully on that exact head. Both configured jobs passed:
+
+- **Verify (Node.js 22):** locked dependencies, production dependency audit, syntax checks; 46 tests total, 45 passed, 1 skipped, 0 failed. The skipped test is the authenticated API integration test in this job; that integration suite runs in the PostgreSQL job.
+- **PostgreSQL migrations and tenant RLS:** completed successfully, including migration application, tenant/FK catalogue audit, restricted-role RLS checks, authenticated API integration, production image build and restricted-container health check.
+
+This verifies the current combined candidate plus documentation reconciliation on its exact head. It does not execute the full financial acceptance plan or satisfy independent assurance, customer validation or G0–G5 release gates. PR #27 remains draft and unmerged.
