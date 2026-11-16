@@ -20,6 +20,7 @@ function decimalCents(value){
     const remainder=digits%divisor;
     cents=quotient+(remainder*2n>=divisor?1n:0n);
   }
+  if(cents>BigInt(Number.MAX_SAFE_INTEGER))return null;
   return match[1]==="-"?-cents:cents;
 }
 const fromCents=cents=>Number(cents)/100;
