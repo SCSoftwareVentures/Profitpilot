@@ -192,3 +192,15 @@ A static review of the current combined candidate identified two production secu
 2. **Reviewer authority is enforced at the HTTP layer for invoice-match decisions.** The `profitpilot_app` role has `UPDATE` on `match_reviews`, while the current database RLS policy is tenant-scoped and does not independently prove that the signed actor is a reviewer/admin/owner. The Express route checks the membership role, but a compromised application process or SQL injection could use the shared database role to bypass that route-level check. Before production, enforce actor-role authority in a database policy or narrowly scoped stored procedure tied to the verified signed tenant/subject context, and add direct-SQL analyst-denial tests. The payroll confirmation trigger similarly validates the submitted `reviewer_id`'s membership role but does not independently bind that reviewer to the signed actor; this must be addressed before any runtime write grant or payroll confirmation API is enabled.
 
 These are static findings, not evidence of an observed exploit. The repository remains a prototype and must not receive real customer, employee, payroll or invoice data.
+
+ 
+## Remediation verification follow-up — hardening branch, 17 November 2026
+
+The specific code findings in the preceding section have been remediated on the draft hardening branch:
+
+1. `server/db-config.js` now fails closed when `NODE_ENV=production` and `DATABASE_SSL` is not exactly `true`. TLS configuration always sets `rejectUnauthorized: true` and supports a supplied `DATABASE_SSL_CA`. Unit tests cover production rejection, verified TLS configuration and explicit local-development plaintext.
+2. Migration 013 adds a PostgreSQL restrictive UPDATE policy on `match_reviews`, requiring the role resolved from the verified signed tenant context to be owner/admin/reviewer. Direct-SQL integration tests prove analyst update returns no row while a reviewer can update.
+3. Migration 013 adds a payroll confirmation trigger that requires the runtime session's signed subject to be the same user as `NEW.reviewer_id`, with reviewer/admin/owner authority. Integration tests prove analyst confirmation and reviewer-ID substitution are rejected even when the runtime update privilege is temporarily granted for the test. The test revokes that temporary privilege in a `finally` block.
+4. The CI health smoke test now runs the restricted container in development mode against the local plaintext PostgreSQL service. It is explicitly not evidence of a production TLS connection; production TLS fail-closed behaviour is covered by configuration unit tests. A real managed PostgreSQL TLS handshake with the approved CA remains a deployment acceptance test.
+
+These changes reduce the identified application/database privilege gap but do not constitute independent penetration testing. Distributed rate limiting, production identity/MFA, private file storage/quarantine/malware scanning, retention/deletion verification, managed secret/KMS custody, DB TLS handshake against the chosen provider, backup/restore and incident response remain open release blockers. Payroll ingestion remains disabled.
