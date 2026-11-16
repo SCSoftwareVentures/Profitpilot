@@ -6,7 +6,7 @@ ProfitPilot is a proposed business operations and customer transaction-managemen
 
 The repository is a product-validation specification and partial API/database implementation scaffold, not a complete or deployed customer application. Customer demand, legal/privacy clearance, production security and unit economics are not yet established.
 
-**Current review branches:** PR #25 (security hardening) and PR #26 (product blueprint) remain separate draft, unmerged branches. CI run #310 passed on PR #25 head 17178768002b978d6f5bd76f0192b2bbff7a4355; CI run #347 passed on PR #26 head 559c7476d13e42ec9d9190409b8e3b091407a1bb. These are independent checks, not a combined integration result or independent certification.
+**Current review branches:** PR #25 (security implementation) and PR #26 (product blueprint) remain separate draft, unmerged source branches. Combined review candidate PR #27 (`integration/pr25-pr26-validation`) integrates the reviewed trees at head `47f0a5c3dc5a1e4f85b565b27195e5d217195c0a`. Both branch-push CI run #43975153600 and pull-request CI run #43975210049 passed on that exact head; each run passed Node.js 22 and PostgreSQL 16 jobs. This is combined automated CI evidence only—not full financial acceptance, independent assurance, customer validation or production approval. All three PRs remain draft/unmerged.
 
 ## Initial validation approach
 
