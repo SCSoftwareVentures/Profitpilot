@@ -129,3 +129,11 @@ Additional changes since run #292:
 CI run: https://github.com/luxhustle01-ux/Profitpilot/actions/runs/43853493427
 
 This remains automated CI only. It does not implement private binary object storage, malware scanning, retention/deletion, production managed-secret custody, MFA/provisioning, shared rate limiting, production TLS/backup operations, privacy/legal clearance or independent penetration testing.
+
+
+### Final object-level authorization pass — 16 November 2026 (PR #25, commit 928f6c348595fb7172be55fdac963f6bc541c090)
+Hosted CI run **#308** passed both jobs on the exact commit above. In addition to the prior coverage, the authenticated API integration test now verifies that a tenant-C user cannot validate tenant-D's import batch or create a calculation using tenant-D contract/site identifiers. This complements the existing cross-tenant calculation retrieval, import-row ingestion and match-decision tests.
+
+Run: https://github.com/luxhustle01-ux/Profitpilot/actions/runs/43853843251
+
+This closes the current API's implemented object-IDOR test matrix for the exposed routes. It does not prove security for future endpoints, unimplemented modules or a compromised API process.
