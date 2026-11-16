@@ -114,7 +114,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
       subject:"ci-api-analyst",method:"POST",
       body:{sourceType:"payroll",fileName:"payroll.csv",sha256:"a".repeat(64),permissionReference:"CI permission",periodStart:"2026-02-31",periodEnd:"2026-03-01"}
     });
-    assert.equal(invalidDate.status,400,"impossible calendar dates must be rejected");
+    const invalidDateResponse=await invalidDate.text();
+    assert.equal(invalidDate.status,400,`impossible calendar dates must be rejected; API returned ${invalidDate.status}: ${invalidDateResponse}`);
 
     const importBody={sourceType:"payroll",fileName:"payroll.csv",sha256:"b".repeat(64),permissionReference:"CI permission",periodStart:"2026-02-01",periodEnd:"2026-02-28",tenantId:tenantB};
     const created=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-analyst",method:"POST",body:importBody});
