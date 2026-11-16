@@ -35,7 +35,7 @@
 ## Current automated test coverage
 The Node test suite covers money rounding, CSV parsing, quoted fields, escaped quotes, CRLF, malformed row widths/headings, invalid dates, invoice validation, payroll reconciliation, over-allocation, negative allocation, human confirmation and contract aggregation.
 
-**Execution status:** tests have been authored and a GitHub Actions workflow committed. No successful workflow result or test log has been retrieved in this audit. Therefore no pass count is claimed.
+**Execution status (16 November 2026):** the 19 test cases were executed locally using Node.js v22. The exact engine and test-suite source retrieved from the repository were run with `node --test`: **19 passed, 0 failed**. This is a local test result, not a GitHub-hosted Actions run. The GitHub Actions workflow and a pull-request trigger were committed, but the connected GitHub Actions run lookup returned no workflow runs or status checks; hosted CI therefore remains unverified. The invoice-date regular expression was also corrected after source review and the 19-test suite passed against the corrected implementation.
 
 ## Known implementation limits — not defects to conceal
 1. No production environment, API host, database instance or identity provider is configured.
