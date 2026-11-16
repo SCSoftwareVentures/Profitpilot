@@ -99,7 +99,7 @@ test("invoice matcher requires customer, contract, site, service period, currenc
   assert.equal(result.confidence,"HIGH");
   assert.equal(result.requiresHumanConfirmation,true);
   assert.equal(result.decision,"candidate");
-  assert.equal(matchInvoice({...row,site_id:undefined},contract).confidence,"MEDIUM");
+  assert.equal(matchInvoice({...row,site_id:undefined},contract).confidence,"LOW");
   assert.equal(matchInvoice({...row,currency:"NZD"},contract).evidence.currency,false);
   assert.equal(matchInvoice({...row,tax_basis:"unknown"},contract).evidence.taxBasis,false);
 });
