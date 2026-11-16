@@ -48,6 +48,18 @@ paths:
         "400": { description: Invalid metadata }
         "403": { description: Permission or role not sufficient }
         "409": { description: Conflicting duplicate or period }
+  /tenants/{tenantId}/imports/{batchId}/rows:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    post:
+      summary: Persist parsed invoice row objects for a source batch
+      description: Accepts 1–200 JSON row objects per request. Client-side parsing only; raw file upload/storage is not implemented.
+      responses:
+        "201": { description: Rows persisted; duplicates are idempotently ignored }
+        "400": { description: Invalid row payload }
+        "403": { description: Not authorised }
+        "404": { description: Batch not found }
   /tenants/{tenantId}/imports/{batchId}/validate:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -55,7 +67,7 @@ paths:
     post:
       summary: Validate source rows and produce held/review candidates
       responses:
-        "202": { description: Validation queued }
+        "202": { description: Invoice rows structurally validated into candidate/held states; payroll validation is not yet supported }
         "403": { description: Not authorised }
         "404": { description: Batch not found in this tenant }
   /tenants/{tenantId}/matches/{matchId}/decision:
