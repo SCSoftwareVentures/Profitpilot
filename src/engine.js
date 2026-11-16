@@ -118,8 +118,8 @@ export function allocatePayroll({pool,direct=[],approved=[],nonSite=0,excluded=0
   return {pool:safe(p),direct:safe(d),approvedAllocated:safe(a),nonSite:safe(n),excluded:safe(e),unallocated:safe(residual),siteTotals:Object.fromEntries(Object.entries(siteCents).map(([k,v])=>[k,fromCents(v)])),reconciles:valid&&d+a+n+e+residual===p,errors:valid?[]:["Invalid monetary input, negative bucket or allocation exceeds eligible payroll pool"]};
 }
 export function matchInvoice(row,contract){
-  const identity=!!row.site&&row.site===contract.site;
-  const period=!!row.date&&row.date>=contract.periodStart&&row.date<=contract.periodEnd;
+  const identity=typeof row.site==="string"&&row.site.trim()!==""&&row.site===contract.site;
+  const period=isIsoDate(row.date)&&isIsoDate(contract.periodStart)&&isIsoDate(contract.periodEnd)&&row.date>=contract.periodStart&&row.date<=contract.periodEnd;
   const amountCents=decimalCents(row.amount);
   const amount=amountCents!==null&&amountCents>0n;
   const evidence=[identity,period,amount].filter(Boolean).length;
