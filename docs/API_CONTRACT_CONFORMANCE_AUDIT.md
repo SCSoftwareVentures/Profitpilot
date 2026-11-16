@@ -165,3 +165,15 @@ All tests below are **PROPOSED / NOT RUN**.
 This audit is static. No OpenAPI parser, generated client, endpoint request, load test, deployed server or live database was exercised for this review. The existing CI success on PR #25 is not evidence that every API-SPEC test above passes.
 
 No application code, OpenAPI contract, schema, migration, customer data or production configuration was changed by this audit. Synthetic fixtures only. G5 remains binding.
+
+ 
+## OpenAPI exact-money and response-schema reconciliation — 17 November 2026
+
+The draft hardening branch updates `api/openapi.yaml` to document:
+- the operational `/health` endpoint and authenticated identity response;
+- contract list, import registration/idempotent replay, row ingestion, validation, match decision and calculation response shapes;
+- the explicit 422 payroll-ingestion-disabled state and 413 body-limit outcome;
+- a reusable `MoneyDecimal` schema: JSON string only, no exponent notation or binary floating-point number, maximum PostgreSQL `numeric(14,2)` magnitude and scale;
+- calculation output fields with contribution and margin nullable while the result is incomplete, and the separately labelled indicative value.
+
+The OpenAPI server URL remains a placeholder and no service is deployed. This is contract documentation, not evidence that all proposed product endpoints exist. Payroll ingestion, variation management, export, membership discovery and private binary upload remain unimplemented.
