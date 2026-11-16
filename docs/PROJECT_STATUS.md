@@ -87,9 +87,14 @@ The product-blueprint branch now also contains:
 
 These documents improve preparation and make the remaining work actionable. They do not provide missing customer evidence, specialist sign-offs, signed G5 approval, implementation or production readiness.
 
-Latest CI on the prior docs-only head 559c7476d13e42ec9d9190409b8e3b091407a1bb (run #347) passed both configured jobs. The latest documentation commit passed run #347 on its exact head.
+Latest CI on product-blueprint head `a72c03386b08cf4c18ef42573bf1b790c81be211` (run #355, 17 November 2026) passed both configured jobs: Verify (Node.js 22) and PostgreSQL migrations/tenant RLS, including the configured authenticated API integration and container checks. This is CI evidence for the PR #26 branch only; it is not combined-branch validation, production readiness or execution of the proposed financial acceptance suite.
 
 
 ## API contract conformance review — 17 November 2026
 
 Added `docs/API_CONTRACT_CONFORMANCE_AUDIT.md`, a static comparison of the Express route inventory and OpenAPI contract. It records response-schema gaps, import-state language, missing pagination/idempotency/concurrency definitions, route-role matrix requirements and 16 proposed contract tests. This is not a runtime test or implementation. No API/OpenAPI code or production feature was changed.
+
+
+## Owner test environment note — 17 November 2026
+
+A separate downloadable HTML owner demonstration was supplied in the conversation. It is a local, standalone synthetic calculator and evidence-threshold walkthrough. It is not connected to this repository's API/database, does not implement authentication, tenant isolation, imports or persistence, and is not evidence that the financial engine has passed acceptance. Do not use real customer or employee information in it.

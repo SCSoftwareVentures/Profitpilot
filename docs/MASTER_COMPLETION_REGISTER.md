@@ -208,3 +208,10 @@ PR #26 head 559c7476d13e42ec9d9190409b8e3b091407a1bb completed CI run #347 succe
 ## 12. API contract conformance audit
 
 A static Express/OpenAPI comparison is recorded in [API Contract Conformance Audit](API_CONTRACT_CONFORMANCE_AUDIT.md). It covers the nine observed route declarations (including the operational health route), status/response schema gaps, import lifecycle terminology, pagination, idempotency, concurrency, role matrix and 16 proposed contract tests. These tests are NOT RUN; no runtime API or generated-client conformance is claimed.
+
+
+## 13. Latest CI and owner demonstration — 17 November 2026
+
+PR #26 latest head: `a72c03386b08cf4c18ef42573bf1b790c81be211`. Workflow run #355 completed successfully on that exact commit. Both configured jobs passed: Verify (Node.js 22) and PostgreSQL migrations/tenant RLS. PR #25 remains a separate open draft at `17178768002b978d6f5bd76f0192b2bbff7a4355`; neither PR is merged. No combined candidate has been validated.
+
+A standalone synthetic HTML owner demonstration was provided in the conversation. It is not connected to the API or database and is not a deployed product. It does not test authentication, tenant isolation, import processing, persistence or the full financial engine. Its output must not be used as business accounting evidence.
