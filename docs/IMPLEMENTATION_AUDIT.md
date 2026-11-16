@@ -87,10 +87,9 @@ The following evidence applies to the review branch only. It does not describe `
 - CI masks ephemeral tenant-signing and database-role credentials.
 
 ### Verified CI evidence
-- Latest review-branch CI run **#212** (commit `cfc93637ca75c7c0fcf75aa7b0c9c16b3a7e8380`) passed Node.js 22 verification, PostgreSQL migrations and tenant RLS/catalog tests, authenticated API tests, Docker build and container health check.
-- Run **#210** passed all-table isolation and tenant-object IDOR coverage.
-- Run **#204** passed dependency lockfile generation and dependency audit before the lockfile was committed.
-- Earlier runs cancelled by newer commits are not counted as failures or passes; use the final completed run above as the authoritative evidence for this branch.
+- Latest completed review-branch CI run **#226** (commit `b5ada13b6c70dbac09114378ce7fb847388bb6c3`) passed Node.js 22 verification, locked dependency installation, production dependency audit, PostgreSQL migrations, all-table RLS/catalog tests, authenticated API tests, runtime-role isolation, Docker build and container health check.
+- The run is ephemeral CI evidence for the exact reviewed commit. Later branch changes require their own completed passing run before they can be treated as verified.
+- Earlier runs cancelled by newer commits are not counted as failures or passes.
 - These are automated ephemeral CI tests. They are not an independent penetration test, production deployment, or security certification.
 
 ### Remaining release blockers
