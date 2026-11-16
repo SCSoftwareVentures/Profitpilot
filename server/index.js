@@ -103,6 +103,12 @@ app.get("/v1/tenants/:tenantId/calculations/:runId",membership,async(req,res,nex
  if(!result.rowCount)return res.status(404).json({error:"Calculation run not found"});
  res.json(result.rows[0]);
  }catch(e){next(e);}});
+ 
+app.get("/v1/tenants/:tenantId/calculations/:runId",membership,async(req,res,next)=>{try{
+ const result=await withTenant(req.membership.tenantId,client=>client.query("SELECT id,contract_id,site_id,period_start,period_end,formula_version,inputs,outputs,completeness,created_at FROM calculation_runs WHERE id=$1 AND tenant_id=$2",[req.params.runId,req.membership.tenantId]));
+ if(!result.rowCount)return res.status(404).json({error:"Calculation run not found"});
+ res.json(result.rows[0]);
+ }catch(e){next(e);}});
 
 app.use((err,req,res,next)=>{const id=randomUUID();process.stderr.write(JSON.stringify({event:"request_error",id,message:err.message})+"\n");res.status(500).json({error:"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
