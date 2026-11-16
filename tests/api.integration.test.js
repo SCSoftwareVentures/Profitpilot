@@ -221,6 +221,36 @@ test("authenticated API enforces tenant membership, role permissions and import 
     });
     assert.equal(invalidDate.status,400,"impossible calendar dates must be rejected");
 
+    // Complete synthetic source evidence proves contract tax-basis mismatch is
+    // blocked only after both revenue and payroll inputs are otherwise present.
+    const reviewerUser="abababab-abab-4bab-8bab-abababababac";
+    const calculationSite="cdcdcdcd-cdcd-4cdc-8cdc-cdcdcdcdcdcd";
+    await admin.query("INSERT INTO users(id,auth_subject,email,status) VALUES ($1,'ci-api-reviewer','reviewer@example.invalid','active') ON CONFLICT(id) DO NOTHING",[reviewerUser]);
+    await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES ($1,$2,'reviewer','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role='reviewer',status='active'",[tenantA,reviewerUser]);
+    await admin.query("UPDATE contract_versions SET effective_to='2026-02-28' WHERE id='acacacac-acac-4cac-8cac-acacacacacac'");
+    await admin.query("INSERT INTO sites(id,tenant_id,business_id,name) VALUES ($1,$2,$3,'CI tax-basis site') ON CONFLICT(id) DO NOTHING",[calculationSite,tenantA,businessA]);
+    await admin.query("INSERT INTO contract_versions(id,tenant_id,contract_id,version_no,effective_from,effective_to,price,currency,tax_basis,billing_basis,approved_by,approved_at) VALUES ('dededede-dede-4ded-8ded-dededededede',$1,$2,2,'2026-03-01','2026-03-31',100,'AUD','gst_exclusive','monthly',$3,now()) ON CONFLICT(id) DO NOTHING",[tenantA,contractA,reviewerUser]);
+    const invoiceBatch="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const payrollBatch="f0f0f0f0-f0f0-40f0-80f0-f0f0f0f0f0f0";
+    await admin.query("INSERT INTO import_batches(id,tenant_id,source_type,source_period_start,source_period_end,permission_ref,status,file_sha256,file_name,created_by) VALUES ($1,$2,'customer_invoice','2026-03-01','2026-03-31','CI synthetic permission','review',$3,'tax-invoice.csv',$4),($5,$2,'payroll','2026-03-01','2026-03-31','CI synthetic permission','registered',$6,'tax-payroll.csv',$4) ON CONFLICT(id) DO NOTHING",[invoiceBatch,tenantA,"1".repeat(64),userA,payrollBatch,"2".repeat(64)]);
+    const invoiceRaw="f1f1f1f1-f1f1-41f1-81f1-f1f1f1f1f1f1";
+    const payrollRaw="f2f2f2f2-f2f2-42f2-82f2-f2f2f2f2f2f2";
+    await admin.query("INSERT INTO raw_import_rows(id,tenant_id,batch_id,row_number,payload) VALUES ($1,$2,$3,1,'{}'::jsonb),($4,$2,$5,1,'{}'::jsonb) ON CONFLICT(id) DO NOTHING",[invoiceRaw,tenantA,invoiceBatch,payrollRaw,payrollBatch]);
+    const payrollPool="f3f3f3f3-f3f3-43f3-83f3-f3f3f3f3f3f3";
+    const payrollSource="f4f4f4f4-f4f4-44f4-84f4-f4f4f4f4f4f4";
+    const allocationRun="f5f5f5f5-f5f5-45f5-85f5-f5f5f5f5f5f5";
+    await admin.query("INSERT INTO payroll_pools(id,tenant_id,batch_id,period_start,period_end,total_amount,currency,source_ref) VALUES ($1,$2,$3,'2026-03-01','2026-03-31',50,'AUD','CI payroll pool') ON CONFLICT(id) DO NOTHING",[payrollPool,tenantA,payrollBatch]);
+    await admin.query("INSERT INTO payroll_source_rows(id,tenant_id,payroll_pool_id,raw_import_row_id,source_row_key,row_sha256,amount,currency) VALUES ($1,$2,$3,$4,'march-payroll-row',repeat('a',64),50,'AUD') ON CONFLICT(id) DO NOTHING",[payrollSource,tenantA,payrollPool,payrollRaw]);
+    await admin.query("INSERT INTO invoices(id,tenant_id,direction,invoice_number,invoice_date,total_amount,currency,tax_basis,source_ref) VALUES ('f6f6f6f6-f6f6-46f6-86f6-f6f6f6f6f6f6',$1,'customer','CI-TAX-1','2026-03-15',100,'AUD','gst_inclusive','CI invoice') ON CONFLICT(id) DO NOTHING",[tenantA]);
+    await admin.query("INSERT INTO invoice_lines(id,tenant_id,invoice_id,line_number,description,amount,source_row_id) VALUES ('f7f7f7f7-f7f7-47f7-87f7-f7f7f7f7f7f7',$1,'f6f6f6f6-f6f6-46f6-86f6-f6f6f6f6f6f6',1,'March service',100,$2) ON CONFLICT(id) DO NOTHING",[tenantA,invoiceRaw]);
+    await admin.query("INSERT INTO match_reviews(id,tenant_id,invoice_line_id,contract_id,site_id,service_period_start,service_period_end,confidence,decision,evidence) VALUES ('f8f8f8f8-f8f8-48f8-88f8-f8f8f8f8f8f8',$1,'f7f7f7f7-f7f7-47f7-87f7-f7f7f7f7f7f7',$2,$3,'2026-03-01','2026-03-31','HIGH','confirmed','{}'::jsonb) ON CONFLICT(id) DO NOTHING",[tenantA,contractA,calculationSite]);
+    await admin.query("INSERT INTO allocation_runs(id,tenant_id,payroll_pool_id,method_version,status,direct_amount,allocated_amount,non_site_amount,excluded_amount,residual_amount,reviewer_id) VALUES ($1,$2,$3,'CI-currency-gate','draft',50,0,0,0,0,$4) ON CONFLICT(id) DO NOTHING",[allocationRun,tenantA,payrollPool,reviewerUser]);
+    await admin.query("INSERT INTO allocation_lines(tenant_id,allocation_run_id,site_id,bucket_type,amount,source_ref,payroll_source_row_id) VALUES ($1,$2,$3,'direct',50,'CI source row',$4)",[tenantA,allocationRun,calculationSite,payrollSource]);
+    await admin.query("UPDATE allocation_runs SET status='confirmed' WHERE id=$1",[allocationRun]);
+    const mismatchedTaxCalculation=await request(`/v1/tenants/${tenantA}/calculations`,{subject:"ci-api-analyst",method:"POST",body:{contractId:contractA,siteId:calculationSite,periodStart:"2026-03-01",periodEnd:"2026-03-31"}});
+    assert.equal(mismatchedTaxCalculation.status,422);
+    assert.match((await mismatchedTaxCalculation.json()).error,/contract-mismatched invoice tax\/currency basis/,"otherwise complete inputs with invoice tax basis different from the approved contract version must be blocked");
+
     const importBody={sourceType:"payroll",fileName:"payroll.csv",sha256:"b".repeat(64),permissionReference:"CI permission",periodStart:"2026-02-01",periodEnd:"2026-02-28",tenantId:tenantB};
     const created=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-analyst",method:"POST",body:importBody});
     assert.equal(created.status,201);
