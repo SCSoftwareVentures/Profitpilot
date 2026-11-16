@@ -91,7 +91,8 @@ export function validateInvoiceRows(rows){
     if(typeof r.invoice_id!=="string"||!r.invoice_id.trim())errors.push("Missing invoice_id");
     if(typeof r.site!=="string"||!r.site.trim())errors.push("Missing site");
     if(!isIsoDate(r.date))errors.push("Invalid date (expected a real YYYY-MM-DD date)");
-    if(!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(amountText)||/^0(?:\.0{1,2})?$/.test(amountText))errors.push("Amount must be a positive canonical decimal with at most two fractional digits");
+    const invoiceCents=decimalCents(amountText);
+    if(invoiceCents===null||invoiceCents<=0n)errors.push("Amount must be a positive canonical decimal within numeric(14,2) range");
     return {rowNumber:r.__rowNumber||i+2,record:r,errors,status:errors.length?"held":"pending_review"};
   });
 }
@@ -171,7 +172,8 @@ export function normalizePayrollRows(rows){
     const amountText=typeof row.amount==="string"?row.amount:"";
     const currency=typeof row.currency==="string"?row.currency.trim().toUpperCase():"";
     if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(key))errors.push("source_row_key must be an opaque stable key (1–128 safe characters)");
-    if(!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(amountText))errors.push("amount must be a non-negative decimal with at most two fractional digits");
+    const payrollCents=decimalCents(amountText);
+    if(payrollCents===null||payrollCents<0n)errors.push("amount must be a non-negative canonical decimal within numeric(14,2) range");
     if(!/^[A-Z]{3}$/.test(currency))errors.push("currency must be a three-letter ISO-style code");
     if(key&&seen.has(key))errors.push("Duplicate source_row_key within this batch");
     if(key)seen.add(key);
