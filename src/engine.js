@@ -1,6 +1,40 @@
 // ProfitPilot prototype calculation and import engine.
 // Deterministic demo logic only. Do not use with real payroll/customer data.
-export const money = value => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+function decimalCents(value){
+  const text=typeof value==="number"?(Number.isFinite(value)?String(value):""):typeof value==="string"?value.trim():"";
+  const match=text.match(/^([+-]?)(\\d+)(?:\\.(\\d*))?(?:e([+-]?\\d+))?$/i);
+  if(!match)return null;
+  const exponent=Number(match[4]||0);
+  if(!Number.isInteger(exponent)||Math.abs(exponent)>100)return null;
+  const fraction=match[3]||"";
+  const digits=BigInt((match[2]+fraction).replace(/^0+(?=\\d)/,""));
+  const scale=fraction.length-exponent;
+  let cents;
+  if(scale<=2)cents=digits*10n**BigInt(2-scale);
+  else{
+    const divisor=10n**BigInt(scale-2);
+    const quotient=digits/divisor;
+    const remainder=digits%divisor;
+    cents=quotient+(remainder*2n>=divisor?1n:0n);
+  }
+  return match[1]==="-"?-cents:cents;
+}
+const fromCents=cents=>Number(cents)/100;
+function sumCents(values){
+  let total=0n;
+  for(const value of values){const cents=decimalCents(value);if(cents===null)return null;total+=cents;}
+  return total;
+}
+function ratioCents(numerator,denominator){
+  if(denominator===0n)return null;
+  const negative=(numerator<0n)!==(denominator<0n);
+  const n=numerator<0n?-numerator:numerator;
+  const d=denominator<0n?-denominator:denominator;
+  const quotient=n/d,remainder=n%d;
+  const rounded=quotient+(remainder*2n>=d?1n:0n);
+  return negative?-rounded:rounded;
+}
+export const money=value=>{const cents=decimalCents(value);return cents===null?NaN:fromCents(cents);};
 export function isIsoDate(value){
   if(typeof value!=="string"||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value))return false;
   const date=new Date(value+"T00:00:00.000Z");
@@ -13,7 +47,7 @@ export function parseCsv(text) {
     if(c==='"' && quoted && n==='"'){cell+='"';i++;}
     else if(c==='"'){quoted=!quoted;}
     else if(c===',' && !quoted){row.push(cell);cell="";}
-    else if((c==="\n"||c==="\r")&&!quoted){if(c==="\r"&&n==="\n")i++;row.push(cell);if(row.some(v=>v.trim()!==""))rows.push(row);row=[];cell="";}
+    else if((c==="\\n"||c==="\\r")&&!quoted){if(c==="\\r"&&n==="\\n")i++;row.push(cell);if(row.some(v=>v.trim()!==""))rows.push(row);row=[];cell="";}
     else cell+=c;
   }
   if(quoted) throw new Error("CSV contains an unclosed quoted field.");
@@ -39,12 +73,20 @@ export function validateInvoiceRows(rows){
   });
 }
 export function allocatePayroll({pool,direct=[],approved=[],nonSite=0,excluded=0}){
-  const p=money(pool),d=money(direct.reduce((s,x)=>s+Number(x.amount||0),0)),a=money(approved.reduce((s,x)=>s+Number(x.amount||0),0)),n=money(nonSite),e=money(excluded);
-  const residual=money(p-d-a-n-e);
-  const siteTotals={};
-  for(const x of [...direct,...approved])siteTotals[x.site]=(siteTotals[x.site]||0)+Number(x.amount||0);
-  const valid=[p>=0,d>=0,a>=0,n>=0,e>=0,residual>=0,Object.values(siteTotals).every(v=>v>=0)];
-  return {pool:p,direct:d,approvedAllocated:a,nonSite:n,excluded:e,unallocated:residual,siteTotals:Object.fromEntries(Object.entries(siteTotals).map(([k,v])=>[k,money(v)])),reconciles:valid.every(Boolean)&&money(d+a+n+e+residual)===p,errors:valid.every(Boolean)?[]:["Negative pool, bucket or allocation exceeds eligible payroll pool"]};
+  const p=decimalCents(pool),d=sumCents(direct.map(x=>x.amount??0)),a=sumCents(approved.map(x=>x.amount??0)),n=decimalCents(nonSite),e=decimalCents(excluded);
+  const validInputs=[p,d,a,n,e].every(x=>x!==null);
+  const residual=validInputs?p-d-a-n-e:null;
+  const siteCents={};
+  let sitesValid=true;
+  for(const x of [...direct,...approved]){
+    const amount=decimalCents(x.amount??0);
+    if(amount===null){sitesValid=false;continue;}
+    const key=String(x.site??"");
+    siteCents[key]=(siteCents[key]||0n)+amount;
+  }
+  const valid=validInputs&&p>=0n&&d>=0n&&a>=0n&&n>=0n&&e>=0n&&residual>=0n&&sitesValid&&Object.values(siteCents).every(v=>v>=0n);
+  const safe=v=>v===null?NaN:fromCents(v);
+  return {pool:safe(p),direct:safe(d),approvedAllocated:safe(a),nonSite:safe(n),excluded:safe(e),unallocated:safe(residual),siteTotals:Object.fromEntries(Object.entries(siteCents).map(([k,v])=>[k,fromCents(v)])),reconciles:valid&&d+a+n+e+residual===p,errors:valid?[]:["Invalid monetary input, negative bucket or allocation exceeds eligible payroll pool"]};
 }
 export function matchInvoice(row,contract){
   const identity=!!row.site&&row.site===contract.site;
@@ -55,10 +97,19 @@ export function matchInvoice(row,contract){
   return {contractId:contract.id,confidence,evidence:{identity,period,amount},requiresHumanConfirmation:true};
 }
 export function summariseContracts(contracts){
-  return contracts.map(c=>({...c,revenue:money(c.revenue),cost:money(c.cost),contribution:money(c.revenue-c.cost),margin:c.revenue?money((c.revenue-c.cost)/c.revenue*100):null}));
+  return contracts.map(c=>{
+    const revenue=decimalCents(c.revenue),cost=decimalCents(c.cost);
+    if(revenue===null||cost===null)return {...c,revenue:NaN,cost:NaN,contribution:NaN,margin:null};
+    const contribution=revenue-cost;
+    const margin=revenue?ratioCents(contribution*10000n,revenue):null;
+    return {...c,revenue:fromCents(revenue),cost:fromCents(cost),contribution:fromCents(contribution),margin:margin===null?null:fromCents(margin)};
+  });
 }
 export function aggregateMetrics(contracts){
   const rows=summariseContracts(contracts);
-  const revenue=money(rows.reduce((s,r)=>s+r.revenue,0)),cost=money(rows.reduce((s,r)=>s+r.cost,0));
-  return {revenue,cost,contribution:money(revenue-cost),margin:revenue?money((revenue-cost)/revenue*100):null,contracts:rows};
+  const revenue=sumCents(rows.map(r=>r.revenue)),cost=sumCents(rows.map(r=>r.cost));
+  if(revenue===null||cost===null)return {revenue:NaN,cost:NaN,contribution:NaN,margin:null,contracts:rows};
+  const contribution=revenue-cost;
+  const margin=revenue?ratioCents(contribution*10000n,revenue):null;
+  return {revenue:fromCents(revenue),cost:fromCents(cost),contribution:fromCents(contribution),margin:margin===null?null:fromCents(margin),contracts:rows};
 }
