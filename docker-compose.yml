@@ -56,3 +56,4 @@ services:
     restart: unless-stopped
 volumes:
   profitpilot_pg:
+      - ./database/migrations/009_import_metadata_status.sql:/docker-entrypoint-initdb.d/011-import-metadata-status.sql:ro
