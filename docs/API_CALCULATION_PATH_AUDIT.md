@@ -171,3 +171,26 @@ PR #25 head `ff354de4418b4d471ca0e8cd881af4f9acf5ef78` passed CI run #4397350220
 The calculation route now checks payroll allocation currency as well as invoice currency against the effective contract version. It rejects mixed payroll currencies and any payroll currency that differs from the contract currency. A synthetic API integration fixture creates a valid source-row payroll pool and confirmed site allocation in USD against an AUD contract, then verifies the calculation is blocked. A separate complete synthetic fixture verifies invoice GST-basis mismatch is also blocked.
 
 PR #25 head `ce168020eb49667616e5c36f1cc9b324f92c22b5` passed CI run #43974141222. These are targeted negative integration cases, not the complete calculation acceptance suite, accounting policy approval or independent audit.
+
+
+## 9. Combined-candidate source review — PR #27, 17 November 2026
+
+**Reviewed ref:** combined PR #27 head `47f0a5c3dc5a1e4f85b565b27195e5d217195c0a`.  
+**Method:** static inspection of `server/index.js`, `src/engine.js`, database schema/migrations and the current integration/unit tests; CI job evidence checked separately. This is not independent accounting validation.
+
+The earlier findings API-CALC-01 and API-CALC-02 are superseded for this combined candidate in the following limited sense:
+
+- Migration 010 creates the tenant-scoped `payroll_source_rows` table and links append-only `allocation_lines` to source-row provenance. Migration 011 adds confirmation-time integrity checks. The calculation query now joins the migrated allocation ledger rather than relying on a nonexistent table.
+- The calculation route parses database decimal text into integer BigInt cents and formats the difference back to canonical decimal text. Invoice validation uses strict decimal syntax. Cardinality fields are converted to Number only for row counts, not monetary arithmetic.
+- The route does not emit a definitive contribution or margin while its model is incomplete: `contribution` and `marginPercent` are null; the separately named `indicativeContribution` is explicitly limited and accompanied by incompleteness/limitations metadata.
+- Migration 012 supplies contract-version tax-basis metadata; calculation blocks unknown or mismatched invoice tax basis. Integration tests cover targeted tax-basis and payroll-currency mismatch negatives.
+
+### Remaining calculation/payroll acceptance gaps
+
+1. **Payroll normalization exactness:** `normalizePayrollRows` currently accepts a finite JavaScript-number `amount` as well as a string. Converting an already-rounded binary floating-point value to text cannot recover the original source decimal. Before enabling ingestion, accept only canonical source decimal strings and test rejection of numeric inputs, exponent notation, unsafe magnitudes and malformed values.
+2. **Payroll workflow:** the normalizer is a pure helper. There is no complete privacy-safe payroll upload/parse/mapping/review/allocation/confirmation API. Payroll ingestion remains disabled.
+3. **Completeness:** requiring at least one confirmed invoice line and one confirmed payroll allocation line is not a source manifest or proof that all eligible revenue and cost categories are present. The current output correctly labels itself incomplete and withholds headline contribution/margin, but a versioned source-coverage policy and explicit expected-source reconciliation are still needed.
+4. **Accounting policy:** tax basis, GST treatment, rounding, credits/reversals, FX conversion, service-period attribution and payroll inclusion policy require named qualified approval. Migration metadata is not a substitute for that approval.
+5. **Acceptance evidence:** targeted authenticated API regression cases and the configured Node/PostgreSQL CI pass do not execute the full API-CALC-T01–T14 set or the broader DEC/TAX/PAY/PAYLED/INV/CON/VAR/IMP and property-based suites. Those remain NOT RUN as a complete suite.
+
+Do not represent the calculation output as audited profit, complete margin, tax advice or payroll processing. Keep payroll ingestion disabled and preserve the G5/release gate.
