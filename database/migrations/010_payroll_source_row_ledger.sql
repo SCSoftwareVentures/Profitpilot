@@ -25,7 +25,7 @@ ALTER TABLE payroll_source_rows FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON payroll_source_rows
  USING(tenant_id=private.current_tenant_id()) WITH CHECK(tenant_id=private.current_tenant_id());
 CREATE FUNCTION private.validate_payroll_source_row_provenance()
-RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public,private AS $
+RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public,private AS $provenance$
 DECLARE pool_batch uuid; raw_batch uuid; batch_type text;
 BEGIN
  SELECT pp.batch_id,ib.source_type INTO pool_batch,batch_type
@@ -44,7 +44,7 @@ BEGIN
  END IF;
  RETURN NEW;
 END;
-$;
+$provenance$;
 CREATE TRIGGER payroll_source_rows_validate_provenance
 BEFORE INSERT ON payroll_source_rows
 FOR EACH ROW EXECUTE FUNCTION private.validate_payroll_source_row_provenance();
