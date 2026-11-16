@@ -20,7 +20,7 @@ The first delivery mode is a concierge validation service using secure, authoris
 - Express API scaffold with JWT/JWKS authentication, tenant membership and role checks
 - PostgreSQL schema, tenant RLS migration and ordered initialization scripts
 - Import row persistence, invoice validation decisions, human-reviewed match decisions and evidence-gated calculation endpoints
-- Node.js 22 automated test suite and GitHub Actions CI
+- Node.js 22 automated test suite and GitHub Actions CI, including PostgreSQL 16 migration execution and a basic tenant RLS integration check
 
 ## What is not established
 
