@@ -109,9 +109,9 @@ test("invoice validation uses strict decimal syntax without Number coercion",()=
   assert.equal(validateInvoiceRows([{...base,amount:"100.00"}])[0].status,"pending_review");
 });
 
-test("money rejects amounts whose cent representation cannot be safely returned as a JavaScript number",()=>{
-  assert.equal(Number.isNaN(money("90071992547409.92")),true);
-  assert.equal(money("90071992547409.91"),90071992547409.9);
+test("money preserves the full supported PostgreSQL numeric(14,2) range exactly",()=>{
+  assert.equal(money("999999999999.99"),"999999999999.99");
+  assert.equal(Number.isNaN(money("1000000000000.00")),true);
 });
 
 test("contract aggregation blocks mixed currencies, tax bases and reporting periods",()=>{
@@ -129,4 +129,4 @@ test("contract aggregation blocks mixed currencies, tax bases and reporting peri
 
 test("invoice validator rejects JSON numeric amounts before any float coercion",()=>{const row={invoice_id:"inv-1",site:"A",date:"2026-11-01",amount:0.1};assert.equal(validateInvoiceRows([row])[0].status,"held");});
 test("payroll normalizer rejects JSON numeric and exponent amounts",()=>{const rows=normalizePayrollRows([{source_row_key:"n1",amount:0.1,currency:"AUD"},{source_row_key:"n2",amount:"1e3",currency:"AUD"},{source_row_key:"n3",amount:"01.00",currency:"AUD"}]);assert.deepEqual(rows.map(x=>x.status),["held","held","held"]);});
-test("financial helpers preserve large supported cent values as decimal strings",()=>{assert.equal(money("999999999999.99"),"999999999999.99");assert.equal(Number.isNaN(money("1000000000000.00")),true);});
+
