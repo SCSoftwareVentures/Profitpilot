@@ -116,3 +116,16 @@ Additional regressions corrected in this pass:
 - Runtime-role catalogue audit now also checks that the role has no memberships and owns no application objects/schemas.
 
 This evidence supersedes the earlier CI run references for the current review branch. It remains automated CI, not an independent security assessment.
+
+
+### Follow-up verification — 16 November 2026 (PR #25, commit fc22a52167c1fc9a45f2a66d6c193f230a96a383)
+The latest review-branch CI run **#301** passed both jobs: Node.js 22 locked install, production dependency audit, syntax checks and unit tests; PostgreSQL 16 migrations, all-table tenant catalogue and fixture checks, authenticated API integration, object-level cross-tenant denial, role escalation denial, JWT/HMAC/rate-limit tests, production image build and restricted-container health check.
+
+Additional changes since run #292:
+- Request rate limiting now executes before JSON body parsing, so oversized/expensive request bodies are not parsed before the API limiter is applied.
+- Added an explicit negative API test proving an analyst cannot invoke reviewer-only invoice-match decision authority.
+- The final verified commit remains on the open draft PR #25 and has not been merged into main.
+
+CI run: https://github.com/luxhustle01-ux/Profitpilot/actions/runs/43853493427
+
+This remains automated CI only. It does not implement private binary object storage, malware scanning, retention/deletion, production managed-secret custody, MFA/provisioning, shared rate limiting, production TLS/backup operations, privacy/legal clearance or independent penetration testing.
