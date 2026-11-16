@@ -7,7 +7,7 @@ Tenant RLS now uses a short-lived HMAC-signed transaction context containing the
 ## Identity boundary
 Use a managed identity provider with OIDC/OAuth 2.0 Authorization Code + PKCE for browser clients. The application must not store raw passwords. Require MFA for privileged users; provide secure recovery, session revocation, rate limiting and account lifecycle controls.
 
-The database user identity is mapped from a verified provider subject, never from a client-supplied user ID or email string alone.
+The database user identity is mapped from a verified provider subject, never from a client-supplied user ID or email string alone. The global `users` table is protected by forced RLS: the runtime role can read only the row whose `auth_subject` matches the currently valid HMAC-signed tenant context. The runtime role has no insert, update or delete privileges on `users`; user provisioning remains an administrative operation.
 
 ## Tenant membership
 A user may belong to multiple tenants. Every request resolves the active tenant from a server-verified membership record. A tenant ID supplied by the browser is only a requested context, never proof of access.
@@ -76,7 +76,7 @@ Append-only events for login/security changes, membership, source upload/access,
 ## Required pre-production evidence
 - Identity-provider configuration and recovery tests.
 - Tenant-isolation negative test suite for all entities and API endpoints; production HMAC key custody, emergency revocation and recovery exercises; explicit threat model for API-process compromise.
-- RLS tests under the real application database role and connection pool.
+- RLS tests under the real application database role and connection pool, including self-only access to global identity rows.
 - Independent penetration test and remediation retest.
 - SAST, dependency and secret scanning.
 - File malware/parser tests.
