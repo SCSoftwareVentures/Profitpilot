@@ -3,12 +3,12 @@
 function decimalCents(value){
   const text=typeof value==="number"?(Number.isFinite(value)?String(value):""):typeof value==="string"?value.trim():"";
   if(text.length>128)return null;
-  const match=text.match(/^([+-]?)(\\d+)(?:\\.(\\d*))?(?:e([+-]?\\d+))?$/i);
+  const match=text.match(/^([+-]?)(\d+)(?:\.(\d*))?(?:e([+-]?\d+))?$/i);
   if(!match)return null;
   const exponent=Number(match[4]||0);
   if(!Number.isInteger(exponent)||Math.abs(exponent)>100)return null;
   const fraction=match[3]||"";
-  const digits=BigInt((match[2]+fraction).replace(/^0+(?=\\d)/,""));
+  const digits=BigInt((match[2]+fraction).replace(/^0+(?=\d)/,""));
   const scale=fraction.length-exponent;
   if(Math.abs(scale)>100)return null;
   let cents;
