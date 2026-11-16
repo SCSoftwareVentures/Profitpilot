@@ -252,6 +252,13 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const persistedInvoiceRow=await admin.query("SELECT payload->>'amount' AS amount FROM raw_import_rows WHERE batch_id=$1 AND row_number=1",[invoiceBatch]);
     assert.equal(persistedInvoiceRow.rows[0].amount,"100.00","a conflicting replay must not overwrite or replace original source evidence");
 
+    const secondChunk=await request(`/v1/tenants/${tenantA}/imports/${invoiceBatch}/rows`,{subject:"ci-api-analyst",method:"POST",body:{startRowNumber:2,rows:[{invoice_id:"INV-2",site:"Site A",date:"2026-02-11",amount:"50.00"}]}});
+    assert.equal(secondChunk.status,201,"subsequent import chunks must preserve original source row numbers");
+    const secondChunkRow=await admin.query("SELECT row_number FROM raw_import_rows WHERE batch_id=$1 AND payload->>'invoice_id'='INV-2'",[invoiceBatch]);
+    assert.equal(secondChunkRow.rows[0].row_number,2);
+    const invalidStartRow=await request(`/v1/tenants/${tenantA}/imports/${invoiceBatch}/rows`,{subject:"ci-api-analyst",method:"POST",body:{startRowNumber:0,rows:[{invoice_id:"INV-3"}]}});
+    assert.equal(invalidStartRow.status,400);
+
     const readerWrite=await request(`/v1/tenants/${tenantA}/imports`,{
       subject:"ci-api-reader",method:"POST",
       body:{...importBody,sha256:"c".repeat(64)}
