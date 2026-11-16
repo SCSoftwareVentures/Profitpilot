@@ -56,6 +56,15 @@ Further product, validation, architecture, roadmap and risk documentation will b
 - [Synthetic invoice CSV fixture](tests/fixtures/invoices_demo.csv)
 - [QA verification matrix and release gates](docs/VERIFICATION_MATRIX.md)
 
+## Backend and development
+
+- [Local development guide](docs/LOCAL_DEVELOPMENT.md)
+- [Implementation audit and defect register](docs/IMPLEMENTATION_AUDIT.md)
+- [Database migrations](database/migrations/)
+- [GitHub Actions CI](.github/workflows/ci.yml)
+
+The API and database are implementation scaffolds, not a deployed service. Review the audit and development guide before attempting to run them.
+
 ## Visual prototypes
 
 - [Simplified dashboard concept](demo/dashboard.html) — responsive static HTML with fictional placeholder figures; no live data or connected services.
