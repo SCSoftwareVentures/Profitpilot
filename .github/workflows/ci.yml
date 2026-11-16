@@ -35,6 +35,9 @@ jobs:
       - name: Generate reproducible dependency lockfile
         run: npm install --package-lock-only --ignore-scripts --no-audit --no-fund
 
+      - name: Audit resolved production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Retain generated lockfile for repository commit
         uses: actions/upload-artifact@v4
         with:
@@ -73,8 +76,12 @@ jobs:
 
       - name: Generate ephemeral tenant context signing key
         run: |
-          echo "TENANT_CONTEXT_HMAC_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
-          echo "POSTGRES_APP_PASSWORD=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          TENANT_CONTEXT_HMAC_SECRET="$(openssl rand -hex 32)"
+          POSTGRES_APP_PASSWORD="$(openssl rand -hex 32)"
+          echo "::add-mask::$TENANT_CONTEXT_HMAC_SECRET"
+          echo "::add-mask::$POSTGRES_APP_PASSWORD"
+          echo "TENANT_CONTEXT_HMAC_SECRET=$TENANT_CONTEXT_HMAC_SECRET" >> "$GITHUB_ENV"
+          echo "POSTGRES_APP_PASSWORD=$POSTGRES_APP_PASSWORD" >> "$GITHUB_ENV"
 
       - name: Apply schema, runtime role and migrations
         env:
