@@ -109,3 +109,8 @@ test("invoice validation uses strict decimal syntax without Number coercion",()=
     assert.equal(validateInvoiceRows([{...base,amount}])[0].status,"held",amount);
   assert.equal(validateInvoiceRows([{...base,amount:"100.00"}])[0].status,"pending_review");
 });
+
+test("money rejects amounts whose cent representation cannot be safely returned as a JavaScript number",()=>{
+  assert.equal(Number.isNaN(money("90071992547409.92")),true);
+  assert.equal(money("90071992547409.91"),90071992547409.9);
+});
