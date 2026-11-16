@@ -229,3 +229,12 @@ The project owner has named **Sammy Chehade** as the technical owner. This is a 
 PR #26 head `5faa5957493c7f8349300895e0d4b5dc3d61cc08` completed CI run #359 successfully. Both configured jobs passed. The result applies only to PR #26's current documentation branch and its own base. It is not combined-branch validation and does not execute the proposed full financial acceptance suite.
 
 The G5 record has been updated with the named technical owner and explicit outstanding fields. G5 remains **DEFERRED / NOT AUTHORISED** because G0–G4 evidence, competitive preconditions, budget, delivery capacity, legal/privacy plan, specialist approvals and formal decision-maker signature are not established. No software build, merge, deployment, real-data intake or payment activity is authorised.
+
+
+## 16. PR #25 security and payroll ledger verification — 17 November 2026
+
+PR #25 remains separate from this product/documentation branch. Its current reviewed head is `ce66bcf6f9a705532313ce6e71892839a3b55344`; hosted CI run #43971209376 completed successfully on that exact commit. Both Node.js 22 and PostgreSQL 16 jobs passed, including migrations, tenant/RLS/FK catalogue checks, restricted-role isolation, authenticated API integration, production API image build and container health check.
+
+Changes now present on PR #25 include the tenant-scoped immutable payroll source-row ledger, append-only allocation lines with per-source-row over-allocation protection, confirmation-time source/pool/currency/summary/reviewer reconciliation, rejection of legacy unlinked allocation lines, and a database provenance guard tying payroll evidence to the same payroll import batch. Payroll ingestion remains blocked in the API until privacy-safe mapping and reviewer workflow exist. The calculation route uses cent-based decimal arithmetic, blocks partial payroll and invoice service-period overlaps, and deliberately withholds definitive contribution/margin because the cost model remains incomplete.
+
+**Evidence boundary:** this is a passing CI result on PR #25 alone. It does not validate a combined PR #25/#26 candidate, the proposed full financial acceptance/property suites, a production environment, independent penetration testing, privacy/legal clearance, customer discovery or commercial gates. PR #25 and PR #26 remain open drafts; neither is merged. G0–G4 evidence remains outstanding and G5 remains DEFERRED / NOT AUTHORISED.
