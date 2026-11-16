@@ -1,0 +1,5 @@
+invoice_id,site,date,amount
+DEMO-INV-001,Riverside,2026-11-03,1850.00
+DEMO-INV-002,Northside,2026-11-08,1240.50
+DEMO-INV-003,Harbour,2026-11-12,2100.00
+DEMO-INV-004,,not-a-date,-45.00
