@@ -2,11 +2,12 @@ import {createRemoteJWKSet, jwtVerify} from "jose";
 
 let jwks;
 let jwksUrl;
+function cIssuerIsHttps(value){try{return new URL(value).protocol==="https:";}catch{return false;}}
 function config(){
  const {AUTH_ISSUER,AUTH_AUDIENCE,AUTH_JWKS_URL,NODE_ENV}=process.env;
  if(!AUTH_ISSUER||!AUTH_AUDIENCE||!AUTH_JWKS_URL)throw new Error("Authentication is not configured");
  const url=new URL(AUTH_JWKS_URL);
- if(NODE_ENV==="production"&&url.protocol!=="https:")throw new Error("Production JWKS endpoint must use HTTPS");
+ if(NODE_ENV==="production"&&(url.protocol!=="https:"||!cIssuerIsHttps(AUTH_ISSUER)))throw new Error("Production issuer and JWKS endpoints must use HTTPS");
  return {issuer:AUTH_ISSUER,audience:AUTH_AUDIENCE,url};
 }
 export function authRequired(){
@@ -27,11 +28,11 @@ export function authRequired(){
     maxTokenAge:"15m",
     clockTolerance:5
    });
-   if(typeof payload.sub!=="string"||!payload.sub)return res.status(401).json({error:"Invalid identity subject"});
+   if(typeof payload.sub!=="string"||!payload.sub||payload.sub.length>255)return res.status(401).json({error:"Invalid identity subject"});
    req.identity={subject:payload.sub,email:typeof payload.email==="string"?payload.email:null};
    next();
   }catch(e){
-   const unavailable=e.message==="Authentication is not configured"||e.message==="Production JWKS endpoint must use HTTPS";
+   const unavailable=e.message==="Authentication is not configured"||e.message==="Production issuer and JWKS endpoints must use HTTPS";
    res.status(unavailable?503:401).json({error:unavailable?"Authentication unavailable":"Invalid or expired access token"});
   }
  };
