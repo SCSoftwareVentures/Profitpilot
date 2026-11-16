@@ -220,3 +220,12 @@ A standalone synthetic HTML owner demonstration was provided in the conversation
 ## 14. CI run #357 — 17 November 2026
 
 The latest documentation refresh commit `e5fdf2ae84247b0dde84a7f79df0e31649da3cb6` completed CI run #357 successfully. Both configured jobs passed: Verify (Node.js 22) and PostgreSQL migrations/tenant RLS. The PostgreSQL job completed migration/schema checks, restricted runtime role RLS checks, authenticated API integration tests, production container image build and health endpoint verification. This is a configured CI pass on the PR #26 branch only. It does not prove full financial-engine correctness, independent security assurance, combined PR integration, production readiness or G0–G5 completion. PR #25 and PR #26 remain open draft pull requests and neither has been merged.
+
+
+## 15. Named technical owner and current CI — 17 November 2026
+
+The project owner has named **Sammy Chehade** as the technical owner. This is a recorded designation, not a recorded acceptance/signature or evidence of available delivery capacity.
+
+PR #26 head `5faa5957493c7f8349300895e0d4b5dc3d61cc08` completed CI run #359 successfully. Both configured jobs passed. The result applies only to PR #26's current documentation branch and its own base. It is not combined-branch validation and does not execute the proposed full financial acceptance suite.
+
+The G5 record has been updated with the named technical owner and explicit outstanding fields. G5 remains **DEFERRED / NOT AUTHORISED** because G0–G4 evidence, competitive preconditions, budget, delivery capacity, legal/privacy plan, specialist approvals and formal decision-maker signature are not established. No software build, merge, deployment, real-data intake or payment activity is authorised.
