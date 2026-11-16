@@ -162,6 +162,10 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(crossTenantCalculation.status,404,"a tenant member must not retrieve another tenant's calculation object by ID");
     const crossTenantBatch=await request("/v1/tenants/33333333-3333-4333-8333-333333333333/imports/13131313-1313-4313-8313-131313131313/rows",{subject:"isolation-tenant-c",method:"POST",body:{rows:[{invoice_id:"D-1"}]}});
     assert.equal(crossTenantBatch.status,404,"a tenant member must not append rows to another tenant's import batch");
+    const crossTenantValidate=await request("/v1/tenants/33333333-3333-4333-8333-333333333333/imports/13131313-1313-4313-8313-131313131313/validate",{subject:"isolation-tenant-c",method:"POST"});
+    assert.equal(crossTenantValidate.status,404,"a tenant member must not validate another tenant's import batch");
+    const crossTenantCalculationCreate=await request("/v1/tenants/33333333-3333-4333-8333-333333333333/calculations",{subject:"isolation-tenant-c",method:"POST",body:{contractId:"dddddddd-dddd-4ddd-8ddd-dddddddddddd",siteId:"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",periodStart:"2026-01-01",periodEnd:"2026-01-31"}});
+    assert.equal(crossTenantCalculationCreate.status,422,"a tenant member must not create a calculation using another tenant's contract/site IDs");
     const crossTenantMatch=await request("/v1/tenants/33333333-3333-4333-8333-333333333333/matches/25252525-2525-4525-8525-252525252525/decision",{subject:"isolation-reviewer-c",method:"POST",body:{decision:"confirmed",reason:"cross-tenant object test"}});
     assert.equal(crossTenantMatch.status,404,"a reviewer must not decide another tenant's match object by ID");
     const analystDecision=await request("/v1/tenants/33333333-3333-4333-8333-333333333333/matches/24242424-2424-4424-8424-242424242424/decision",{subject:"isolation-tenant-c",method:"POST",body:{decision:"confirmed",reason:"analyst role escalation test"}});
