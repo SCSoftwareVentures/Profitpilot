@@ -230,12 +230,12 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("UPDATE contract_versions SET effective_to='2026-02-28' WHERE id='acacacac-acac-4cac-8cac-acacacacacac'");
     await admin.query("INSERT INTO sites(id,tenant_id,business_id,name) VALUES ($1,$2,$3,'CI tax-basis site') ON CONFLICT(id) DO NOTHING",[calculationSite,tenantA,businessA]);
     await admin.query("INSERT INTO contract_versions(id,tenant_id,contract_id,version_no,effective_from,effective_to,price,currency,tax_basis,billing_basis,approved_by,approved_at) VALUES ('dededede-dede-4ded-8ded-dededededede',$1,$2,2,'2026-03-01','2026-03-31',100,'AUD','gst_exclusive','monthly',$3,now()) ON CONFLICT(id) DO NOTHING",[tenantA,contractA,reviewerUser]);
-    const invoiceBatch="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+    const taxEvidenceInvoiceBatch="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
     const payrollBatch="f0f0f0f0-f0f0-40f0-80f0-f0f0f0f0f0f0";
-    await admin.query("INSERT INTO import_batches(id,tenant_id,source_type,source_period_start,source_period_end,permission_ref,status,file_sha256,file_name,created_by) VALUES ($1,$2,'customer_invoice','2026-03-01','2026-03-31','CI synthetic permission','review',$3,'tax-invoice.csv',$4),($5,$2,'payroll','2026-03-01','2026-03-31','CI synthetic permission','registered',$6,'tax-payroll.csv',$4) ON CONFLICT(id) DO NOTHING",[invoiceBatch,tenantA,"1".repeat(64),userA,payrollBatch,"2".repeat(64)]);
+    await admin.query("INSERT INTO import_batches(id,tenant_id,source_type,source_period_start,source_period_end,permission_ref,status,file_sha256,file_name,created_by) VALUES ($1,$2,'customer_invoice','2026-03-01','2026-03-31','CI synthetic permission','review',$3,'tax-invoice.csv',$4),($5,$2,'payroll','2026-03-01','2026-03-31','CI synthetic permission','registered',$6,'tax-payroll.csv',$4) ON CONFLICT(id) DO NOTHING",[taxEvidenceInvoiceBatch,tenantA,"1".repeat(64),userA,payrollBatch,"2".repeat(64)]);
     const invoiceRaw="f1f1f1f1-f1f1-41f1-81f1-f1f1f1f1f1f1";
     const payrollRaw="f2f2f2f2-f2f2-42f2-82f2-f2f2f2f2f2f2";
-    await admin.query("INSERT INTO raw_import_rows(id,tenant_id,batch_id,row_number,payload) VALUES ($1,$2,$3,1,'{}'::jsonb),($4,$2,$5,1,'{}'::jsonb) ON CONFLICT(id) DO NOTHING",[invoiceRaw,tenantA,invoiceBatch,payrollRaw,payrollBatch]);
+    await admin.query("INSERT INTO raw_import_rows(id,tenant_id,batch_id,row_number,payload) VALUES ($1,$2,$3,1,'{}'::jsonb),($4,$2,$5,1,'{}'::jsonb) ON CONFLICT(id) DO NOTHING",[invoiceRaw,tenantA,taxEvidenceInvoiceBatch,payrollRaw,payrollBatch]);
     const payrollPool="f3f3f3f3-f3f3-43f3-83f3-f3f3f3f3f3f3";
     const payrollSource="f4f4f4f4-f4f4-44f4-84f4-f4f4f4f4f4f4";
     const allocationRun="f5f5f5f5-f5f5-45f5-85f5-f5f5f5f5f5f5";
