@@ -81,6 +81,11 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/006_tenant_actor_membership_fks.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/007_users_self_rls.sql
 
+      - name: Audit every tenant-scoped table and tenant-to-tenant foreign key
+        env:
+          PGPASSWORD: ci-admin-password
+        run: psql "postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.catalog.sql
+
       - name: Verify tenant RLS with restricted runtime role
         env:
           PGPASSWORD: ci-admin-password
@@ -97,6 +102,7 @@ jobs:
         run: |
           npm install --no-audit --no-fund
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/api.integration.test.js
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" psql "postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.runtime.sql
 
       - name: Build production API image
         run: docker build --pull -t profitpilot-api:ci .
