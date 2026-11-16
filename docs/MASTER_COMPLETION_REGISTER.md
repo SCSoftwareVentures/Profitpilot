@@ -303,3 +303,33 @@ G0, G1, G2, G3 and G4 remain NOT EVIDENCED. G5 remains BLOCKED / DEFERRED / NOT 
 ### Latest documentation-reconciliation head CI — 17 November 2026
 
 PR #27 branch `integration/pr25-pr26-validation` advanced to exact head `688d50bb5e3b45479f48f9cf7bb20e5897750291`. CI run **#43980939798** passed on that exact SHA. Both Node.js 22 and PostgreSQL 16 jobs passed. Node.js reported 46 tests total (45 passed, 1 skipped, 0 failed); PostgreSQL migration/RLS, tenant/FK catalogue, authenticated API integration, image build and restricted-container health steps completed successfully. This is the latest combined-candidate CI evidence, not the full financial acceptance suite, independent certification or release approval.
+
+ 
+## 20. Follow-up implementation hardening — 17 November 2026
+
+A separate draft branch `hardening/financial-security-followup` and draft PR #28 were created from the CI-verified combined candidate. The purpose is to remediate source-boundary and database-authority findings without merging or enabling payroll ingestion.
+
+### Implemented on the hardening branch
+
+- Exact-money parser accepts only decimal strings (no JSON Number coercion, exponent notation or malformed decimal syntax) and enforces PostgreSQL `numeric(14,2)` bounds.
+- Monetary helper outputs remain canonical decimal strings; BigInt cents are not converted back to JavaScript Number.
+- Invoice and payroll normalizers reject numeric JSON amounts; payroll output remains minimal and privacy-reduced.
+- Production database configuration fails closed unless verified TLS is explicitly enabled; optional PEM CA configuration is supported.
+- Migration 013 introduces restrictive database-side reviewer-role enforcement for invoice-match UPDATEs and a signed-actor identity check for any future runtime payroll confirmation.
+- CI applies migration 013 and tests both direct SQL reviewer denial/permission and payroll reviewer-identity substitution rejection.
+- A deterministic property suite exercises 500 seeded payroll reconciliation cases using seed `0x5eed1234`, plus row-order invariance, null/sign preservation and mixed-currency/tax-basis blocking.
+
+### Verification evidence
+
+The initial hardening CI run exposed one stale numeric assertion in the contract aggregation test. That test was corrected to expect the new exact decimal-string contract. The corrected implementation passed CI run #43982291906 on exact head `e4f2a024d245af86a58992eb8cc113e0d9a0801d`: Node.js 22 reported 51 passed, 1 skipped, 0 failed; PostgreSQL 16 passed migrations, 20-table tenant/FK audit, restricted-role RLS, authenticated API integration, production image build and restricted-container health. The property-suite addition is a subsequent change and requires its own exact-head CI result.
+
+### Outstanding and deliberately blocked
+
+- The full deterministic financial acceptance suite is not complete. The 500-case property suite is a targeted invariant suite, not the complete DEC/TAX/PAY/PAYLED/INV/CON/VAR/IMP acceptance plan.
+- GST/FX, source inclusion, rounding, credits/reversals, denominator, service-period, payroll classification and variation policy still need named finance/payroll/tax approvers.
+- Payroll ingestion remains disabled; no complete private-file import, source-row mapping/review/allocation workflow exists.
+- Private object storage, quarantine, malware scanning, retention/deletion and backup deletion verification remain unimplemented.
+- Production identity/MFA/provisioning/recovery, managed secrets/KMS, distributed rate limiting, production database TLS handshake, backup/restore, monitoring and incident response remain unverified.
+- Independent penetration testing, finance/accounting review, Australian privacy/legal review, G0–G4 customer/commercial evidence and signed G5 GO remain outstanding. G6 has not started.
+
+PR #28 remains draft and unmerged. No merge, deployment, real-data intake, customer pilot or payment activity is authorised.
