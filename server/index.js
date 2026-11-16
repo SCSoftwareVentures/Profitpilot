@@ -21,12 +21,12 @@ async function membership(req,res,next){
  const tenantId=req.params.tenantId;
  if(!/^[0-9a-f-]{36}$/i.test(tenantId))return res.status(400).json({error:"Invalid tenant ID"});
  try{
-  const r=await pool.query("SELECT role,status FROM tenant_memberships tm JOIN users u ON u.id=tm.user_id JOIN tenants t ON t.id=tm.tenant_id WHERE tm.tenant_id=$1 AND u.auth_subject=$2 AND tm.status='active' AND u.status='active' AND t.status='active'",[tenantId,req.identity.subject]);
+  const r=await withTenant(tenantId,client=>client.query("SELECT role FROM tenant_memberships tm JOIN users u ON u.id=tm.user_id JOIN tenants t ON t.id=tm.tenant_id WHERE tm.tenant_id=$1 AND u.auth_subject=$2 AND tm.status='active' AND u.status='active' AND t.status='active'",[tenantId,req.identity.subject]));
   if(!r.rowCount)return res.status(403).json({error:"No active membership for this tenant"});
   req.membership={tenantId,role:r.rows[0].role};next();
  }catch(e){next(e);}
 }
-app.get("/v1/me",async(req,res,next)=>{try{const r=await pool.query("SELECT t.id AS tenant_id,t.legal_name,tm.role FROM tenant_memberships tm JOIN users u ON u.id=tm.user_id JOIN tenants t ON t.id=tm.tenant_id WHERE u.auth_subject=$1 AND tm.status='active' AND u.status='active' AND t.status='active'",[req.identity.subject]);res.json({subject:req.identity.subject,memberships:r.rows});}catch(e){next(e);}});
+app.get("/v1/me",async(req,res)=>{res.json({subject:req.identity.subject,email:req.identity.email,membershipsEndpoint:"Membership discovery is not exposed until a separately reviewed security-definer function is installed."});});
 app.get("/v1/tenants/:tenantId/contracts",membership,async(req,res,next)=>{try{const rows=await withTenant(req.membership.tenantId,async c=>(await c.query("SELECT id,customer_name,status FROM contracts WHERE tenant_id=$1 ORDER BY customer_name",[req.membership.tenantId])).rows);res.json({items:rows});}catch(e){next(e);}});
 app.post("/v1/tenants/:tenantId/imports",membership,requireRole("owner","admin","analyst"),async(req,res,next)=>{
  try{
