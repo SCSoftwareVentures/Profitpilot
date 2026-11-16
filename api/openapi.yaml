@@ -1,0 +1,122 @@
+openapi: 3.1.0
+info:
+  title: ProfitPilot Core API
+  version: 0.1.0
+  description: Contract-economics prototype API contract. Specification only; no server is deployed.
+servers:
+  - url: https://api.example.invalid/v1
+    description: Placeholder only — not a live endpoint
+security:
+  - bearerAuth: []
+paths:
+  /me:
+    get:
+      summary: Resolve authenticated identity and memberships
+      responses:
+        "200": { description: Verified identity and permitted tenant memberships }
+        "401": { description: Unauthenticated }
+  /tenants/{tenantId}/contracts:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      summary: List contracts visible to the verified tenant member
+      responses:
+        "200": { description: Contract list }
+        "403": { description: Tenant membership or role not authorised }
+  /tenants/{tenantId}/imports:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      summary: Create an import batch from an authorised source file
+      description: Server must verify membership, permission basis, file checksum, limits and idempotency.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sourceType, fileName, sha256, permissionReference, periodStart, periodEnd]
+              properties:
+                sourceType: { type: string, enum: [payroll, customer_invoice, supplier_invoice] }
+                fileName: { type: string, maxLength: 255 }
+                sha256: { type: string, pattern: '^[a-fA-F0-9]{64}$' }
+                permissionReference: { type: string, minLength: 1 }
+                periodStart: { type: string, format: date }
+                periodEnd: { type: string, format: date }
+      responses:
+        "201": { description: Batch created or idempotent existing batch returned }
+        "400": { description: Invalid metadata }
+        "403": { description: Permission or role not sufficient }
+        "409": { description: Conflicting duplicate or period }
+  /tenants/{tenantId}/imports/{batchId}/validate:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    post:
+      summary: Validate source rows and produce held/review candidates
+      responses:
+        "202": { description: Validation queued }
+        "403": { description: Not authorised }
+        "404": { description: Batch not found in this tenant }
+  /tenants/{tenantId}/matches/{matchId}/decision:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: matchId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Record a human invoice-match decision
+      description: Candidate scores never auto-confirm a match. Append reviewer, reason and timestamp.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, reason]
+              properties:
+                decision: { type: string, enum: [confirmed, rejected, held] }
+                reason: { type: string, minLength: 3, maxLength: 2000 }
+      responses:
+        "201": { description: Decision appended }
+        "403": { description: Reviewer role required }
+        "409": { description: Match state changed; refresh required }
+  /tenants/{tenantId}/calculations:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      summary: Create a versioned contract/site/period calculation run
+      description: Server calculates from immutable input versions; no client-supplied output totals are trusted.
+      responses:
+        "201": { description: Calculation run created }
+        "422": { description: Insufficient or unreconciled source evidence }
+  /tenants/{tenantId}/calculations/{runId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: runId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Retrieve immutable calculation output and coverage limitations
+      responses:
+        "200": { description: Calculation output }
+        "404": { description: Run not found in this tenant }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TenantId:
+      name: tenantId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    BatchId:
+      name: batchId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
