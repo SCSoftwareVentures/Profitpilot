@@ -333,3 +333,21 @@ The initial hardening CI run exposed one stale numeric assertion in the contract
 - Independent penetration testing, finance/accounting review, Australian privacy/legal review, G0–G4 customer/commercial evidence and signed G5 GO remain outstanding. G6 has not started.
 
 PR #28 remains draft and unmerged. No merge, deployment, real-data intake, customer pilot or payment activity is authorised.
+
+ 
+### 21. Exact-money, reviewer authority and production TLS hardening — 17 November 2026
+
+Draft PR #28 (`hardening/financial-security-followup`) now includes:
+- canonical decimal-string-only parsing and formatting for the prototype financial engine, with PostgreSQL `numeric(14,2)` bounds;
+- rejection of JSON numeric invoice/payroll amounts before float coercion;
+- production database TLS fail-closed configuration with certificate verification and optional PEM CA;
+- migration 013 restrictive reviewer-role enforcement for match-review UPDATEs and signed-actor identity binding for payroll confirmation;
+- direct-SQL reviewer denial/permission and payroll reviewer-identity substitution integration tests;
+- a 500-case seeded payroll reconciliation property suite, seed `0x5eed1234`;
+- expanded OpenAPI money and response schemas.
+
+CI run **#43982827602** passed on exact implementation head `ead10a236e33684c25c5c7613d1c5a2fbeb883fd`. The PostgreSQL job generated and enabled an ephemeral server TLS certificate, verified a trusted CA connection, rejected an untrusted CA, and successfully ran the API container in production mode with verified database TLS. Node.js reported 56 passed, 0 failed and 3 skipped (the DB-dependent API/TLS tests are run in the PostgreSQL job). PostgreSQL migrations/RLS, the 20-table tenant/FK catalogue audit, authenticated API integration, image build and production-mode TLS health check passed.
+
+The subsequent OpenAPI-only documentation updates do not change application code; their exact-head CI is tracked by the current branch run. PR #28 remains draft and unmerged.
+
+The full financial acceptance plan and all nontechnical release gates remain outstanding. Payroll ingestion remains disabled; no real customer or employee data is authorised.
