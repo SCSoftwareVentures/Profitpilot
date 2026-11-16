@@ -35,9 +35,9 @@ app.post("/v1/tenants/:tenantId/imports",membership,requireRole("owner","admin",
   const id=randomUUID();
   const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>c.query("INSERT INTO import_batches(id,tenant_id,source_type,source_period_start,source_period_end,permission_ref,status,file_sha256,file_name,created_by) SELECT $1,$2,$3,$4,$5,$6,'registered',$7,$8,u.id FROM users u WHERE u.auth_subject=$9 ON CONFLICT(tenant_id,file_sha256) DO NOTHING RETURNING id,status",[id,req.membership.tenantId,sourceType,periodStart,periodEnd,permissionReference.trim(),sha256.toLowerCase(),fileName,req.identity.subject]));
   if(!result.rowCount){
-   const old=await withTenant(req.membership.tenantId,req.identity.subject,async c=>c.query("SELECT id,status,source_type,file_name,source_period_start,source_period_end,permission_ref FROM import_batches WHERE tenant_id=$1 AND file_sha256=$2",[req.membership.tenantId,sha256.toLowerCase()]));
+   const old=await withTenant(req.membership.tenantId,req.identity.subject,async c=>c.query("SELECT id,status,source_type,file_name,source_period_start::text AS source_period_start,source_period_end::text AS source_period_end,permission_ref FROM import_batches WHERE tenant_id=$1 AND file_sha256=$2",[req.membership.tenantId,sha256.toLowerCase()]));
    const existing=old.rows[0];
-   const same=existing&&existing.source_type===sourceType&&existing.file_name===fileName&&String(existing.source_period_start).slice(0,10)===periodStart&&String(existing.source_period_end).slice(0,10)===periodEnd&&existing.permission_ref===permissionReference.trim();
+   const same=existing&&existing.source_type===sourceType&&existing.file_name===fileName&&existing.source_period_start===periodStart&&existing.source_period_end===periodEnd&&existing.permission_ref===permissionReference.trim();
    if(!same)return res.status(409).json({error:"This file checksum is already registered with different import metadata. Reconcile the original registration; do not silently reuse it."});
    return res.status(200).json({batch:{id:existing.id,status:existing.status},idempotent:true});
   }
