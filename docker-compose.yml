@@ -3,15 +3,17 @@ services:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: profitpilot
-      POSTGRES_USER: profitpilot
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in your environment}
+      POSTGRES_USER: profitpilot_admin
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?Set POSTGRES_ADMIN_PASSWORD}
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
       - profitpilot_pg:/var/lib/postgresql/data
       - ./database/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+      - ./database/init/002-runtime-role.sql:/docker-entrypoint-initdb.d/002-runtime-role.sql:ro
+      - ./database/migrations/002_tenant_rls.sql:/docker-entrypoint-initdb.d/003-tenant-rls.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U profitpilot -d profitpilot"]
+      test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -21,7 +23,7 @@ services:
     environment:
       NODE_ENV: production
       PORT: 8080
-      DATABASE_URL: postgres://profitpilot:${POSTGRES_PASSWORD}@db:5432/profitpilot
+      DATABASE_URL: postgres://profitpilot_app:local-dev-only-change-this@db:5432/profitpilot
       DATABASE_SSL: "false"
       CORS_ORIGIN: ${CORS_ORIGIN:?Set CORS_ORIGIN}
       AUTH_ISSUER: ${AUTH_ISSUER:?Set AUTH_ISSUER}
