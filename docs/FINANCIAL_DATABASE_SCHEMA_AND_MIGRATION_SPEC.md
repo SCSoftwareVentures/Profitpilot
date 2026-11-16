@@ -31,7 +31,7 @@ The security branch currently defines:
 - Variations: `variations`.
 - Results/audit: `calculation_runs`, `audit_events`.
 
-Migration 008 restricts runtime DML to the currently implemented API operations. Migration 009 corrects metadata-only import status from `uploaded` to `registered`; the API does not store binary file bytes. These migrations are branch-specific until PR #25 is merged.
+Migration 008 restricts runtime DML to the currently implemented API operations. Migration 009 corrects metadata-only import status from `uploaded` to `registered`; the API does not store binary file bytes. The security branch's later actor-reference integrity work is described in its implementation audit; confirm the exact composite foreign keys in the migration chain and catalogue tests rather than inferring them from the base `schema.sql`. These migrations are branch-specific until PR #25 is merged.
 
 ## 3. Schema audit — findings and proposed treatment
 
@@ -47,7 +47,7 @@ Migration 008 restricts runtime DML to the currently implemented API operations.
 | DB-08 | Calculation run stores JSONB inputs/outputs and only complete/incomplete | Hard to query or reproduce input set; status cannot express held/unknown/rejected | Typed immutable run metadata, source links, policy links, output rows and richer status |
 | DB-09 | No policy registry | Historical result may not identify exact tax, rounding, parser or allocation policy | Versioned immutable policy registry and run-policy references |
 | DB-10 | Raw import payload in JSONB | Excess sensitive data, broad access and deletion complexity | Separate restricted raw source storage and controlled references; minimise database payload |
-| DB-11 | Audit events reference object IDs without guaranteed same-tenant actor/target integrity | Orphaned or cross-tenant audit relationships | Tenant-scoped actor FK where applicable, target integrity strategy and append-only grants/triggers |
+| DB-11 | Audit events use a polymorphic target UUID without a target-table FK; the base schema's actor FK is not visibly composite | Target existence/tenant consistency needs an explicit design; actor integrity may be added by later migrations | Preserve polymorphic targets with an allowlisted target-type strategy and verify actor composite-FK migrations/catalogue tests on the exact branch; append-only grants/triggers |
 | DB-12 | No explicit restatement graph or source checksum lineage on each source row | Cannot demonstrate historical reproducibility or safe correction | Import/file/row manifests, canonical source refs and immutable restatement links |
 
 These are static design findings, not evidence of an observed breach or financial loss.
