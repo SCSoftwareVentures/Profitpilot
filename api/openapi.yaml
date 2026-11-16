@@ -11,9 +11,9 @@ security:
 paths:
   /me:
     get:
-      summary: Resolve authenticated identity and memberships
+      summary: Resolve authenticated identity (membership discovery not exposed)
       responses:
-        "200": { description: Verified identity and permitted tenant memberships }
+        "200": { description: Verified identity only; membership discovery requires a separately reviewed endpoint. }
         "401": { description: Unauthenticated }
   /tenants/{tenantId}/contracts:
     parameters:
