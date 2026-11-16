@@ -203,3 +203,8 @@ These are recorded in API_CALCULATION_PATH_AUDIT.md. Findings are static; propos
 ## 11. Final status snapshot
 
 PR #26 head 559c7476d13e42ec9d9190409b8e3b091407a1bb completed CI run #347 successfully on 16 November 2026. Both configured jobs passed: Verify (Node.js 22) and PostgreSQL migrations/tenant RLS, including authenticated API integration, container build and health check. This result applies to this documentation branch and its own base; it does not constitute combined PR #25/#26 integration or execution of the proposed financial acceptance suites.
+
+
+## 12. API contract conformance audit
+
+A static Express/OpenAPI comparison is recorded in [API Contract Conformance Audit](API_CONTRACT_CONFORMANCE_AUDIT.md). It covers the nine observed route declarations (including the operational health route), status/response schema gaps, import lifecycle terminology, pagination, idempotency, concurrency, role matrix and 16 proposed contract tests. These tests are NOT RUN; no runtime API or generated-client conformance is claimed.

@@ -88,3 +88,8 @@ The product-blueprint branch now also contains:
 These documents improve preparation and make the remaining work actionable. They do not provide missing customer evidence, specialist sign-offs, signed G5 approval, implementation or production readiness.
 
 Latest CI on the prior docs-only head 559c7476d13e42ec9d9190409b8e3b091407a1bb (run #347) passed both configured jobs. The latest documentation commit passed run #347 on its exact head.
+
+
+## API contract conformance review — 17 November 2026
+
+Added `docs/API_CONTRACT_CONFORMANCE_AUDIT.md`, a static comparison of the Express route inventory and OpenAPI contract. It records response-schema gaps, import-state language, missing pagination/idempotency/concurrency definitions, route-role matrix requirements and 16 proposed contract tests. This is not a runtime test or implementation. No API/OpenAPI code or production feature was changed.

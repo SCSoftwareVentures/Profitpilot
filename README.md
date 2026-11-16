@@ -29,6 +29,7 @@ Begin with evidence-led concierge validation using authorised data and an approv
 - [MVP implementation epic plan](docs/MVP_IMPLEMENTATION_EPIC_PLAN.md)
 - [G5 signed build authorisation record](docs/G5_SIGNED_BUILD_AUTHORISATION_RECORD.md)
 - [API calculation path static audit](docs/API_CALCULATION_PATH_AUDIT.md)
+- [API contract conformance audit](docs/API_CONTRACT_CONFORMANCE_AUDIT.md)
 
 - [Master completion and evidence register](docs/MASTER_COMPLETION_REGISTER.md)
 - [Initial MVP product requirements](docs/MVP_PRODUCT_REQUIREMENTS.md)
