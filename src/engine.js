@@ -4,7 +4,7 @@ import {createHash} from "node:crypto";
 function decimalCents(value){
   if(typeof value!=="string"||value.length>15)return null;
   const text=value;
-  if(!/^-?(?:0|[1-9]\\d*)(?:\\.\\d{1,2})?$/.test(text))return null;
+  if(!/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(text))return null;
   const negative=text.startsWith("-");
   const unsigned=negative?text.slice(1):text;
   const [whole,fraction=""]=unsigned.split(".");
