@@ -28,7 +28,7 @@ DECLARE
  v_tenant uuid; v_subject text; v_expires bigint; v_nonce text;
  v_key_id text; v_signature text; v_secret bytea; v_payload text; v_expected text;
 BEGIN
- v_tenant:=private.current_tenant_id();
+ v_tenant:=nullif(current_setting('app.tenant_id',true),'')::uuid;
  v_subject:=nullif(current_setting('app.tenant_subject',true),'');
  v_expires:=nullif(current_setting('app.tenant_expires',true),'')::bigint;
  v_nonce:=nullif(current_setting('app.tenant_nonce',true),'');
