@@ -32,7 +32,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
   process.env.AUTH_AUDIENCE=audience;
   process.env.AUTH_JWKS_URL=`http://127.0.0.1:${jwksAddress.port}/.well-known/jwks.json`;
   const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL});
-  const [{default:app}]=await Promise.all([import("../server/index.js")]);
+  const [{default:app},{pool:appPool}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);
   const api=createServer(app);
   await new Promise(resolve=>api.listen(0,"127.0.0.1",resolve));
   const apiAddress=api.address();
@@ -91,6 +91,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
   }finally{
     await new Promise(resolve=>api.close(resolve));
     await admin.end();
+    await appPool.end();
     await new Promise(resolve=>jwksServer.close(resolve));
   }
 });
