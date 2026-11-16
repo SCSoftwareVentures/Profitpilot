@@ -262,3 +262,39 @@ Evidence boundary remains unchanged: PR #25 alone passed CI. PR #25/#26 have not
 PR #25 head `ce168020eb49667616e5c36f1cc9b324f92c22b5` passed CI run #43974141222, with both Node.js 22 and PostgreSQL 16 jobs green. New synthetic integration fixtures create fully reconciled invoice and payroll evidence and verify the API blocks invoice tax basis that differs from the approved contract version, and payroll allocation currency that differs from the contract currency. No definitive contribution is emitted from these mismatched inputs.
 
 This closes only these two targeted negative cases. The full financial acceptance suite, source completeness, credits/reversals, payroll workflow, production security, independent review and G0–G5 validation remain outstanding. The branches remain separate and unmerged.
+
+
+## 19. Superseding combined candidate and exact CI evidence — 17 November 2026
+
+This section supersedes the earlier branch-position snapshots and the prior recommendation that no combined candidate existed.
+
+### Combined candidate
+
+| Item | Verified position | Interpretation |
+|---|---|---|
+| PR #25 | Security implementation source branch; open, draft, unmerged | Retain as a source/review branch |
+| PR #26 | Product blueprint/documentation source branch; open, draft, unmerged | Retain as a source/review branch |
+| PR #27 | `integration/pr25-pr26-validation`; head `47f0a5c3dc5a1e4f85b565b27195e5d217195c0a`; open, draft, unmerged | Combined review candidate |
+| Branch-push CI | Run #43975153600 passed on the exact PR #27 head | Combined branch-push automated checks passed |
+| Pull-request CI | Run #43975210049 passed on the exact PR #27 head | Combined PR-triggered automated checks passed |
+| PR review | No submitted reviews or inline review threads found | Human review remains outstanding |
+
+The pull-request CI run completed both configured jobs successfully: Node.js 22 verification and PostgreSQL 16 migrations/tenant RLS. The Node job completed locked dependency installation, production dependency audit, syntax checks and unit tests (45 passed, 1 skipped, 0 failed). The PostgreSQL job applied the migration sequence through 012, ran the tenant/FK catalogue audit, restricted-role RLS checks, authenticated API integration tests, production image build and restricted-container health check.
+
+### What this evidence closes—and does not close
+
+**Closed:** the previously missing combined-branch CI checkpoint for the current candidate SHA.
+
+**Not closed:** the full financial-engine acceptance plan; independent penetration testing and remediation retest; independent accounting/payroll/tax review; Australian privacy/legal review; secure binary-file lifecycle; production identity/MFA and managed secret custody; distributed rate limiting; production operations/recovery; G0–G4 customer and commercial validation; G5 signed build authorisation; G6 paid-pilot exit.
+
+### Current code-review observations
+
+- Migrations 010/011 provide a tenant-scoped payroll source-row ledger, immutable source provenance, append-only allocation lines, source-row allocation caps and confirmation-time reconciliation. The API still does not expose the full privacy-safe payroll import, mapping, reviewer allocation and confirmation workflow; payroll ingestion remains disabled.
+- Migration 012 adds versioned contract tax-basis metadata. Unknown legacy basis and invoice/contract basis mismatches are blocked, but the underlying GST/tax policy and conversion rules still need qualified approval.
+- The calculation route uses decimal text parsing and BigInt cents for its arithmetic. It deliberately stores/returns an incomplete management view with `contribution` and `marginPercent` null and an explicitly indicative contribution value. This does not establish complete source coverage or an audited profit figure.
+- A remaining exactness issue exists in `normalizePayrollRows`: finite JavaScript-number amounts are accepted and stringified. Number inputs may already have lost decimal precision; tighten this boundary to canonical decimal strings only and add regression coverage before enabling any payroll ingestion path.
+- The passing CI unit tests are not the full DEC/TAX/PAY/PAYLED/INV/CON/VAR/IMP and property-based acceptance suite. That complete suite remains NOT RUN.
+
+### Gate register remains unchanged
+
+G0, G1, G2, G3 and G4 remain NOT EVIDENCED. G5 remains BLOCKED / DEFERRED / NOT AUTHORISED. G6 remains NOT STARTED. No merge, deployment, production feature build, live-data intake, customer pilot or payment activity is authorised. The repository is public; synthetic fixtures only.
