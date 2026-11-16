@@ -163,3 +163,32 @@ This is a PR #25 branch result only. It does not establish that the two PR branc
 PR #25 head `ce168020eb49667616e5c36f1cc9b324f92c22b5` passed CI run #43974141222. The authenticated API integration suite now constructs complete synthetic source evidence and confirms calculation creation rejects both invoice tax basis mismatched to the approved contract version and payroll allocation currency mismatched to the contract currency. Node.js 22 and PostgreSQL 16 jobs passed on the exact head.
 
 The combined-candidate requirement remains open. This is not the full API-CALC-T01–T14 suite, not a financial/accounting signoff, and not production certification. PR #25 and PR #26 remain separate drafts; no merge or deployment is authorised.
+
+
+## 11. Combined PR #27 candidate — exact integration and CI verification, 17 November 2026
+
+The combined candidate has now been created and tested; this supersedes the earlier recommendation in this report that no combined candidate existed.
+
+- Repository: `luxhustle01-ux/Profitpilot`.
+- Source branches: PR #25 security implementation and PR #26 product blueprint; both remain open drafts and unmerged.
+- Candidate: PR #27, branch `integration/pr25-pr26-validation`.
+- Exact candidate head: `47f0a5c3dc5a1e4f85b565b27195e5d217195c0a`.
+- Branch-push CI run #43975153600: passed.
+- Pull-request CI run #43975210049: passed on the same exact SHA. Both Node.js 22 and PostgreSQL 16 jobs succeeded.
+
+The pull-request CI executed locked dependency installation, production dependency audit, syntax checks and the existing Node.js unit suite (45 passed, 1 skipped, 0 failed). PostgreSQL CI applied migrations through 012, ran the tenant-scoped table and FK catalogue audit, restricted-runtime RLS checks, authenticated API integration tests, production API image build and restricted-container health check.
+
+### Reconciliation conclusion
+
+The exact combined branch passes the repository's configured automated CI. The branch integration checkpoint is therefore **PASS for configured CI on this SHA**, not a general production or release pass. The run does not prove the complete financial-engine acceptance plan, every route × role × tenant × object combination, independent security/accounting assurance, operational recovery, privacy/legal approval or G0–G5 completion. PR #27 remains draft and unmerged; PR #25 and PR #26 remain separate open drafts. No merge, deployment, real-data intake or payment activity is authorised.
+
+### Outstanding implementation and assurance items
+
+- Complete financial deterministic/property acceptance suites and independent reviewer approval.
+- Full payroll privacy-safe ingestion, mapping, reviewer allocation and confirmation workflow; keep current payroll ingestion disabled.
+- Source completeness manifests, supplier/non-site cost coverage, credit/reversal handling and restatement history.
+- Canonical decimal-string-only payroll normalizer input; reject JavaScript Number amounts to prevent precision loss at the source boundary.
+- Private binary object storage, quarantine, malware scanning, retention/deletion and backup deletion verification.
+- Production identity/MFA/provisioning/recovery, managed secret custody/KMS, shared rate limiting/trusted proxy, database TLS, backups/restore, monitoring and incident response.
+- Independent penetration test/remediation retest, Australian privacy/legal review and qualified accounting/payroll/tax policy approval.
+- G0–G4 customer/data/commercial/usability evidence, signed G5 GO and post-build G6 paid-pilot exit.
