@@ -18,6 +18,7 @@ Begin with an evidence-led concierge workflow using authorised data. Validate da
 - Invoice matches require human confirmation.
 - AI may assist extraction and explanation, but must not authorise financial calculations, approvals, payments, disputes, or ratings.
 - Never commit credentials, customer exports, employee records, or other sensitive information.
+- **Repository visibility is public.** Treat every commit, branch, issue and uploaded artifact as publicly accessible. Use synthetic fixtures only; never place customer/client, business-owner, employee, payroll, invoice, identity or confidential commercial data here.
 
 ## Documentation
 
@@ -71,3 +72,11 @@ The API and database are implementation scaffolds, not a deployed service. Revie
 - [Landing-page concept](index.html) — static presentation concept.
 
 These prototypes are for design review only. They are not a deployed product or evidence of implemented business workflows.
+
+## Security review status
+
+- [Implementation audit and security hardening evidence](docs/IMPLEMENTATION_AUDIT.md)
+- [Identity, tenant isolation and security plan](docs/IDENTITY_AND_TENANT_SECURITY.md)
+- [Production signing-key operations runbook](docs/PRODUCTION_SIGNING_KEY_RUNBOOK.md)
+
+The hardening work is under review in PR #25. It is not a production security certification. Private file storage/upload, malware scanning, production secret custody, identity-provider/MFA configuration, privacy/legal review and independent penetration testing remain release blockers.
