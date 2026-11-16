@@ -98,8 +98,6 @@ test("authenticated API enforces tenant membership, role permissions and import 
     process.env.TENANT_CONTEXT_HMAC_KEY_ID="rotation-next";
     const activeSecondary=await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT id FROM contracts"));
     assert.equal(activeSecondary.rowCount,1,"the replacement key must remain valid after old-key revocation");
-    process.env.TENANT_CONTEXT_HMAC_SECRET=primarySecret;
-    process.env.TENANT_CONTEXT_HMAC_KEY_ID=primaryKeyId;
     const afterCommit=await appPool.query("SELECT current_setting('app.tenant_id',true) AS tenant_id");
     assert.ok(afterCommit.rows[0].tenant_id===null||afterCommit.rows[0].tenant_id==="","tenant context must not leak after a transaction returns its pooled connection");
     await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'RLS write probe','active')",["99999999-9999-4999-8999-999999999999",tenantB,businessB])),/row-level security/i,"RLS WITH CHECK must reject cross-tenant writes");
