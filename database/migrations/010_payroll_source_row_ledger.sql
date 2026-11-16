@@ -5,7 +5,7 @@ CREATE TABLE payroll_source_rows (
  tenant_id uuid NOT NULL,
  payroll_pool_id uuid NOT NULL,
  raw_import_row_id uuid NOT NULL,
- source_row_key text NOT NULL CHECK(source_row_key ~ '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$'),
+ source_row_key text NOT NULL CHECK(length(source_row_key) BETWEEN 1 AND 128 AND source_row_key ~ '^[A-Za-z0-9]' AND source_row_key !~ '[^A-Za-z0-9._:-]'),
  row_sha256 text NOT NULL CHECK(row_sha256 ~ '^[a-f0-9]{64}$'),
  amount numeric(14,2) NOT NULL CHECK(amount>=0),
  currency char(3) NOT NULL CHECK(currency ~ '^[A-Z]{3}$'),
