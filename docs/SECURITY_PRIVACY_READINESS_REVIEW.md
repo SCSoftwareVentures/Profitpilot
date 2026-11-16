@@ -204,3 +204,16 @@ The specific code findings in the preceding section have been remediated on the 
 4. The CI health smoke test now runs the restricted container in development mode against the local plaintext PostgreSQL service. It is explicitly not evidence of a production TLS connection; production TLS fail-closed behaviour is covered by configuration unit tests. A real managed PostgreSQL TLS handshake with the approved CA remains a deployment acceptance test.
 
 These changes reduce the identified application/database privilege gap but do not constitute independent penetration testing. Distributed rate limiting, production identity/MFA, private file storage/quarantine/malware scanning, retention/deletion verification, managed secret/KMS custody, DB TLS handshake against the chosen provider, backup/restore and incident response remain open release blockers. Payroll ingestion remains disabled.
+
+ 
+## Exact-head production TLS and actor-authority verification — 17 November 2026
+
+The earlier development-mode/plaintext smoke-test note above is superseded by the latest hardening workflow:
+
+- CI generated an ephemeral PostgreSQL server certificate with a SAN for `127.0.0.1`, configured the PostgreSQL 16 service for TLS, and restarted it with SSL enabled.
+- A Node/PostgreSQL integration test successfully connected using the configured trusted CA and confirmed `pg_stat_ssl.ssl=true`.
+- A second integration test rejected an untrusted CA.
+- The API container then ran with `NODE_ENV=production`, `DATABASE_SSL=true`, `rejectUnauthorized=true` and the explicit test CA; its database-backed health endpoint passed.
+- The same CI run also applied migration 013, passed the tenant/FK audit, and passed direct-SQL role and signed payroll-actor tests.
+
+Verified CI run **#43982827602** passed both Node.js 22 and PostgreSQL 16 jobs on exact implementation head `ead10a236e33684c25c5c7613d1c5a2fbeb883fd`. This proves the prototype can enforce and establish a verified TLS connection in the ephemeral CI environment. It does not verify the selected managed production database, production certificate rotation, private networking or production secret custody.
