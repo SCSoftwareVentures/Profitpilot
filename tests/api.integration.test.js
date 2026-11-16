@@ -212,6 +212,15 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(analystDirectDecision.rowCount,0,"database RLS must block analyst direct-SQL invoice decision even if the application route is bypassed");
     const reviewerDirectDecision=await withTenant("33333333-3333-4333-8333-333333333333","isolation-reviewer-c",client=>client.query("UPDATE match_reviews SET decision='confirmed',reviewer_id='77777777-7777-4777-8777-777777777777' WHERE id='24242424-2424-4424-8424-242424242424' RETURNING id"));
     assert.equal(reviewerDirectDecision.rowCount,1,"database RLS must permit an authenticated tenant reviewer to decide an invoice match");
+    const actorGuardRun="35353535-3535-4535-8535-353535353535";
+    await admin.query("INSERT INTO allocation_runs(id,tenant_id,payroll_pool_id,method_version,status,direct_amount,residual_amount,reviewer_id) VALUES ($1,'33333333-3333-4333-8333-333333333333','16161616-1616-4616-8616-161616161616','actor-binding-test','draft',0,100,'55555555-5555-4555-8555-555555555555')",[actorGuardRun]);
+    await admin.query("GRANT UPDATE ON allocation_runs TO profitpilot_app");
+    try {
+      await assert.rejects(()=>withTenant("33333333-3333-4333-8333-333333333333","isolation-tenant-c",client=>client.query("UPDATE allocation_runs SET status='confirmed',reviewer_id='55555555-5555-4555-8555-555555555555' WHERE id=$1",[actorGuardRun])),/authenticated signed tenant actor/i,"an analyst cannot confirm payroll even when the runtime SQL privilege is temporarily granted");
+      await assert.rejects(()=>withTenant("33333333-3333-4333-8333-333333333333","isolation-reviewer-c",client=>client.query("UPDATE allocation_runs SET status='confirmed',reviewer_id='55555555-5555-4555-8555-555555555555' WHERE id=$1",[actorGuardRun])),/authenticated signed tenant actor/i,"a reviewer cannot submit another member's reviewer identity to the payroll confirmation trigger");
+    } finally {
+      await admin.query("REVOKE UPDATE ON allocation_runs FROM profitpilot_app");
+    }
 
     const invalidTenant=await request("/v1/tenants/not-a-uuid/contracts",{subject:"ci-api-analyst"});
     assert.equal(invalidTenant.status,400);
