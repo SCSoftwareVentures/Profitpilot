@@ -67,3 +67,38 @@ The Node test suite covers money rounding, CSV parsing, quoted fields, escaped q
 **Production: not ready.**
 
 No customer data should be entered into the public repository or current browser demo.
+
+
+## Security hardening review — 16 November 2026 (PR #25, not merged)
+
+The following evidence applies to the review branch only. It does not describe `main` until PR #25 is merged.
+
+### Confirmed changes
+- Added migration 008 to revoke broad runtime DML grants, grant writes only to current API operations, and remove future-table DML defaults. CI checks the catalogue and verifies no default INSERT/UPDATE/DELETE grants remain.
+- Runtime role write privileges are denied for tenant records, global identities and tenant memberships. It cannot delete import source records or audit history. The runtime role remains LOGIN, NOSUPERUSER and NOBYPASSRLS.
+- Catalog audit checks forced RLS and expected tenant/self-only policies on all 19 protected tenant/root-identity tables and composite tenant foreign-key coverage.
+- CI seeds two synthetic tenants with one row in every protected table (two membership rows for one tenant). Signed tenant-scoped integration tests assert tenant-specific visibility across all 19 tables.
+- Cross-tenant object-IDOR tests cover calculation retrieval, import-row ingestion and invoice-match decisions.
+- JWT validation requires exp, iat and sub; uses a 15-minute maximum token age, an explicit RS256/ES256 allowlist, a five-second JWKS fetch timeout, five-minute JWKS cache and HTTPS-only JWKS URL in production. Tests cover expired/missing claims, old tokens and new JWKS key publication.
+- Request rate-limit behaviour is exercised in integration tests. The current limiter uses its in-process default store; it is not yet suitable for consistent enforcement across multiple API instances.
+- Error middleware no longer writes raw exception messages to logs or returns internal exception text to clients.
+- Production signing-key custody, rotation, emergency revocation and recovery procedures are documented. No production secret manager is configured and no production recovery exercise has been performed.
+- A resolver-generated npm v3 lockfile is committed. CI and Docker use `npm ci`; production dependency audit is included in CI.
+- CI masks ephemeral tenant-signing and database-role credentials.
+
+### Verified CI evidence
+- Latest review-branch CI run **#212** (commit `cfc93637ca75c7c0fcf75aa7b0c9c16b3a7e8380`) passed Node.js 22 verification, PostgreSQL migrations and tenant RLS/catalog tests, authenticated API tests, Docker build and container health check.
+- Run **#210** passed all-table isolation and tenant-object IDOR coverage.
+- Run **#204** passed dependency lockfile generation and dependency audit before the lockfile was committed.
+- Earlier runs cancelled by newer commits are not counted as failures or passes; use the final completed run above as the authoritative evidence for this branch.
+- These are automated ephemeral CI tests. They are not an independent penetration test, production deployment, or security certification.
+
+### Remaining release blockers
+1. Secure private object storage, authenticated binary upload/download, malware scanning, retention/deletion and backup deletion verification are not implemented.
+2. Production HMAC secret custody in a managed secret manager/KMS, operator controls, emergency revocation and recovery exercises remain unconfigured/unverified.
+3. Production identity-provider configuration, tenant/member provisioning, MFA policy and secure account recovery remain unconfigured.
+4. A shared rate-limit store and correctly configured trusted-proxy boundary are required before horizontally scaled deployment.
+5. The repository remains public. Do not put customer, employee, payroll, invoice, credential or confidential commercial data in the repository or demo. Repository visibility has not been changed.
+6. Independent penetration testing and remediation retest, privacy impact assessment, Australian legal/privacy review, backup restore exercise and incident-response tabletop remain outstanding.
+
+**Release decision remains unchanged:** prototype engineering foundation only; no real customer information, private pilot or production use approved.
