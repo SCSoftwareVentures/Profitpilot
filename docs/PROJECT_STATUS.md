@@ -141,3 +141,29 @@ This remains PR #25-only evidence. PR #25 and PR #26 are still separate, open dr
 ## PR #25 calculation-basis integration regression — 17 November 2026
 
 PR #25 head `ce168020eb49667616e5c36f1cc9b324f92c22b5` passed CI run #43974141222. Both Node.js 22 and PostgreSQL 16 jobs passed on the exact head. New authenticated API integration fixtures provide complete, reconciled synthetic invoice and payroll evidence and confirm that contract/invoice tax-basis mismatches and payroll/contract currency mismatches are blocked with 422 responses. This is additional branch-specific regression evidence, not the full API-CALC-T01–T14 suite or independent accounting validation. PR #25 and PR #26 remain separate drafts; G5 remains deferred/not authorised.
+
+
+## Superseding combined integration verification — 17 November 2026
+
+The earlier repository-position sections above are historical snapshots and are superseded by this exact combined-candidate evidence:
+
+- Repository: `luxhustle01-ux/Profitpilot` (public; synthetic fixtures only).
+- PR #25 security implementation and PR #26 product blueprint remain separate open draft branches.
+- Combined candidate: PR #27, branch `integration/pr25-pr26-validation`, exact head `47f0a5c3dc5a1e4f85b565b27195e5d217195c0a`.
+- Branch-push CI run #43975153600 and pull-request CI run #43975210049 both passed on that exact head. The PR-triggered run's two jobs—Node.js 22 verification and PostgreSQL 16 migrations/tenant RLS—both completed successfully. The PostgreSQL job applied migrations 008–012, ran the tenant/FK catalogue audit, restricted-role RLS checks, authenticated API integration tests, production image build and restricted-container health check. The Node job completed locked dependency install, production dependency audit, syntax checks and unit tests (45 passed, 1 skipped, 0 failed).
+- PR #27 has no submitted reviews or inline review threads at the time of this check. It remains draft and unmerged.
+
+This closes the previously open **combined automated CI** checkpoint only. It does not close the full financial acceptance plan, independent penetration/security review, finance/accounting review, privacy/legal review, operational recovery exercises, customer validation or release gates.
+
+### Current technical status and remaining work
+
+- The row-level payroll evidence ledger is present in migrations 010/011, including tenant-scoped source provenance, append-only allocation lines, per-row limits and confirmation-time reconciliation. The pure payroll normalizer is present, but the end-to-end privacy-safe payroll ingestion, mapping, allocation-review and reviewer workflow is not implemented; payroll ingestion remains disabled.
+- Contract-version tax-basis metadata is present in migration 012. Legacy `unknown` tax basis and invoice/contract mismatches are blocked; approved GST/tax policy and conversion rules still require qualified review.
+- The calculation route uses decimal-string parsing and BigInt cents for its revenue/cost difference. It returns `completeness: incomplete`, `contribution: null` and `marginPercent: null`, with a separately named `indicativeContribution`. This is not a complete cost model or statutory/audited profit. Source completeness, supplier/non-site costs, credits/reversals, source manifests and restatement workflow remain open.
+- Additional code-review finding: `normalizePayrollRows` accepts finite JavaScript-number amounts as well as strings, then converts numbers to strings. Because numeric values may already have lost decimal precision before this helper receives them, the exact-money boundary should be tightened to accept canonical decimal strings only, with a regression test. This is a remediation item, not a claim that the complete payroll pipeline exists.
+- The configured CI runs do not execute the complete DEC/TAX/PAY/PAYLED/INV/CON/VAR/IMP and property-based acceptance plan. The financial acceptance suite remains NOT RUN as a complete suite.
+- Private original-file storage/upload, quarantine and malware scanning, retention/deletion and backup deletion verification, managed production secrets/KMS, production identity/MFA/provisioning/recovery, shared distributed rate limiting, database TLS, backup/restore, monitoring and incident response remain unimplemented or unverified.
+
+### Release gates
+
+G0–G4 customer/data/commercial/usability evidence remains NOT EVIDENCED. G5 remains DEFERRED / NOT AUTHORISED: the signed decision, budget, delivery capacity, legal/privacy plan and accountable specialist approvals are absent. G6 has not started. No merge, deployment, real-data intake, customer pilot or payment activity is authorised. Preserve the public-repository synthetic-data-only rule.
