@@ -5,7 +5,6 @@ BEGIN;
 ALTER TABLE invoices ADD CONSTRAINT invoices_tenant_id_id_unique UNIQUE (tenant_id,id);
 ALTER TABLE raw_import_rows ADD CONSTRAINT raw_import_rows_tenant_id_id_unique UNIQUE (tenant_id,id);
 ALTER TABLE invoice_lines ADD CONSTRAINT invoice_lines_tenant_id_id_unique UNIQUE (tenant_id,id);
-ALTER TABLE invoice_lines ADD CONSTRAINT invoice_lines_tenant_id_id_unique UNIQUE (tenant_id,id);
 ALTER TABLE mapping_decisions ADD CONSTRAINT mapping_decisions_raw_row_same_tenant_fk
  FOREIGN KEY (tenant_id,raw_row_id) REFERENCES raw_import_rows(tenant_id,id);
 ALTER TABLE invoice_lines ADD CONSTRAINT invoice_lines_invoice_same_tenant_fk
