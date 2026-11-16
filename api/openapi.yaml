@@ -285,8 +285,51 @@ components:
         contribution: { type: [string, "null"], description: Always null while the source/cost model is incomplete }
         marginPercent: { type: [string, "null"], description: Always null while the source/cost model is incomplete }
         indicativeContribution: { $ref: '#/components/schemas/MoneyDecimal' }
-        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        currency: { type: string, pattern: '^[A-Z]{3}
+        completeness: { type: string, enum: [incomplete] }
+        limitations: { type: array, items: { type: string } }
+    CalculationRunResponse:
+      type: object
+      required: [id, createdAt, outputs]
+      properties:
+        id: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        outputs: { $ref: '#/components/schemas/CalculationOutputs' }
+    CalculationRunRecord:
+      type: object
+      required: [id, contract_id, site_id, period_start, period_end, formula_version, inputs, outputs, completeness, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        contract_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        period_start: { type: string, format: date }
+        period_end: { type: string, format: date }
+        formula_version: { type: string }
+        inputs: { type: object }
+        outputs: { $ref: '#/components/schemas/CalculationOutputs' }
+        completeness: { type: string, enum: [incomplete] }
+        created_at: { type: string, format: date-time }
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TenantId:
+      name: tenantId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    BatchId:
+      name: batchId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+ }
         taxBasis: { type: string }
+        invoiceLineCount: { type: integer, minimum: 0 }
+        allocationLineCount: { type: integer, minimum: 0 }
+        taxBasisCount: { type: integer, minimum: 0 }
         completeness: { type: string, enum: [incomplete] }
         limitations: { type: array, items: { type: string } }
     CalculationRunResponse:
