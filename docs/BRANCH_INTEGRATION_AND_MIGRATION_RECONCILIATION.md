@@ -156,3 +156,10 @@ PR #25 head `ff354de4418b4d471ca0e8cd881af4f9acf5ef78` passed CI run #4397350220
 Migration 012 introduces explicit contract-version tax-basis metadata and defaults legacy versions to `unknown`; calculation creation blocks unknown or invoice-mismatched tax basis. Local Compose initialization now mounts migrations 010–012, and CI applies migration 012. Import registration and parsed-row ingestion now reject conflicting checksum metadata and changed row replays, support stable row offsets across chunks, and serialize writes per batch.
 
 This is a PR #25 branch result only. It does not establish that the two PR branches compose cleanly. Keep the combined-candidate requirements above: one reviewed commit SHA, migration execution, full RLS/IDOR/FK suite, full financial acceptance suite, role matrix and independent security/accounting review. Both PRs remain separate drafts; no merge or deployment is authorised.
+
+
+## 10. Calculation currency and tax-basis regression evidence — 17 November 2026
+
+PR #25 head `ce168020eb49667616e5c36f1cc9b324f92c22b5` passed CI run #43974141222. The authenticated API integration suite now constructs complete synthetic source evidence and confirms calculation creation rejects both invoice tax basis mismatched to the approved contract version and payroll allocation currency mismatched to the contract currency. Node.js 22 and PostgreSQL 16 jobs passed on the exact head.
+
+The combined-candidate requirement remains open. This is not the full API-CALC-T01–T14 suite, not a financial/accounting signoff, and not production certification. PR #25 and PR #26 remain separate drafts; no merge or deployment is authorised.
