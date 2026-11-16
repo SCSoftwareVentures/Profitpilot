@@ -59,7 +59,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES ($1,$2,'analyst','active'),($1,$3,'read_only','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status='active'",[tenantA,userA,userB]);
     await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES ($1,$2,'analyst','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status='active'",[tenantB,userC]);
     const importB="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-    await admin.query("INSERT INTO import_batches(id,tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by) VALUES ($1,$2,'payroll','CI tenant B permission','uploaded',$3,'tenant-b.csv',$4) ON CONFLICT(id) DO NOTHING",[importB,tenantB,"e".repeat(64),userC]);
+    await admin.query("INSERT INTO import_batches(id,tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by) VALUES ($1,$2,'payroll','CI tenant B permission','registered',$3,'tenant-b.csv',$4) ON CONFLICT(id) DO NOTHING",[importB,tenantB,"e".repeat(64),userC]);
     await admin.query("INSERT INTO businesses(id,tenant_id,name) VALUES ($1,$2,'CI Business A') ON CONFLICT(id) DO NOTHING",[businessA,tenantA]);
     await admin.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'CI Customer A','active') ON CONFLICT(id) DO NOTHING",[contractA,tenantA,businessA]);
     await admin.query("INSERT INTO businesses(id,tenant_id,name) VALUES ($1,$2,'CI Business B') ON CONFLICT(id) DO NOTHING",[businessB,tenantB]);
@@ -67,7 +67,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const partialSite="abababab-abab-4bab-8bab-abababababab";
     await admin.query("INSERT INTO sites(id,tenant_id,business_id,name) VALUES ($1,$2,$3,'CI partial-period site') ON CONFLICT(id) DO NOTHING",[partialSite,tenantA,businessA]);
     await admin.query("INSERT INTO contract_versions(id,tenant_id,contract_id,version_no,effective_from,price,currency,billing_basis,approved_by,approved_at) VALUES ('acacacac-acac-4cac-8cac-acacacacacac',$1,$2,1,'2026-02-15',100,'AUD','monthly',$3,now()) ON CONFLICT(id) DO NOTHING",[tenantA,contractA,userA]);
-    await assert.rejects(()=>admin.query("INSERT INTO import_batches(id,tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by) VALUES ($1,$2,'payroll','CI permission','uploaded',$3,'cross-tenant.csv',$4)",["cccccccc-cccc-4ccc-8ccc-cccccccccccc",tenantA,"d".repeat(64),userC]),/foreign key constraint/i,"a user who belongs only to tenant B must not be recorded as the creator of a tenant A import");
+    await assert.rejects(()=>admin.query("INSERT INTO import_batches(id,tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by) VALUES ($1,$2,'payroll','CI permission','registered',$3,'cross-tenant.csv',$4)",["cccccccc-cccc-4ccc-8ccc-cccccccccccc",tenantA,"d".repeat(64),userC]),/foreign key constraint/i,"a user who belongs only to tenant B must not be recorded as the creator of a tenant A import");
 
     const noToken=await request("/v1/me");
     assert.equal(noToken.status,401,"requests without a bearer token must be rejected");
