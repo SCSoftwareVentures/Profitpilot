@@ -72,6 +72,15 @@ BEGIN
         fk.source_table,fk.target_table;
     END IF;
   END LOOP;
+  IF EXISTS (
+    SELECT 1 FROM pg_default_acl d
+    JOIN pg_namespace ns ON ns.oid=d.defaclnamespace
+    CROSS JOIN LATERAL aclexplode(d.defaclacl) acl
+    JOIN pg_roles grantee ON grantee.oid=acl.grantee
+    WHERE ns.nspname='public' AND d.defaclobjtype='r'
+      AND grantee.rolname='profitpilot_app'
+      AND acl.privilege_type IN ('INSERT','UPDATE','DELETE')
+  ) THEN RAISE EXCEPTION 'Runtime role has dangerous default DML grants on future tables'; END IF;
   IF has_table_privilege('profitpilot_app','public.tenants','INSERT')
      OR has_table_privilege('profitpilot_app','public.tenants','UPDATE')
      OR has_table_privilege('profitpilot_app','public.tenants','DELETE')
