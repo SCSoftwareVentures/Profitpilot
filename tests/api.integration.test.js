@@ -69,6 +69,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(ownBody.items[0].id,contractA);
     const scopedRows=await withTenant(tenantA,client=>client.query("SELECT id FROM contracts ORDER BY id"));
     assert.deepEqual(scopedRows.rows.map(row=>row.id),[contractA],"database RLS must hide tenant B contract rows even from a tenant A scoped connection");
+    const afterCommit=await appPool.query("SELECT current_setting('app.tenant_id',true) AS tenant_id");
+    assert.ok(afterCommit.rows[0].tenant_id===null||afterCommit.rows[0].tenant_id==="","tenant context must not leak after a transaction returns its pooled connection");
     await assert.rejects(()=>withTenant(tenantA,client=>client.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'RLS write probe','active')",["99999999-9999-4999-8999-999999999999",tenantB,businessB])),/row-level security/i,"RLS WITH CHECK must reject cross-tenant writes");
 
     const otherTenant=await request(`/v1/tenants/${tenantB}/contracts`,{subject:"ci-api-analyst"});
