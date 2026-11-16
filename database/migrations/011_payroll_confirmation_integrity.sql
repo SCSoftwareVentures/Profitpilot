@@ -99,14 +99,14 @@ FOR EACH ROW
 EXECUTE FUNCTION private.validate_payroll_allocation_confirmation();
 
 CREATE FUNCTION private.reject_confirmed_allocation_run_mutation()
-RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public,private AS $
+RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public,private AS $$
 BEGIN
   IF OLD.status='confirmed' THEN
     RAISE EXCEPTION 'Confirmed payroll allocation runs are immutable' USING ERRCODE='55000';
   END IF;
   RETURN OLD;
 END;
-$;
+$$;
 CREATE TRIGGER allocation_runs_confirmed_immutable
 BEFORE UPDATE OR DELETE ON allocation_runs
 FOR EACH ROW EXECUTE FUNCTION private.reject_confirmed_allocation_run_mutation();
