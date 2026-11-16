@@ -58,6 +58,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("INSERT INTO users(id,auth_subject,email,status) VALUES ($1,'ci-api-analyst','analyst@example.invalid','active'),($2,'ci-api-reader','reader@example.invalid','active'),($3,'ci-api-tenant-b-only','tenant-b@example.invalid','active') ON CONFLICT(auth_subject) DO UPDATE SET status='active'",[userA,userB,userC]);
     await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES ($1,$2,'analyst','active'),($1,$3,'read_only','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status='active'",[tenantA,userA,userB]);
     await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES ($1,$2,'analyst','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status='active'",[tenantB,userC]);
+    const importB="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    await admin.query("INSERT INTO import_batches(id,tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by) VALUES ($1,$2,'payroll','CI tenant B permission','uploaded',$3,'tenant-b.csv',$4) ON CONFLICT(id) DO NOTHING",[importB,tenantB,"e".repeat(64),userC]);
     await admin.query("INSERT INTO businesses(id,tenant_id,name) VALUES ($1,$2,'CI Business A') ON CONFLICT(id) DO NOTHING",[businessA,tenantA]);
     await admin.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'CI Customer A','active') ON CONFLICT(id) DO NOTHING",[contractA,tenantA,businessA]);
     await admin.query("INSERT INTO businesses(id,tenant_id,name) VALUES ($1,$2,'CI Business B') ON CONFLICT(id) DO NOTHING",[businessB,tenantB]);
@@ -132,7 +134,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(activeSecondary.rowCount,1,"the replacement key must remain valid after old-key revocation");
     const afterCommit=await appPool.query("SELECT current_setting('app.tenant_id',true) AS tenant_id");
     assert.ok(afterCommit.rows[0].tenant_id===null||afterCommit.rows[0].tenant_id==="","tenant context must not leak after a transaction returns its pooled connection");
-    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'RLS write probe','active')",["99999999-9999-4999-8999-999999999999",tenantB,businessB])),/row-level security/i,"RLS WITH CHECK must reject cross-tenant writes");
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'unauthorised write','active')",["99999999-9999-4999-8999-999999999999",tenantB,businessB])),/permission denied/i,"the runtime role must not write to unimplemented contract administration tables");
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES ($1,$2,1,'{}'::jsonb)",[tenantB,importB])),/row-level security/i,"RLS WITH CHECK must reject cross-tenant writes on an API-writable table");
 
     const otherTenant=await request(`/v1/tenants/${tenantB}/contracts`,{subject:"ci-api-analyst"});
     assert.equal(otherTenant.status,403,"a tenant A member must not access tenant B");
