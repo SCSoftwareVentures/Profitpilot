@@ -111,6 +111,7 @@ test("invoice validation uses strict decimal syntax without Number coercion",()=
 
 test("money preserves the full supported PostgreSQL numeric(14,2) range exactly",()=>{
   assert.equal(money("999999999999.99"),"999999999999.99");
+  assert.equal(money("-999999999999.99"),"-999999999999.99");
   assert.equal(Number.isNaN(money("1000000000000.00")),true);
 });
 
