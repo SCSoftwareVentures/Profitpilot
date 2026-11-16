@@ -46,7 +46,8 @@ app.post("/v1/tenants/:tenantId/imports",membership,requireRole("owner","admin",
 });
 app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requireRole("owner","admin","analyst"),async(req,res,next)=>{try{
  const rows=req.body?.rows;
- if(!Array.isArray(rows)||rows.length<1||rows.length>200||rows.some(x=>!x||typeof x!=="object"||Array.isArray(x)))return res.status(400).json({error:"Provide 1–200 row objects"});
+ const startRowNumber=req.body?.startRowNumber??1;
+ if(!Number.isSafeInteger(startRowNumber)||startRowNumber<1||startRowNumber>1000000000||!Array.isArray(rows)||rows.length<1||rows.length>200||startRowNumber+rows.length-1>1000000000||rows.some(x=>!x||typeof x!=="object"||Array.isArray(x)))return res.status(400).json({error:"Provide 1–200 row objects and a valid positive startRowNumber"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const batch=await client.query("SELECT id,status,source_type FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.batchId,req.membership.tenantId]);
   if(!batch.rowCount)return {status:404,error:"Import batch not found"};
@@ -55,20 +56,20 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requireRole("o
   // Preflight every row number before writing any row. A retry is idempotent
   // only when the persisted payload is byte-for-byte equivalent as JSON data.
   for(let i=0;i<rows.length;i++){
-   const existing=await client.query("SELECT payload = $4::jsonb AS same FROM raw_import_rows WHERE tenant_id=$1 AND batch_id=$2 AND row_number=$3",[req.membership.tenantId,req.params.batchId,i+1,JSON.stringify(rows[i])]);
+   const existing=await client.query("SELECT payload = $4::jsonb AS same FROM raw_import_rows WHERE tenant_id=$1 AND batch_id=$2 AND row_number=$3",[req.membership.tenantId,req.params.batchId,startRowNumber+i,JSON.stringify(rows[i])]);
    if(existing.rowCount&&!existing.rows[0].same)
     return {status:409,error:"A source row number already exists with different content. Register a corrected source version rather than overwriting import evidence."};
   }
   let inserted=0;
   for(let i=0;i<rows.length;i++){
-   const row=await client.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,$3,$4) ON CONFLICT(batch_id,row_number) DO NOTHING RETURNING id",[req.membership.tenantId,req.params.batchId,i+1,JSON.stringify(rows[i])]);
+   const row=await client.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,$3,$4) ON CONFLICT(batch_id,row_number) DO NOTHING RETURNING id",[req.membership.tenantId,req.params.batchId,startRowNumber+i,JSON.stringify(rows[i])]);
    inserted+=row.rowCount;
   }
   await client.query("UPDATE import_batches SET status='review' WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
-  return {status:201,inserted,received:rows.length,duplicates:rows.length-inserted};
+  return {status:201,inserted,received:rows.length,duplicates:rows.length-inserted,startRowNumber};
  });
  if(result.error)return res.status(result.status).json({error:result.error});
- res.status(result.status).json({batchId:req.params.batchId,inserted:result.inserted,received:result.received,duplicates:result.duplicates});
+ res.status(result.status).json({batchId:req.params.batchId,inserted:result.inserted,received:result.received,duplicates:result.duplicates,startRowNumber:result.startRowNumber});
  }catch(e){next(e);}});
 
 app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
