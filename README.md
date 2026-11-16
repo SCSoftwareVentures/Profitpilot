@@ -22,3 +22,19 @@ Begin with an evidence-led concierge workflow using authorised data. Validate da
 ## Documentation
 
 Further product, validation, architecture, roadmap and risk documentation will be added as the repository foundation is populated.
+
+
+## Project documentation
+
+- [Current project status](docs/PROJECT_STATUS.md)
+- [G0 concierge pilot pack](docs/G0_CONCIERGE_PILOT_PACK.md)
+- [Target architecture](docs/ARCHITECTURE.md)
+- [Initial threat model](docs/THREAT_MODEL.md)
+- [Release and test plan](docs/RELEASE_AND_TEST_PLAN.md)
+
+## Visual prototypes
+
+- [Simplified dashboard concept](demo/dashboard.html) — responsive static HTML with fictional placeholder figures; no live data or connected services.
+- [Landing-page concept](index.html) — static presentation concept.
+
+These prototypes are for design review only. They are not a deployed product or evidence of implemented business workflows.
