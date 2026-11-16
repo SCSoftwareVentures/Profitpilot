@@ -31,7 +31,7 @@ Separate high-impact actions such as membership changes, exports, baseline appro
 - Log authorization denials and sensitive exports without logging secrets or unnecessary personal data.
 
 ## PostgreSQL row-level security deployment pattern
-The tenant RLS migration enables and forces row-level security on tenant-owned tables using `private.current_tenant_id()`, which validates a short-lived HMAC-signed transaction context and active membership. PostgreSQL 16 CI tests passed for valid context, raw-GUC spoof rejection, cross-tenant row isolation, cross-tenant write rejection and pooled-context cleanup. Production deployment, key rotation/recovery and broader all-table adversarial isolation tests remain outstanding. Before any shared or production deployment:
+The tenant RLS migration enables and forces row-level security on tenant-owned tables using `private.current_tenant_id()`, which validates a short-lived HMAC-signed transaction context and active membership. PostgreSQL 16 CI tests passed for valid context, raw-GUC spoof rejection, cross-tenant row isolation, cross-tenant write rejection and pooled-context cleanup. Production deployment, operational key provisioning/recovery and broader all-table adversarial isolation tests remain outstanding. Overlapping key rotation, replacement-key cutover and old-key revocation now have ephemeral PostgreSQL CI coverage (run #115); production key custody, rotation runbooks and recovery exercises remain unverified. Before any shared or production deployment:
 1. Generate a cryptographically random HMAC key outside the database and source repository; provision it to the API secret store and the private database key table through a controlled migration/bootstrap path.
 2. Set a transaction-local signed context only after verifying identity and membership; include tenant ID, verified subject, expiry, nonce and key ID.
 3. Ensure pooled connections cannot leak context between requests.
@@ -51,7 +51,7 @@ USING (tenant_id = private.current_tenant_id())
 WITH CHECK (tenant_id = private.current_tenant_id());
 ```
 
-Do not copy this blindly into production. Missing, expired, forged or membership-invalid context must deny access. Keep the signing key out of source control and inaccessible to the database runtime role. The API process is trusted with this secret; protect it accordingly. Rotate keys using overlapping key IDs and a controlled dual-key window; document revocation, backup, recovery and compromise procedures. Never reuse the CI key in any shared environment.
+Do not copy this blindly into production. Missing, expired, forged or membership-invalid context must deny access. Keep signing keys out of source control and inaccessible to the database runtime role. The API process is trusted with this secret; protect it accordingly. CI covers overlapping rotation and revocation, but production key custody, rotation runbooks, emergency revocation and recovery remain operational requirements. Rotate keys using overlapping key IDs and a controlled dual-key window; document revocation, backup, recovery and compromise procedures. Never reuse the CI key in any shared environment.
 
 ## File and import security
 - Private object storage, not public repository or browser local storage.
