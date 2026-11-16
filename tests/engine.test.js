@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {money,parseCsv,validateInvoiceRows,allocatePayroll,matchInvoice,aggregateMetrics,isIsoDate,normalizePayrollRows} from "../src/engine.js";
 
-test("money uses cent precision",()=>assert.equal(money(10.126),10.13));
+test("money accepts canonical decimal strings and returns exact decimal strings",()=>{assert.equal(money("10.13"),"10.13");assert.equal(Number.isNaN(money(10.13)),true);});
 test("ISO date accepts a valid calendar date",()=>assert.equal(isIsoDate("2026-11-16"),true));
 test("ISO date accepts leap day only in leap years",()=>{assert.equal(isIsoDate("2024-02-29"),true);assert.equal(isIsoDate("2025-02-29"),false);});
 test("ISO date rejects impossible and malformed dates",()=>{assert.equal(isIsoDate("2026-02-31"),false);assert.equal(isIsoDate("16-11-2026"),false);});
@@ -27,31 +27,30 @@ test("invoice whitespace-only identity fields are held",()=>assert.equal(validat
 test("invoice amount rejects non-decimal numeric syntax",()=>assert.equal(validateInvoiceRows([{invoice_id:"1",site:"A",date:"2026-11-01",amount:"0x10"}])[0].status,"held"));
 test("invoice amount rejects more than two fractional digits",()=>assert.equal(validateInvoiceRows([{invoice_id:"1",site:"A",date:"2026-11-01",amount:"1.234"}])[0].status,"held"));
 test("impossible calendar date is held",()=>assert.equal(validateInvoiceRows([{invoice_id:"1",site:"A",date:"2026-02-31",amount:"3"}])[0].status,"held"));
-test("payroll buckets reconcile",()=>assert.equal(allocatePayroll({pool:1000,direct:[{site:"A",amount:400}],approved:[{site:"B",amount:300}],nonSite:200,excluded:50}).reconciles,true));
-test("over-allocation is rejected",()=>assert.equal(allocatePayroll({pool:100,direct:[{site:"A",amount:101}]}).reconciles,false));
-test("negative allocation is rejected",()=>assert.equal(allocatePayroll({pool:100,direct:[{site:"A",amount:-1}]}).reconciles,false));
-test("amount-only match remains low-confidence and unconfirmed",()=>{const r=matchInvoice({amount:100},{id:"c",periodStart:"2026-11-01",periodEnd:"2026-11-30"});assert.equal(r.confidence,"LOW");assert.equal(r.requiresHumanConfirmation,true);assert.equal(r.decision,"candidate");});
-test("match candidate always needs human confirmation",()=>assert.equal(matchInvoice({site:"A",date:"2026-11-05",amount:100},{id:"c",site:"A",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).requiresHumanConfirmation,true));
-test("metrics aggregate totals and margin",()=>{const r=aggregateMetrics([{revenue:1000,cost:600},{revenue:500,cost:250}]);assert.deepEqual([r.revenue,r.cost,r.contribution,r.margin],[1500,850,650,43.33]);});
+test("payroll buckets reconcile",()=>assert.equal(allocatePayroll({pool:"1000.00",direct:[{site:"A",amount:"400.00"}],approved:[{site:"B",amount:"300.00"}],nonSite:"200.00",excluded:"50.00"}).reconciles,true));
+test("over-allocation is rejected",()=>assert.equal(allocatePayroll({pool:"100.00",direct:[{site:"A",amount:"101.00"}]}).reconciles,false));
+test("negative allocation is rejected",()=>assert.equal(allocatePayroll({pool:"100.00",direct:[{site:"A",amount:"-1.00"}]}).reconciles,false));
+test("amount-only match remains low-confidence and unconfirmed",()=>{const r=matchInvoice({amount:"100.00"},{id:"c",periodStart:"2026-11-01",periodEnd:"2026-11-30"});assert.equal(r.confidence,"LOW");assert.equal(r.requiresHumanConfirmation,true);assert.equal(r.decision,"candidate");});
+test("match candidate always needs human confirmation",()=>assert.equal(matchInvoice({site:"A",date:"2026-11-05",amount:"100.00"},{id:"c",site:"A",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).requiresHumanConfirmation,true));
+test("metrics aggregate totals and margin",()=>{const r=aggregateMetrics([{revenue:"1000.00",cost:"600.00"},{revenue:"500.00",cost:"250.00"}]);assert.deepEqual([r.revenue,r.cost,r.contribution,r.margin],["1500.00","850.00","650.00","43.33"]);});
 
 test("money rounds decimal half-cents consistently, including negative values",()=>{
-  assert.equal(money("1.005"),1.01);
-  assert.equal(money("2.675"),2.68);
-  assert.equal(money("-1.005"),-1.01);
+  assert.equal(Number.isNaN(money("1.005")),true);
+  assert.equal(Number.isNaN(money("2.675")),true);
+  assert.equal(money("-1.00"),"-1.00");
 });
-test("money rejects non-finite and malformed inputs",()=>{
-  assert.equal(Number.isNaN(money("not-money")),true);
-  assert.equal(Number.isNaN(money(Infinity)),true);
+test("money rejects non-string, non-canonical and out-of-range inputs",()=>{
+  for(const value of ["not-money","1e3","01.00","1.234","1000000000000.00",1.25,Infinity]) assert.equal(Number.isNaN(money(value)),true);
 });
 test("payroll allocation sums decimal amounts without binary floating drift",()=>{
   const result=allocatePayroll({pool:"0.30",direct:[{site:"A",amount:"0.10"},{site:"A",amount:"0.20"}]});
   assert.equal(result.reconciles,true);
-  assert.equal(result.direct,0.30);
-  assert.equal(result.siteTotals.A,0.30);
+  assert.equal(result.direct,"0.30");
+  assert.equal(result.siteTotals.A,"0.30");
 });
 test("contract aggregation preserves cents over repeated decimal values",()=>{
   const result=aggregateMetrics([{revenue:"0.10",cost:"0.03"},{revenue:"0.20",cost:"0.06"}]);
-  assert.deepEqual([result.revenue,result.cost,result.contribution,result.margin],[0.30,0.09,0.21,70]);
+  assert.deepEqual([result.revenue,result.cost,result.contribution,result.margin],["0.30","0.09","0.21","70.00"]);
 });
 
 test("invoice matcher rejects hexadecimal and non-finite amount syntax",()=>{
@@ -126,3 +125,8 @@ test("contract aggregation blocks mixed currencies, tax bases and reporting peri
   assert.equal(mixedPeriod.complete,false);
   assert.equal(aggregateMetrics([{...common,revenue:100,cost:50},{...common,revenue:100,cost:50}]).contribution,100);
 });
+
+
+test("invoice validator rejects JSON numeric amounts before any float coercion",()=>{const row={invoice_id:"inv-1",site:"A",date:"2026-11-01",amount:0.1};assert.equal(validateInvoiceRows([row])[0].status,"held");});
+test("payroll normalizer rejects JSON numeric and exponent amounts",()=>{const rows=normalizePayrollRows([{source_row_key:"n1",amount:0.1,currency:"AUD"},{source_row_key:"n2",amount:"1e3",currency:"AUD"},{source_row_key:"n3",amount:"01.00",currency:"AUD"}]);assert.deepEqual(rows.map(x=>x.status),["held","held","held"]);});
+test("financial helpers preserve large supported cent values as decimal strings",()=>{assert.equal(money("999999999999.99"),"999999999999.99");assert.equal(Number.isNaN(money("1000000000000.00")),true);});
