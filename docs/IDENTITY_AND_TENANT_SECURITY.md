@@ -2,6 +2,8 @@
 
 **Status:** partial implementation scaffold. The API includes JWT/JWKS verification, tenant membership checks, role middleware, transaction-scoped tenant context and a PostgreSQL RLS migration. The schema and migrations were executed against an ephemeral PostgreSQL 16 service in GitHub Actions, and a basic RLS isolation check passed under the restricted runtime role. They have not been tested in a production environment or independently security-tested. Secure file storage is not implemented.
 
+The current RLS context is a server-set PostgreSQL custom setting (`app.tenant_id`). This provides defence against accidentally unscoped queries and has been tested for row filtering, cross-tenant writes and transaction-pool cleanup. It is **not** an independent security boundary against a compromised application process or arbitrary SQL execution under `profitpilot_app`: PostgreSQL permits that role to set custom GUC values. Production threat modelling must explicitly accept the API process as trusted for tenant-context selection or replace this mechanism with a cryptographically authenticated context / stronger database role boundary. Do not describe the current RLS implementation as protecting against a malicious or fully compromised runtime role.
+
 ## Identity boundary
 Use a managed identity provider with OIDC/OAuth 2.0 Authorization Code + PKCE for browser clients. The application must not store raw passwords. Require MFA for privileged users; provide secure recovery, session revocation, rate limiting and account lifecycle controls.
 
@@ -73,7 +75,7 @@ Append-only events for login/security changes, membership, source upload/access,
 
 ## Required pre-production evidence
 - Identity-provider configuration and recovery tests.
-- Tenant-isolation negative test suite for all entities and API endpoints.
+- Tenant-isolation negative test suite for all entities and API endpoints, including a reviewed decision on the trust boundary for application-set tenant context.
 - RLS tests under the real application database role and connection pool.
 - Independent penetration test and remediation retest.
 - SAST, dependency and secret scanning.
