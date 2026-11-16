@@ -114,7 +114,7 @@ paths:
       - $ref: '#/components/parameters/TenantId'
     post:
       summary: Create a versioned contract/site/period calculation run
-      description: Server calculates from immutable input versions; no client-supplied output totals are trusted.
+      description: Server calculates from immutable input versions; no client-supplied output totals are trusted. The approved contract version tax basis must be explicit and must match every confirmed invoice source basis; unknown or mixed tax basis is blocked.
       responses:
         "201": { description: Calculation run created }
         "422": { description: Insufficient or unreconciled source evidence }
