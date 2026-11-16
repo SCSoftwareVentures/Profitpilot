@@ -78,13 +78,13 @@ BEGIN
     WHERE app_role.rolname='profitpilot_app'
   ) THEN RAISE EXCEPTION 'Runtime role must not inherit or SET ROLE into another database role'; END IF;
   IF EXISTS (
-    SELECT 1 FROM pg_class c JOIN pg_roles r ON r.oid=c.relowner
+    SELECT 1 FROM pg_class c JOIN pg_roles owner_role ON owner_role.oid=c.relowner
     JOIN pg_namespace ns ON ns.oid=c.relnamespace
-    WHERE r.rolname='profitpilot_app' AND ns.nspname='public'
+    WHERE owner_role.rolname='profitpilot_app' AND ns.nspname='public'
   ) THEN RAISE EXCEPTION 'Runtime role must not own public tables, sequences or views'; END IF;
   IF EXISTS (
-    SELECT 1 FROM pg_namespace ns JOIN pg_roles r ON r.oid=ns.nspowner
-    WHERE r.rolname='profitpilot_app' AND ns.nspname IN ('public','private')
+    SELECT 1 FROM pg_namespace ns JOIN pg_roles schema_owner ON schema_owner.oid=ns.nspowner
+    WHERE schema_owner.rolname='profitpilot_app' AND ns.nspname IN ('public','private')
   ) THEN RAISE EXCEPTION 'Runtime role must not own application schemas'; END IF;
   IF EXISTS (
     SELECT 1 FROM pg_default_acl d
