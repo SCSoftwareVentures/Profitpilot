@@ -7,6 +7,7 @@ on:
   pull_request:
     branches:
       - main
+      - integration/pr25-pr26-validation
   workflow_dispatch:
 
 permissions:
