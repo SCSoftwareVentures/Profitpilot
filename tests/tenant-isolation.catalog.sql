@@ -15,7 +15,7 @@ BEGIN
     FROM pg_class c
     JOIN pg_namespace n ON n.oid=c.relnamespace
     WHERE n.nspname='public' AND c.relkind IN ('r','p')
-      AND (c.relname='tenants' OR EXISTS (
+      AND (c.relname IN ('tenants','users') OR EXISTS (
         SELECT 1 FROM pg_attribute a
         WHERE a.attrelid=c.oid AND a.attname='tenant_id'
           AND a.attnum>0 AND NOT a.attisdropped
