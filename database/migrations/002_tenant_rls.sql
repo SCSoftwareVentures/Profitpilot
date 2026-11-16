@@ -35,7 +35,7 @@ BEGIN
  v_key_id:=nullif(current_setting('app.tenant_key_id',true),'');
  v_signature:=lower(nullif(current_setting('app.tenant_signature',true),''));
  IF v_tenant IS NULL OR v_subject IS NULL OR v_expires IS NULL OR v_nonce IS NULL OR v_key_id IS NULL OR v_signature IS NULL THEN RETURN NULL; END IF;
- IF v_expires < floor(extract(epoch FROM clock_timestamp()))::bigint OR v_expires > floor(extract(epoch FROM clock_timestamp()))::bigint+60 THEN RETURN NULL; END IF;
+ IF v_expires < floor(extract(epoch FROM statement_timestamp()))::bigint OR v_expires > floor(extract(epoch FROM statement_timestamp()))::bigint+60 THEN RETURN NULL; END IF;
  IF v_nonce !~ '^[a-f0-9]{32}$' OR v_signature !~ '^[a-f0-9]{64}$' THEN RETURN NULL; END IF;
  SELECT secret INTO v_secret FROM private.tenant_context_keys WHERE key_id=v_key_id AND active=true;
  IF v_secret IS NULL THEN RETURN NULL; END IF;
