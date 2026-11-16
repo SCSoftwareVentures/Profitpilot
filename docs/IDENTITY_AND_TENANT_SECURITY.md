@@ -84,3 +84,19 @@ Append-only events for login/security changes, membership, source upload/access,
 - Privacy impact assessment, retention schedule and verified deletion tests.
 
 No production security certification is implied by this plan.
+
+
+## Security hardening evidence update — 16 November 2026 (PR #25 review branch)
+
+This addendum supersedes earlier statements in this document that all-table database visibility tests were still outstanding. It applies to the unmerged security review branch, not to `main`.
+
+- CI catalog-checks forced RLS and expected policies across all 19 protected tenant/root-identity tables.
+- Two synthetic tenants are seeded across every protected table. Under signed tenant context, integration tests verify tenant C and tenant D see only their respective rows in every table.
+- Cross-tenant object-IDOR negatives cover calculation retrieval, import-row ingestion and match decisions.
+- Runtime database privileges are least-privilege: tenant, user and membership records are read-only; deletes of import/source and audit records are denied; only current API write paths receive explicit DML grants. Future tables default to read-only.
+- JWT validation requires `exp`, `iat` and `sub`, limits token age to 15 minutes, restricts signing algorithms and requires HTTPS JWKS in production. CI tests expiry, stale tokens and JWKS key publication/rotation.
+- Request rate limiting, HMAC key overlap/revocation, forged/expired/non-member tenant contexts and pooled connection cleanup have CI coverage.
+- The npm lockfile is committed and CI/Docker use `npm ci`; production dependency audit runs in CI.
+- Latest review-branch CI run **#212** passed. This remains ephemeral test evidence, not independent security certification.
+
+Still not implemented or verified: private object storage and secure file lifecycle, malware scanning, production identity-provider/MFA configuration, managed production HMAC secret custody and recovery exercises, distributed rate limiting, production backup/restore, privacy impact/legal review, independent penetration test and remediation retest. Do not use real customer or employee information until these gates are completed and explicitly approved.
