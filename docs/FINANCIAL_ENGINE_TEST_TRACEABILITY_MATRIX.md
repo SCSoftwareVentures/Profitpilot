@@ -138,3 +138,10 @@ This is evidence that the repository's configured checks passed for that exact c
 This matrix authorises no code changes, SQL migrations, dependency additions, data backfills, production configuration, customer-data access, merge or deployment. The public repository must continue to contain synthetic fixtures only.
 
 Before implementation: reconcile the PR #25 security branch with the product branch; obtain named technical, finance/payroll, privacy/legal and security owners; resolve policy decisions; complete G0–G4 evidence; and obtain explicit G5 signed GO. A green CI run or a completed design document cannot substitute for those approvals.
+
+ 
+## 8. Follow-up exact-money and property tests — hardening branch
+
+The follow-up hardening branch adds canonical decimal-string enforcement and a deterministic property suite. The property suite runs 500 payroll bucket reconciliation cases with seed `0x5eed1234`, checks aggregation order invariance, preserves unknown/null and negative-credit semantics, and blocks mixed currency/tax-basis aggregation. Targeted Node/PostgreSQL CI also exercises direct-SQL reviewer-role denial and payroll actor binding.
+
+These are additional implementation and regression checks. They do **not** mark the complete DEC/TAX/PAY/PAYLED/INV/CON/VAR/IMP plan as executed. Locale-specific thousands parsing, rounding-policy selection, GST/FX conversion, payroll source-row lifecycle/restatement, invoice eligibility denominator, variation lifecycle, import control totals, formula-injection export and full source provenance remain unimplemented or not tested end-to-end. Qualified reviewers must approve all expected financial values and policy choices before the financial acceptance gate can pass.
