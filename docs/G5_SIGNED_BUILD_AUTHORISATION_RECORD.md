@@ -73,3 +73,17 @@ I confirm that the evidence above has been reviewed, the scope and budget are ap
 - Review/expiry date:
 
 **A signed G5 record authorises only the scope explicitly written above. It does not authorise production deployment, live customer data, payment activity or commercial launch; those retain separate release approvals.**
+
+## Owner assignment — 17 November 2026
+
+- Technical delivery owner (named): **Sammy Chehade**.
+- Assignment basis: explicitly supplied by the project owner on 17 November 2026.
+- Technical owner's acceptance/signature: NOT RECORDED.
+- Product owner / decision-maker: NOT CONFIRMED IN THIS RECORD.
+- Finance/payroll, security, privacy/legal, UX/accessibility and operations/support accountable reviewers: NOT NAMED.
+- Approved budget/funding source: NOT PROVIDED.
+- Delivery capacity/resourcing: NOT EVIDENCED.
+- G0–G4 and competitive preconditions: NOT EVIDENCED.
+- G5 decision: **DEFER — NOT AUTHORISED**.
+
+Naming a technical owner satisfies only the named-owner field. It does not constitute that person's acceptance, assign unverified capacity, provide a budget, satisfy validation gates, or authorise implementation. Complete the remaining fields and attach evidence before any G5 approval.
