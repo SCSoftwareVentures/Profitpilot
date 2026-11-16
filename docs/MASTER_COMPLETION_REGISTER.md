@@ -255,3 +255,10 @@ Verified additions:
 - CI and local Compose initialization include the new migration sequence.
 
 Evidence boundary remains unchanged: PR #25 alone passed CI. PR #25/#26 have not been combined. The full financial acceptance suite, private object storage, production identity/MFA, managed key custody, shared rate limiting, independent penetration test, legal/privacy/accounting approval and G0–G5 validation remain open. G5 is DEFERRED / NOT AUTHORISED.
+
+
+## 18. PR #25 calculation basis integration tests — 17 November 2026
+
+PR #25 head `ce168020eb49667616e5c36f1cc9b324f92c22b5` passed CI run #43974141222, with both Node.js 22 and PostgreSQL 16 jobs green. New synthetic integration fixtures create fully reconciled invoice and payroll evidence and verify the API blocks invoice tax basis that differs from the approved contract version, and payroll allocation currency that differs from the contract currency. No definitive contribution is emitted from these mismatched inputs.
+
+This closes only these two targeted negative cases. The full financial acceptance suite, source completeness, credits/reversals, payroll workflow, production security, independent review and G0–G5 validation remain outstanding. The branches remain separate and unmerged.
