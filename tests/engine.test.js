@@ -30,7 +30,7 @@ test("impossible calendar date is held",()=>assert.equal(validateInvoiceRows([{i
 test("payroll buckets reconcile",()=>assert.equal(allocatePayroll({pool:1000,direct:[{site:"A",amount:400}],approved:[{site:"B",amount:300}],nonSite:200,excluded:50}).reconciles,true));
 test("over-allocation is rejected",()=>assert.equal(allocatePayroll({pool:100,direct:[{site:"A",amount:101}]}).reconciles,false));
 test("negative allocation is rejected",()=>assert.equal(allocatePayroll({pool:100,direct:[{site:"A",amount:-1}]}).reconciles,false));
-test("amount-only match is unmatched",()=>assert.equal(matchInvoice({amount:100},{site:"A",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).confidence,"UNMATCHED"));
+test("amount-only match remains low-confidence and unconfirmed",()=>{const r=matchInvoice({amount:100},{id:"c",periodStart:"2026-11-01",periodEnd:"2026-11-30"});assert.equal(r.confidence,"LOW");assert.equal(r.requiresHumanConfirmation,true);assert.equal(r.decision,"candidate");});
 test("match candidate always needs human confirmation",()=>assert.equal(matchInvoice({site:"A",date:"2026-11-05",amount:100},{id:"c",site:"A",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).requiresHumanConfirmation,true));
 test("metrics aggregate totals and margin",()=>{const r=aggregateMetrics([{revenue:1000,cost:600},{revenue:500,cost:250}]);assert.deepEqual([r.revenue,r.cost,r.contribution,r.margin],[1500,850,650,43.33]);});
 
