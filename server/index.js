@@ -129,7 +129,7 @@ app.post("/v1/tenants/:tenantId/calculations",membership,requireRole("owner","ad
   await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'calculation_created','calculation_run',$3,'Versioned management contribution calculation',$4)",[req.membership.tenantId,user.rows[0].id,saved.rows[0].id,JSON.stringify({formulaVersion:"0.1.0",periodStart,periodEnd})]);
   return {id:saved.rows[0].id,createdAt:saved.rows[0].created_at,outputs};
  });
- if(result.error)return res.status(422).json({error:result.error});
+ if(result.error)return res.status(422).json({error:result.error,code:result.code||"CALCULATION_BLOCKED"});
  res.status(201).json(result);
  }catch(e){next(e);}});
  
