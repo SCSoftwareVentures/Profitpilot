@@ -173,3 +173,28 @@ ProfitPilot is not “completely finished” until each applicable statement is 
 This register is the single project completion control document. Update a status only when evidence is attached or referenced. “Designed”, “specified”, “in CI”, “passed in synthetic CI”, “independently reviewed”, “customer validated” and “production operational” are different evidence states; never collapse them.
 
 The repository remains public. Synthetic data only. No PR merge, production deployment, real customer-data intake, payment activity or production feature build is authorised by this register.
+
+
+## 10. Additional implementation-ready artefacts
+
+The following documents close further preparation gaps but do not constitute implementation:
+
+- [Initial MVP Product Requirements](MVP_PRODUCT_REQUIREMENTS.md) — functional requirements MVP-001 through MVP-065, user roles, scope boundaries, non-functional requirements and primary acceptance journeys.
+- [iPhone-First Screen and Workflow Specification](MOBILE_SCREEN_AND_WORKFLOW_SPEC.md) — screen-by-screen behaviour, states, error paths and mobile/accessibility acceptance.
+- [Concierge Pilot Execution Playbook](CONCIERGE_PILOT_EXECUTION_PLAYBOOK.md) — recruitment, unaided interviews, permission controls, G0/G2/G3 execution, customer deliverable, measurement and stop/pivot rules.
+- [Commercial Model and Unit-Economics Framework](COMMERCIAL_MODEL_AND_UNIT_ECONOMICS_FRAMEWORK.md) — pricing structures to test, willingness-to-pay method, value measurement and unit-economics formulas.
+- [MVP Implementation Epic Plan](MVP_IMPLEMENTATION_EPIC_PLAN.md) — dependency-ordered epics, roles, acceptance and estimation rules after G5.
+- [API Calculation Path Static Audit](API_CALCULATION_PATH_AUDIT.md) — code-level financial route and engine findings with proposed route acceptance tests.
+- [G5 Signed Build Authorisation Record](G5_SIGNED_BUILD_AUTHORISATION_RECORD.md) — approval template that remains blank until all prerequisites have evidence.
+
+### Refined tenant-FK evidence interpretation
+
+PR #25 CI run #310 includes a catalog-driven check that forces RLS on tenant-owned/root tables and inspects tenant-to-tenant foreign-key pairs for a composite tenant_id constraint. This is stronger than a simple static assertion and passed on the PR #25 review branch. However, the security branch remains separate from this documentation branch. The combined candidate must retain the catalog check, review the complete logical relationship inventory and test each relevant route/relationship; the existence of a composite constraint for a table pair does not by itself prove every semantic relationship or workflow is complete.
+
+### Additional API calculation findings
+
+Static inspection of the PR #25 review branch identifies two further material risks:
+- revenue selection uses invoice issue date for period filtering while the match model carries service-period evidence; invoice date and service delivery period must not be assumed equivalent;
+- contract baseline data has currency, but the reviewed schema does not carry the full explicit tax-basis metadata needed to prove compatibility with invoice amounts.
+
+These are recorded in API_CALCULATION_PATH_AUDIT.md. Findings are static; proposed tests are NOT RUN.

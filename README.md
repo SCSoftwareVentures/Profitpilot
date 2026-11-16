@@ -26,6 +26,11 @@ Begin with evidence-led concierge validation using authorised data and an approv
 ## Project completion pack
 
 - [Master completion and evidence register](docs/MASTER_COMPLETION_REGISTER.md)
+- [MVP implementation epic plan](docs/MVP_IMPLEMENTATION_EPIC_PLAN.md)
+- [G5 signed build authorisation record](docs/G5_SIGNED_BUILD_AUTHORISATION_RECORD.md)
+- [API calculation path static audit](docs/API_CALCULATION_PATH_AUDIT.md)
+
+- [Master completion and evidence register](docs/MASTER_COMPLETION_REGISTER.md)
 - [Initial MVP product requirements](docs/MVP_PRODUCT_REQUIREMENTS.md)
 - [iPhone-first screen and workflow specification](docs/MOBILE_SCREEN_AND_WORKFLOW_SPEC.md)
 - [Concierge pilot execution playbook](docs/CONCIERGE_PILOT_EXECUTION_PLAYBOOK.md)

@@ -72,3 +72,19 @@ G6 is a post-build paid software-pilot exit gate.
 ## Repository safety
 
 This repository is public. Never commit customer exports, employee-identifiable records, confidential contracts, credentials, API keys, payment secrets or private source documents. Use synthetic fixtures only. Real pilot data must remain in an approved private environment under written authority and documented handling controls.
+
+## Additional completion package — 16 November 2026
+
+The product-blueprint branch now also contains:
+- Master completion and evidence register.
+- MVP product requirements (MVP-001–MVP-065).
+- iPhone-first screen/workflow specification.
+- Concierge pilot execution playbook.
+- Commercial model/unit-economics framework.
+- MVP implementation epic/dependency plan.
+- G5 signed build-authorisation template.
+- API calculation path static audit.
+
+These documents improve preparation and make the remaining work actionable. They do not provide missing customer evidence, specialist sign-offs, signed G5 approval, implementation or production readiness.
+
+Latest CI on the prior docs-only head 4ca08f6418cc498cd0e5db05565403ac837e75a7 (run #343) passed both configured jobs. A new documentation commit has since advanced the branch; its own CI must be checked separately.
