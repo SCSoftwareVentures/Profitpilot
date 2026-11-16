@@ -1,6 +1,11 @@
 // ProfitPilot prototype calculation and import engine.
 // Deterministic demo logic only. Do not use with real payroll/customer data.
 export const money = value => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+export function isIsoDate(value){
+  if(typeof value!=="string"||!/^\\d{4}-\\d{2}-\\d{2}$/.test(value))return false;
+  const date=new Date(value+"T00:00:00.000Z");
+  return Number.isFinite(date.getTime())&&date.toISOString().slice(0,10)===value;
+}
 export function parseCsv(text) {
   const rows=[]; let row=[], cell="", quoted=false;
   for(let i=0;i<text.length;i++){
@@ -28,7 +33,7 @@ export function validateInvoiceRows(rows){
     const errors=[];
     if(!r.invoice_id)errors.push("Missing invoice_id");
     if(!r.site)errors.push("Missing site");
-    if(!r.date||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(r.date)||Number.isNaN(Date.parse(r.date))||new Date(r.date).toISOString().slice(0,10)!==r.date)errors.push("Invalid date (expected a real YYYY-MM-DD date)");
+    if(!isIsoDate(r.date))errors.push("Invalid date (expected a real YYYY-MM-DD date)");
     if(!r.amount||!Number.isFinite(amount)||amount<=0)errors.push("Amount must be greater than zero");
     return {rowNumber:r.__rowNumber||i+2,record:r,errors,status:errors.length?"held":"pending_review"};
   });
