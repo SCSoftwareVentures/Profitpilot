@@ -49,17 +49,28 @@ The first delivery mode is concierge validation using authorised data and an app
 - Production deployment, customer support readiness or positive unit economics.
 - G6 paid software-pilot exit.
 
-## Critical technical findings
+## Critical technical findings and current branch evidence
 
-- The reviewed API calculation route references allocation_lines, while the reviewed schema does not define the required row-level ledger.
-- The API calculation path still uses JavaScript Number and toFixed for money.
-- Payroll persistence is aggregate-oriented and cannot demonstrate source-row caps and provenance.
-- Contribution may still be emitted when important inputs are incomplete.
-- Tenant-bound relationship integrity must be verified on the combined candidate.
-- Import metadata registration is not a binary upload or secure file lifecycle.
-- The in-process limiter is not a shared production rate-limit control.
+PR #25 remains a separate draft review branch. Its latest reviewed head is `ce66bcf6f9a705532313ce6e71892839a3b55344`, with CI run #43971209376 passing both configured jobs (Node.js verification and PostgreSQL migrations, tenant/RLS/FK audit, authenticated API integration, container build and health check).
 
-See the master completion register, financial test traceability matrix and branch integration report for closure evidence.
+The following earlier findings have been partly addressed on PR #25 and must not be repeated as if unchanged:
+- The payroll source-row ledger now exists in migration 010, is tenant-scoped and immutable, and allocation lines are append-only with source-row caps.
+- Migration 011 requires source-row reconciliation, currency consistency, reviewer authority, exact summary reconciliation, source-linked allocation totals and immutable confirmed runs.
+- Payroll source rows are now required to reference raw evidence from the same tenant's payroll import batch as the payroll pool; invoice-import evidence is rejected.
+- The calculation route now uses the migrated allocation ledger and decimal-string/BigInt cent arithmetic for its calculation outputs, blocks partial payroll-period and partial invoice-service-period overlaps, and withholds authoritative contribution/margin while the cost model remains incomplete.
+- The database catalogue/RLS/FK and authenticated API tests pass on the PR #25 head.
+
+Remaining material technical gaps include:
+- Payroll source-row normalization exists as a pure helper, but no privacy-safe payroll ingestion, mapping, allocation-review or reviewer confirmation API is implemented; payroll row ingestion remains deliberately blocked.
+- The calculation is still an incomplete management view; it excludes material cost categories and must not be represented as audited profit or a complete margin.
+- Contract tax-basis compatibility metadata and approved tax treatment/conversion policy remain incomplete.
+- Invoice evidence matching, service-period completeness, source manifests, credit notes/reversals, duplicate/replay controls and restatement workflows need further implementation and executable acceptance coverage.
+- Secure binary upload/private object storage, malware scanning, retention/deletion and backup deletion verification are not implemented.
+- Production identity/MFA/provisioning, managed secret custody, shared rate limiting, database TLS, backups/monitoring and incident response remain unconfigured.
+- No combined PR #25/#26 candidate has been validated; independent CI passes do not prove branch integration.
+- Independent penetration testing, Australian legal/privacy review, accounting/payroll policy sign-off and G0–G4 customer evidence remain outstanding.
+
+See the master completion register, financial test traceability matrix and branch integration report for exact scope and release gates.
 
 ## Build-control rule
 
@@ -110,3 +121,8 @@ The documentation refresh commit `e5fdf2ae84247b0dde84a7f79df0e31649da3cb6` comp
 The current PR #26 head `5faa5957493c7f8349300895e0d4b5dc3d61cc08` completed ProfitPilot CI run #359 successfully. Both configured jobs passed. This confirms the current documentation-branch checks only; it does not test a combined PR #25/#26 candidate or execute the proposed full financial acceptance suite.
 
 The project owner named **Sammy Chehade** as technical owner. This records the designation only; acceptance, delivery capacity, budget and other accountable specialist owners remain unverified. G0–G4 remain unevidenced and G5 remains deferred/not authorised. No implementation, merge, deployment or live-data permission is implied.
+
+
+## PR #25 verification update — 17 November 2026
+
+The latest PR #25 head `ce66bcf6f9a705532313ce6e71892839a3b55344` passed CI run #43971209376. Both jobs passed, including the authenticated PostgreSQL/API integration suite and restricted production-container health check. The PR remains open, draft and unmerged. No combined branch validation, customer pilot, production deployment or G5 GO has occurred.
