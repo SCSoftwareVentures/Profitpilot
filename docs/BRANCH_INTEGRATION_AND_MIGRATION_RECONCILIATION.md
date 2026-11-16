@@ -139,3 +139,10 @@ Do not reorder or squash migrations casually. Migration history, existing deploy
 **Recommendation:** retain PR #25 and PR #26 as separate draft review branches. Resolve the critical integration and financial blockers before preparing a combined candidate. Do not merge either PR on the strength of separate green CI runs.
 
 No merge, deployment, production feature build, live-data access, payment activity or external customer operation is authorised by this review. The G0–G5 validation and explicit G5 signed GO remain binding.
+
+
+## 8. Updated PR #25 evidence — 17 November 2026
+
+PR #25 has advanced to `ce66bcf6f9a705532313ce6e71892839a3b55344` and passed CI run #43971209376. The tested branch now contains migrations 010/011 for source-row payroll provenance and confirmation integrity, the calculation route's migrated allocation-line query and decimal-cent arithmetic, and explicit blocking of partial payroll and invoice service-period overlaps. Payroll row ingestion remains deliberately disabled; the API does not yet expose the complete payroll mapping/allocation/reviewer workflow.
+
+This supersedes the earlier static description of the missing allocation_lines ledger and Number-based calculation arithmetic for the PR #25 head. It does not supersede the combined-candidate requirements in this report. PR #25 and PR #26 remain separate draft branches, and no full financial acceptance suite, combined-branch test, independent security review or production operation has been completed.
