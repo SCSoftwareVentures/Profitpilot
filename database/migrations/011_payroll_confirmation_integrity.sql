@@ -15,8 +15,11 @@ DECLARE
   line_totals record;
   reviewer_role text;
 BEGIN
-  IF NEW.status <> 'confirmed' OR OLD.status = 'confirmed' THEN
+  IF NEW.status <> 'confirmed' THEN
     RETURN NEW;
+  END IF;
+  IF TG_OP='UPDATE' AND OLD.status='confirmed' THEN
+    RAISE EXCEPTION 'Confirmed payroll allocation runs are immutable' USING ERRCODE='55000';
   END IF;
 
   SELECT * INTO pool
@@ -89,9 +92,21 @@ END;
 $$;
 
 CREATE TRIGGER allocation_runs_validate_confirmation
-BEFORE UPDATE OF status ON allocation_runs
+BEFORE INSERT OR UPDATE OF status ON allocation_runs
 FOR EACH ROW
-WHEN (NEW.status='confirmed' AND OLD.status<>'confirmed')
 EXECUTE FUNCTION private.validate_payroll_allocation_confirmation();
+
+CREATE FUNCTION private.reject_confirmed_allocation_run_mutation()
+RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog,public,private AS $
+BEGIN
+  IF OLD.status='confirmed' THEN
+    RAISE EXCEPTION 'Confirmed payroll allocation runs are immutable' USING ERRCODE='55000';
+  END IF;
+  RETURN OLD;
+END;
+$;
+CREATE TRIGGER allocation_runs_confirmed_immutable
+BEFORE UPDATE OR DELETE ON allocation_runs
+FOR EACH ROW EXECUTE FUNCTION private.reject_confirmed_allocation_run_mutation();
 
 COMMIT;
