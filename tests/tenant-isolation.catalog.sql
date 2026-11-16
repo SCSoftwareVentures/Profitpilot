@@ -73,6 +73,20 @@ BEGIN
     END IF;
   END LOOP;
   IF EXISTS (
+    SELECT 1 FROM pg_auth_members m
+    JOIN pg_roles app_role ON app_role.oid=m.member
+    WHERE app_role.rolname='profitpilot_app'
+  ) THEN RAISE EXCEPTION 'Runtime role must not inherit or SET ROLE into another database role'; END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_class c JOIN pg_roles r ON r.oid=c.relowner
+    JOIN pg_namespace ns ON ns.oid=c.relnamespace
+    WHERE r.rolname='profitpilot_app' AND ns.nspname='public'
+  ) THEN RAISE EXCEPTION 'Runtime role must not own public tables, sequences or views'; END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_namespace ns JOIN pg_roles r ON r.oid=ns.nspowner
+    WHERE r.rolname='profitpilot_app' AND ns.nspname IN ('public','private')
+  ) THEN RAISE EXCEPTION 'Runtime role must not own application schemas'; END IF;
+  IF EXISTS (
     SELECT 1 FROM pg_default_acl d
     JOIN pg_namespace ns ON ns.oid=d.defaclnamespace
     CROSS JOIN LATERAL aclexplode(d.defaclacl) acl
