@@ -20,8 +20,8 @@ The correct completion measure is evidence, not the volume of documentation or c
 | Common base | main commit 55d1403c0dc34ac26a9bdb58107662754f34a8e3 | Both active PRs originate from this base |
 | PR #25 | security/exhaustive-hardening; head 17178768002b978d6f5bd76f0192b2bbff7a4355; open, draft, unmerged | Application, database, CI and security hardening changes for review |
 | PR #25 CI | Run #310; Node.js 22 and PostgreSQL migration/RLS jobs passed | Configured automated checks passed on PR #25's exact head |
-| PR #26 | product/six-differentiators-blueprint; head 559c7476d13e42ec9d9190409b8e3b091407a1bb; open, draft, unmerged | Documentation-only product, validation, financial and governance design |
-| PR #26 CI | Run #343; Node.js 22 and PostgreSQL migration/RLS jobs passed | Configured checks passed on PR #26's exact head and its own base |
+| PR #26 | product/six-differentiators-blueprint; last fully CI-verified content head 559c7476d13e42ec9d9190409b8e3b091407a1bb; later changes limited to README/status documentation; open, draft, unmerged | Documentation-only product, validation, financial and governance design |
+| PR #26 CI | Run #347; Node.js 22 and PostgreSQL migration/RLS jobs passed | Configured checks passed on PR #26's exact head and its own base |
 | Branch relationship | PR #25 and PR #26 are sibling branches, not a combined candidate | PR #26's CI does not exercise PR #25's changes |
 | Production | No production deployment or configured customer environment established | No customer data or production use authorised |
 
