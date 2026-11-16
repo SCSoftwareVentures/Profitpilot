@@ -136,3 +136,8 @@ PR #25 head `ff354de4418b4d471ca0e8cd881af4f9acf5ef78` passed CI run #4397350220
 Further verified branch changes include deterministic chunked invoice-row ingestion with conflict-safe replay semantics; full import-metadata comparison on checksum reuse; explicit contract-version tax-basis metadata matched against confirmed invoice tax basis; safe-cent bounds in the prototype money helper; and guards against aggregating mixed currency, tax basis or reporting periods. Contract tax basis defaults to unknown for legacy versions and blocks calculation until reviewed.
 
 This remains PR #25-only evidence. PR #25 and PR #26 are still separate, open drafts. No combined candidate, full API-CALC-T01–T14 financial acceptance suite, independent security certification, production deployment, customer pilot or G5 GO is evidenced. Payroll ingestion remains disabled pending privacy-safe mapping and reviewer workflow.
+
+
+## PR #25 calculation-basis integration regression — 17 November 2026
+
+PR #25 head `ce168020eb49667616e5c36f1cc9b324f92c22b5` passed CI run #43974141222. Both Node.js 22 and PostgreSQL 16 jobs passed on the exact head. New authenticated API integration fixtures provide complete, reconciled synthetic invoice and payroll evidence and confirm that contract/invoice tax-basis mismatches and payroll/contract currency mismatches are blocked with 422 responses. This is additional branch-specific regression evidence, not the full API-CALC-T01–T14 suite or independent accounting validation. PR #25 and PR #26 remain separate drafts; G5 remains deferred/not authorised.
