@@ -4,7 +4,7 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import {randomUUID,createHash} from "node:crypto";
-import {pool,withTenant,health} from "./db.js";
+import {withTenant,health} from "./db.js";
 import {authRequired,requireRole} from "./auth.js";
 import {parseCsv,validateInvoiceRows} from "../src/engine.js";
 
@@ -19,7 +19,7 @@ app.use("/v1",authRequired());
 
 async function membership(req,res,next){
  const tenantId=req.params.tenantId;
- if(!/^[0-9a-f-]{36}$/i.test(tenantId))return res.status(400).json({error:"Invalid tenant ID"});
+ if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(tenantId))return res.status(400).json({error:"Invalid tenant ID"});
  try{
   const r=await withTenant(tenantId,client=>client.query("SELECT role FROM tenant_memberships tm JOIN users u ON u.id=tm.user_id JOIN tenants t ON t.id=tm.tenant_id WHERE tm.tenant_id=$1 AND u.auth_subject=$2 AND tm.status='active' AND u.status='active' AND t.status='active'",[tenantId,req.identity.subject]));
   if(!r.rowCount)return res.status(403).json({error:"No active membership for this tenant"});
@@ -120,13 +120,8 @@ app.get("/v1/tenants/:tenantId/calculations/:runId",membership,async(req,res,nex
  res.json(result.rows[0]);
  }catch(e){next(e);}});
  
-app.get("/v1/tenants/:tenantId/calculations/:runId",membership,async(req,res,next)=>{try{
- const result=await withTenant(req.membership.tenantId,client=>client.query("SELECT id,contract_id,site_id,period_start,period_end,formula_version,inputs,outputs,completeness,created_at FROM calculation_runs WHERE id=$1 AND tenant_id=$2",[req.params.runId,req.membership.tenantId]));
- if(!result.rowCount)return res.status(404).json({error:"Calculation run not found"});
- res.json(result.rows[0]);
- }catch(e){next(e);}});
 
-app.use((err,req,res,next)=>{const id=randomUUID();process.stderr.write(JSON.stringify({event:"request_error",id,message:err.message})+"\n");res.status(500).json({error:"Internal server error",reference:id});});
+app.use((err,req,res,next)=>{const id=randomUUID();process.stderr.write(JSON.stringify({event:"request_error",id,message:err.message})+"\n");res.status(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500).json({error:Number.isInteger(err.status)&&err.status<500?err.message:"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
 if(process.env.NODE_ENV!=="test")app.listen(port,()=>process.stdout.write("ProfitPilot API listening on "+port+"\n"));
 export default app;
