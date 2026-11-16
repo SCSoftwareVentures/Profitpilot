@@ -298,3 +298,8 @@ The pull-request CI run completed both configured jobs successfully: Node.js 22 
 ### Gate register remains unchanged
 
 G0, G1, G2, G3 and G4 remain NOT EVIDENCED. G5 remains BLOCKED / DEFERRED / NOT AUTHORISED. G6 remains NOT STARTED. No merge, deployment, production feature build, live-data intake, customer pilot or payment activity is authorised. The repository is public; synthetic fixtures only.
+
+
+### Latest documentation-reconciliation head CI — 17 November 2026
+
+PR #27 branch `integration/pr25-pr26-validation` advanced to exact head `688d50bb5e3b45479f48f9cf7bb20e5897750291`. CI run **#43980939798** passed on that exact SHA. Both Node.js 22 and PostgreSQL 16 jobs passed. Node.js reported 46 tests total (45 passed, 1 skipped, 0 failed); PostgreSQL migration/RLS, tenant/FK catalogue, authenticated API integration, image build and restricted-container health steps completed successfully. This is the latest combined-candidate CI evidence, not the full financial acceptance suite, independent certification or release approval.
