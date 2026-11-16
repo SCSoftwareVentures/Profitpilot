@@ -1,59 +1,179 @@
 # ProfitPilot — Project Status
 
 **Baseline:** V8.6.1 Master Product Blueprint, dated 16 November 2026  
-**Repository:** working public project repository  
-**Status:** product validation specification plus a partial API/database implementation scaffold; not a production application
+**Repository:** public working project repository; synthetic fixtures only  
+**Status:** extensive product/validation/security/financial specification plus a partial API/database scaffold; not a complete or deployed application
 
 ## Current product decision
 
 ProfitPilot's overall vision is a business operations and customer transaction-management platform. Its initial beachhead remains contract economics reconciliation and exception control for Australian independent commercial cleaning contractors with recurring multi-site B2B contracts.
 
-The first delivery mode is a concierge validation service using secure, authorised data and manual/scripted reconciliation. The initial analysis unit is contract × site × service period.
+The first delivery mode is concierge validation using authorised data and an approved secure handling route. The initial analysis unit is contract × site × service period × calculation version.
+
+## Latest verified repository position — 16 November 2026
+
+- PR #25 security branch: 17178768002b978d6f5bd76f0192b2bbff7a4355; open, draft and unmerged.
+- PR #25 CI run #310 passed Node.js 22 dependency/syntax/unit checks and PostgreSQL migrations, tenant/RLS, authenticated API, container-build and health checks.
+- PR #26 product blueprint: last fully CI-verified content commit 559c7476d13e42ec9d9190409b8e3b091407a1bb; subsequent changes were limited to README and project-status documentation; PR remains open, draft and unmerged.
+- PR #26 CI run #347 passed Node.js 22 syntax/unit checks and PostgreSQL migration/RLS, authenticated API, container-build and health checks.
+- The PRs are sibling branches against main commit 55d1403c0dc34ac26a9bdb58107662754f34a8e3. The CI runs are separate; neither proves a combined candidate.
+- Neither PR has been merged. No production environment or customer pilot is established.
 
 ## Current repository contents
 
-- Product overview and scope
-- G0–G6 validation gates
-- Architecture and data-control principles
-- Staged roadmap and initial risk register
-- Static landing-page HTML concept
-- Express API scaffold with JWT/JWKS authentication, tenant membership and role checks
-- PostgreSQL schema, tenant RLS migration and ordered initialization scripts
-- Import row persistence, invoice validation decisions, human-reviewed match decisions and evidence-gated calculation endpoints
-- Node.js 22 engine tests and GitHub Actions CI
-- PostgreSQL 16 schema/migration execution and HMAC-signed tenant RLS tests
-- Authenticated HTTP API tests for membership, role restrictions, date validation and import idempotency
-- Cross-tenant contract read/write negative tests, raw-GUC spoof rejection, HMAC signature/expiry/membership negative tests, private-key access denial, same-tenant actor foreign-key enforcement and pooled tenant-context cleanup test
-- Production Docker image build and running-container database health smoke test
+- Product overview, market hypothesis and G0–G6 validation gates.
+- G0 concierge pack, G1 customer interview guide, competitive scorecard and concierge execution playbook.
+- Six differentiator product blueprint and shared platform foundations.
+- MVP product requirements, workflow specification and iPhone-first acceptance/screen design.
+- Architecture, data dictionary, threat model and release/test plan.
+- Financial engine audit, decimal data contract, technical design, schema/migration specification and remediation backlog.
+- Payroll source-row allocation ledger design.
+- Synthetic financial test oracle, executable acceptance plan and test traceability matrix.
+- Data classification/privacy/tenant governance and security readiness review.
+- Branch integration/migration reconciliation and master completion register.
+- Static landing-page and dashboard concepts.
+- Partial Express API, PostgreSQL schema/migrations, JWT/JWKS auth, tenant membership/role controls and RLS scaffold.
+- Node.js 22 tests, PostgreSQL CI, authenticated API integration checks and Docker health smoke test on the security review branch.
 
 ## What is not established
 
-- Customer demand or willingness to pay
-- Repeatable lawful access to customer data
-- Production-grade native application implementation
-- Production deployment, exhaustive tenant-isolation assessment and independent security certification
-- Excel or Google Sheets equivalence for the audit workbook
-- Live integrations
-- Legal/privacy clearance
-- Payment-provider approval or safeguarded-funds structure
-- Production security or operational readiness
+- G0–G4 customer, data-feasibility, commercial and usability evidence.
+- G5 signed build authorisation.
+- Combined integration of PR #25 and PR #26.
+- Complete financial engine or executable financial acceptance suite.
+- Production-grade original-file upload/storage, malware scanning, retention and deletion.
+- Configured production identity provider/MFA, managed secrets, distributed rate limiting and operational recovery.
+- Independent penetration test and security remediation retest.
+- Legal/privacy clearance, accounting/payroll/tax policy approvals.
+- Live integrations or customer data processing.
+- Production deployment, customer support readiness or positive unit economics.
+- G6 paid software-pilot exit.
+
+## Critical technical findings and current branch evidence
+
+PR #25 remains a separate draft review branch. Its latest reviewed head is `ce66bcf6f9a705532313ce6e71892839a3b55344`, with CI run #43971209376 passing both configured jobs (Node.js verification and PostgreSQL migrations, tenant/RLS/FK audit, authenticated API integration, container build and health check).
+
+The following earlier findings have been partly addressed on PR #25 and must not be repeated as if unchanged:
+- The payroll source-row ledger now exists in migration 010, is tenant-scoped and immutable, and allocation lines are append-only with source-row caps.
+- Migration 011 requires source-row reconciliation, currency consistency, reviewer authority, exact summary reconciliation, source-linked allocation totals and immutable confirmed runs.
+- Payroll source rows are now required to reference raw evidence from the same tenant's payroll import batch as the payroll pool; invoice-import evidence is rejected.
+- The calculation route now uses the migrated allocation ledger and decimal-string/BigInt cent arithmetic for its calculation outputs, blocks partial payroll-period and partial invoice-service-period overlaps, and withholds authoritative contribution/margin while the cost model remains incomplete.
+- The database catalogue/RLS/FK and authenticated API tests pass on the PR #25 head.
+
+Remaining material technical gaps include:
+- Payroll source-row normalization exists as a pure helper, but no privacy-safe payroll ingestion, mapping, allocation-review or reviewer confirmation API is implemented; payroll row ingestion remains deliberately blocked.
+- The calculation is still an incomplete management view; it excludes material cost categories and must not be represented as audited profit or a complete margin.
+- Contract tax-basis compatibility metadata and approved tax treatment/conversion policy remain incomplete.
+- Invoice evidence matching, service-period completeness, source manifests, credit notes/reversals, duplicate/replay controls and restatement workflows need further implementation and executable acceptance coverage.
+- Secure binary upload/private object storage, malware scanning, retention/deletion and backup deletion verification are not implemented.
+- Production identity/MFA/provisioning, managed secret custody, shared rate limiting, database TLS, backups/monitoring and incident response remain unconfigured.
+- No combined PR #25/#26 candidate has been validated; independent CI passes do not prove branch integration.
+- Independent penetration testing, Australian legal/privacy review, accounting/payroll policy sign-off and G0–G4 customer evidence remain outstanding.
+
+See the master completion register, financial test traceability matrix and branch integration report for exact scope and release gates.
 
 ## Build-control rule
 
-Do not treat repository setup, HTML concepts, documentation, or technical preparation as authorisation to build the SaaS.
+Do not treat repository setup, CI, documentation, HTML concepts or technical preparation as authorisation to build the SaaS.
 
-Software build remains blocked until G0–G4 and competitive preconditions pass and G5 records an explicit signed GO with named technical ownership, legal/privacy plan, delivery capacity and approved budget.
+Software build remains blocked until G0–G4 and competitive preconditions pass and G5 records explicit signed GO with named technical ownership, legal/privacy plan, delivery capacity and approved budget.
 
 G6 is a post-build paid software-pilot exit gate.
 
-## Immediate next work
-
-1. Prepare and run G0 data-feasibility and competitive-proof work.
-2. Obtain at least five complete, authorised export sets from at least three unrelated businesses.
-3. Use the G0 pilot pack to control scope, permissions, data minimisation, source lineage and effort measurement.
-4. Produce one-site contract variance bridges and record pass/fail evidence.
-5. Stop or pivot if no lawful, repeatable source path exists.
-
 ## Repository safety
 
-This repository is public at the time this status file was written. Never commit customer exports, employee-identifiable records, confidential contracts, credentials, API keys, payment secrets or private source documents. Keep any real pilot data in an appropriately authorised, secure environment under documented terms.
+This repository is public. Never commit customer exports, employee-identifiable records, confidential contracts, credentials, API keys, payment secrets or private source documents. Use synthetic fixtures only. Real pilot data must remain in an approved private environment under written authority and documented handling controls.
+
+## Additional completion package — 16 November 2026
+
+The product-blueprint branch now also contains:
+- Master completion and evidence register.
+- MVP product requirements (MVP-001–MVP-065).
+- iPhone-first screen/workflow specification.
+- Concierge pilot execution playbook.
+- Commercial model/unit-economics framework.
+- MVP implementation epic/dependency plan.
+- G5 signed build-authorisation template.
+- API calculation path static audit.
+
+These documents improve preparation and make the remaining work actionable. They do not provide missing customer evidence, specialist sign-offs, signed G5 approval, implementation or production readiness.
+
+Latest CI on product-blueprint head `a72c03386b08cf4c18ef42573bf1b790c81be211` (run #355, 17 November 2026) passed both configured jobs: Verify (Node.js 22) and PostgreSQL migrations/tenant RLS, including the configured authenticated API integration and container checks. This is CI evidence for the PR #26 branch only; it is not combined-branch validation, production readiness or execution of the proposed financial acceptance suite.
+
+
+## API contract conformance review — 17 November 2026
+
+Added `docs/API_CONTRACT_CONFORMANCE_AUDIT.md`, a static comparison of the Express route inventory and OpenAPI contract. It records response-schema gaps, import-state language, missing pagination/idempotency/concurrency definitions, route-role matrix requirements and 16 proposed contract tests. This is not a runtime test or implementation. No API/OpenAPI code or production feature was changed.
+
+
+## Owner test environment note — 17 November 2026
+
+A separate downloadable HTML owner demonstration was supplied in the conversation. It is a local, standalone synthetic calculator and evidence-threshold walkthrough. It is not connected to this repository's API/database, does not implement authentication, tenant isolation, imports or persistence, and is not evidence that the financial engine has passed acceptance. Do not use real customer or employee information in it.
+
+
+## Latest CI confirmation — 17 November 2026
+
+The documentation refresh commit `e5fdf2ae84247b0dde84a7f79df0e31649da3cb6` completed ProfitPilot CI run #357 successfully. Both configured jobs passed: Verify (Node.js 22) and PostgreSQL migrations/tenant RLS. The PostgreSQL job completed schema/migration checks, restricted-role tenant RLS verification, authenticated API integration tests, production-image build and container health check. This remains PR #26 branch-only evidence; it does not validate a combined PR #25/#26 candidate or the proposed full financial acceptance suite.
+
+
+## Latest CI and ownership update — 17 November 2026
+
+The current PR #26 head `5faa5957493c7f8349300895e0d4b5dc3d61cc08` completed ProfitPilot CI run #359 successfully. Both configured jobs passed. This confirms the current documentation-branch checks only; it does not test a combined PR #25/#26 candidate or execute the proposed full financial acceptance suite.
+
+The project owner named **Sammy Chehade** as technical owner. This records the designation only; acceptance, delivery capacity, budget and other accountable specialist owners remain unverified. G0–G4 remain unevidenced and G5 remains deferred/not authorised. No implementation, merge, deployment or live-data permission is implied.
+
+
+## PR #25 verification update — 17 November 2026
+
+The latest PR #25 head `ce66bcf6f9a705532313ce6e71892839a3b55344` passed CI run #43971209376. Both jobs passed, including the authenticated PostgreSQL/API integration suite and restricted production-container health check. The PR remains open, draft and unmerged. No combined branch validation, customer pilot, production deployment or G5 GO has occurred.
+
+
+
+## PR #25 follow-up verification — 17 November 2026
+
+PR #25 head `ff354de4418b4d471ca0e8cd881af4f9acf5ef78` passed CI run #43973502209 on the exact head. Both Node.js 22 and PostgreSQL 16 jobs passed. The PostgreSQL job includes migration 012, exhaustive tenant/RLS/FK catalogue checks, restricted-role isolation, authenticated API integration, production image build and container health.
+
+Further verified branch changes include deterministic chunked invoice-row ingestion with conflict-safe replay semantics; full import-metadata comparison on checksum reuse; explicit contract-version tax-basis metadata matched against confirmed invoice tax basis; safe-cent bounds in the prototype money helper; and guards against aggregating mixed currency, tax basis or reporting periods. Contract tax basis defaults to unknown for legacy versions and blocks calculation until reviewed.
+
+This remains PR #25-only evidence. PR #25 and PR #26 are still separate, open drafts. No combined candidate, full API-CALC-T01–T14 financial acceptance suite, independent security certification, production deployment, customer pilot or G5 GO is evidenced. Payroll ingestion remains disabled pending privacy-safe mapping and reviewer workflow.
+
+
+## PR #25 calculation-basis integration regression — 17 November 2026
+
+PR #25 head `ce168020eb49667616e5c36f1cc9b324f92c22b5` passed CI run #43974141222. Both Node.js 22 and PostgreSQL 16 jobs passed on the exact head. New authenticated API integration fixtures provide complete, reconciled synthetic invoice and payroll evidence and confirm that contract/invoice tax-basis mismatches and payroll/contract currency mismatches are blocked with 422 responses. This is additional branch-specific regression evidence, not the full API-CALC-T01–T14 suite or independent accounting validation. PR #25 and PR #26 remain separate drafts; G5 remains deferred/not authorised.
+
+
+## Superseding combined integration verification — 17 November 2026
+
+The earlier repository-position sections above are historical snapshots and are superseded by this exact combined-candidate evidence:
+
+- Repository: `luxhustle01-ux/Profitpilot` (public; synthetic fixtures only).
+- PR #25 security implementation and PR #26 product blueprint remain separate open draft branches.
+- Combined candidate: PR #27, branch `integration/pr25-pr26-validation`, exact head `47f0a5c3dc5a1e4f85b565b27195e5d217195c0a`.
+- Branch-push CI run #43975153600 and pull-request CI run #43975210049 both passed on that exact head. The PR-triggered run's two jobs—Node.js 22 verification and PostgreSQL 16 migrations/tenant RLS—both completed successfully. The PostgreSQL job applied migrations 008–012, ran the tenant/FK catalogue audit, restricted-role RLS checks, authenticated API integration tests, production image build and restricted-container health check. The Node job completed locked dependency install, production dependency audit, syntax checks and unit tests (45 passed, 1 skipped, 0 failed).
+- PR #27 has no submitted reviews or inline review threads at the time of this check. It remains draft and unmerged.
+
+This closes the previously open **combined automated CI** checkpoint only. It does not close the full financial acceptance plan, independent penetration/security review, finance/accounting review, privacy/legal review, operational recovery exercises, customer validation or release gates.
+
+### Current technical status and remaining work
+
+- The row-level payroll evidence ledger is present in migrations 010/011, including tenant-scoped source provenance, append-only allocation lines, per-row limits and confirmation-time reconciliation. The pure payroll normalizer is present, but the end-to-end privacy-safe payroll ingestion, mapping, allocation-review and reviewer workflow is not implemented; payroll ingestion remains disabled.
+- Contract-version tax-basis metadata is present in migration 012. Legacy `unknown` tax basis and invoice/contract mismatches are blocked; approved GST/tax policy and conversion rules still require qualified review.
+- The calculation route uses decimal-string parsing and BigInt cents for its revenue/cost difference. It returns `completeness: incomplete`, `contribution: null` and `marginPercent: null`, with a separately named `indicativeContribution`. This is not a complete cost model or statutory/audited profit. Source completeness, supplier/non-site costs, credits/reversals, source manifests and restatement workflow remain open.
+- Additional code-review finding: `normalizePayrollRows` accepts finite JavaScript-number amounts as well as strings, then converts numbers to strings. Because numeric values may already have lost decimal precision before this helper receives them, the exact-money boundary should be tightened to accept canonical decimal strings only, with a regression test. This is a remediation item, not a claim that the complete payroll pipeline exists.
+- The configured CI runs do not execute the complete DEC/TAX/PAY/PAYLED/INV/CON/VAR/IMP and property-based acceptance plan. The financial acceptance suite remains NOT RUN as a complete suite.
+- Private original-file storage/upload, quarantine and malware scanning, retention/deletion and backup deletion verification, managed production secrets/KMS, production identity/MFA/provisioning/recovery, shared distributed rate limiting, database TLS, backup/restore, monitoring and incident response remain unimplemented or unverified.
+
+### Release gates
+
+G0–G4 customer/data/commercial/usability evidence remains NOT EVIDENCED. G5 remains DEFERRED / NOT AUTHORISED: the signed decision, budget, delivery capacity, legal/privacy plan and accountable specialist approvals are absent. G6 has not started. No merge, deployment, real-data intake, customer pilot or payment activity is authorised. Preserve the public-repository synthetic-data-only rule.
+
+
+## Latest combined-candidate documentation CI — 17 November 2026
+
+The documentation reconciliation advanced PR #27 branch `integration/pr25-pr26-validation` to exact head `688d50bb5e3b45479f48f9cf7bb20e5897750291`. CI run **#43980939798** completed successfully on that exact head. Both configured jobs passed:
+
+- **Verify (Node.js 22):** locked dependencies, production dependency audit, syntax checks; 46 tests total, 45 passed, 1 skipped, 0 failed. The skipped test is the authenticated API integration test in this job; that integration suite runs in the PostgreSQL job.
+- **PostgreSQL migrations and tenant RLS:** completed successfully, including migration application, tenant/FK catalogue audit, restricted-role RLS checks, authenticated API integration, production image build and restricted-container health check.
+
+This verifies the current combined candidate plus documentation reconciliation on its exact head. It does not execute the full financial acceptance plan or satisfy independent assurance, customer validation or G0–G5 release gates. PR #27 remains draft and unmerged.
