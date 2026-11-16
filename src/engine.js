@@ -2,7 +2,7 @@ import {createHash} from "node:crypto";
 // ProfitPilot prototype calculation and import engine.
 // Deterministic demo logic only. Do not use with real payroll/customer data.
 function decimalCents(value){
-  if(typeof value!=="string"||value.length>15)return null;
+  if(typeof value!=="string"||value.length>16)return null;
   const text=value;
   if(!/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(text))return null;
   const negative=text.startsWith("-");
