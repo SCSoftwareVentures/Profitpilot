@@ -1,0 +1,84 @@
+# ProfitPilot — Identity, Tenant Isolation and Security Implementation Plan
+
+**Status:** security architecture and control requirements. The prototype does not implement production authentication, server authorization, database RLS or secure file storage.
+
+## Identity boundary
+Use a managed identity provider with OIDC/OAuth 2.0 Authorization Code + PKCE for browser clients. The application must not store raw passwords. Require MFA for privileged users; provide secure recovery, session revocation, rate limiting and account lifecycle controls.
+
+The database user identity is mapped from a verified provider subject, never from a client-supplied user ID or email string alone.
+
+## Tenant membership
+A user may belong to multiple tenants. Every request resolves the active tenant from a server-verified membership record. A tenant ID supplied by the browser is only a requested context, never proof of access.
+
+Roles proposed for the first release:
+- owner: tenant ownership and membership administration;
+- admin: configuration and user administration;
+- analyst: imports and analysis;
+- reviewer: approve/reject mappings and calculation outputs;
+- read_only: view permitted reports.
+
+Separate high-impact actions such as membership changes, exports, baseline approval and allocation confirmation. Require re-authentication or step-up MFA where risk warrants it.
+
+## Server-side authorization requirements
+- Deny by default.
+- Check tenant membership and object ownership on every read/write.
+- Never rely on hidden buttons or client-side route guards.
+- Scope all database queries by verified tenant context.
+- Validate object-level permissions, not only endpoint-level roles.
+- Use parameterized SQL and schema validation.
+- Log authorization denials and sensitive exports without logging secrets or unnecessary personal data.
+
+## PostgreSQL row-level security deployment pattern
+The schema scaffold intentionally does not enable RLS because the trusted auth context and connection-pool strategy are not yet deployed. Before enabling:
+1. Define a server-only transaction-local tenant context.
+2. Set it only after verifying identity and membership.
+3. Ensure pooled connections cannot leak context between requests.
+4. Enable and FORCE ROW LEVEL SECURITY on every tenant-owned table.
+5. Add both USING and WITH CHECK policies for tenant_id.
+6. Ensure table owners and service roles cannot bypass policy unexpectedly.
+7. Add negative tests for every table and relationship.
+
+Illustrative policy pattern only:
+
+```sql
+ALTER TABLE sites ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sites FORCE ROW LEVEL SECURITY;
+
+CREATE POLICY sites_tenant_isolation ON sites
+USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
+WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+```
+
+Do not copy this blindly into production. Missing or invalid context must deny access, and the application role must not be able to set arbitrary tenant context without a trusted server authorization step.
+
+## File and import security
+- Private object storage, not public repository or browser local storage.
+- Short-lived signed upload/download URLs.
+- File size/type allowlist, malware scanning and isolated parsing.
+- Content hash, source manifest and idempotency.
+- Encrypt at rest and in transit.
+- Access logging and retention/deletion workflow.
+- CSV formula-injection protection on exports.
+- Do not retain raw payroll/personnel files longer than necessary.
+
+## Secrets and integrations
+- Store secrets in managed secret storage, never source control or client JavaScript.
+- Separate sandbox and production credentials.
+- Rotate credentials and support immediate revocation.
+- Verify webhook signatures, timestamps and replay protection.
+- Idempotent event processing and daily provider reconciliation where applicable.
+
+## Audit
+Append-only events for login/security changes, membership, source upload/access, mapping, calculation, approval, export and any later payment-state transition. Audit logs must be access-controlled and tamper-evident.
+
+## Required pre-production evidence
+- Identity-provider configuration and recovery tests.
+- Tenant-isolation negative test suite for all entities and API endpoints.
+- RLS tests under the real application database role and connection pool.
+- Independent penetration test and remediation retest.
+- SAST, dependency and secret scanning.
+- File malware/parser tests.
+- Backup restore and incident-response exercises.
+- Privacy impact assessment, retention schedule and verified deletion tests.
+
+No production security certification is implied by this plan.
