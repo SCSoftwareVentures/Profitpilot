@@ -81,7 +81,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
     }finally{rawClient.release();}
     async function assertContextDenied({tenantId,subject,expires,nonce,signatureOverride}){
       const keyId="primary";
-      const payload=[tenantId,subject,expires,nonce,keyId].join("\\n");
+      const payload=[tenantId,subject,expires,nonce,keyId].join("\n");
       const signature=signatureOverride||createHmac("sha256",Buffer.from(process.env.TENANT_CONTEXT_HMAC_SECRET,"hex")).update(payload).digest("hex");
       const client=await appPool.connect();
       try{
