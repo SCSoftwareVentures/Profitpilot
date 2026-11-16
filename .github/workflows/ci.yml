@@ -136,7 +136,9 @@ jobs:
           docker exec -u root "$PG_CONTAINER" chown postgres:postgres /var/lib/postgresql/data/server.crt /var/lib/postgresql/data/server.key
           docker exec -u root "$PG_CONTAINER" chmod 600 /var/lib/postgresql/data/server.key
           ADMIN_URL="postgresql://profitpilot_admin:ci-admin-password@127.0.0.1:5432/profitpilot"
-          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl='on'; ALTER SYSTEM SET ssl_cert_file='server.crt'; ALTER SYSTEM SET ssl_key_file='server.key';"
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl='on'"
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl_cert_file='server.crt'"
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl_key_file='server.key'"
           docker restart "$PG_CONTAINER"
           for attempt in $(seq 1 30); do
             if psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "SHOW ssl" | grep -q on; then break; fi
