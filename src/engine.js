@@ -28,7 +28,7 @@ export function validateInvoiceRows(rows){
     const errors=[];
     if(!r.invoice_id)errors.push("Missing invoice_id");
     if(!r.site)errors.push("Missing site");
-    if(!r.date||!/^\\d{4}-\\d{2}-\\d{2}$/.test(r.date)||Number.isNaN(Date.parse(r.date))||new Date(r.date).toISOString().slice(0,10)!==r.date)errors.push("Invalid date (expected a real YYYY-MM-DD date)");
+    if(!r.date||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(r.date)||Number.isNaN(Date.parse(r.date))||new Date(r.date).toISOString().slice(0,10)!==r.date)errors.push("Invalid date (expected a real YYYY-MM-DD date)");
     if(!r.amount||!Number.isFinite(amount)||amount<=0)errors.push("Amount must be greater than zero");
     return {rowNumber:r.__rowNumber||i+2,record:r,errors,status:errors.length?"held":"pending_review"};
   });
