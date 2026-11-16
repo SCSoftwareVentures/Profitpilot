@@ -126,3 +126,13 @@ The project owner named **Sammy Chehade** as technical owner. This records the d
 ## PR #25 verification update — 17 November 2026
 
 The latest PR #25 head `ce66bcf6f9a705532313ce6e71892839a3b55344` passed CI run #43971209376. Both jobs passed, including the authenticated PostgreSQL/API integration suite and restricted production-container health check. The PR remains open, draft and unmerged. No combined branch validation, customer pilot, production deployment or G5 GO has occurred.
+
+
+
+## PR #25 follow-up verification — 17 November 2026
+
+PR #25 head `ff354de4418b4d471ca0e8cd881af4f9acf5ef78` passed CI run #43973502209 on the exact head. Both Node.js 22 and PostgreSQL 16 jobs passed. The PostgreSQL job includes migration 012, exhaustive tenant/RLS/FK catalogue checks, restricted-role isolation, authenticated API integration, production image build and container health.
+
+Further verified branch changes include deterministic chunked invoice-row ingestion with conflict-safe replay semantics; full import-metadata comparison on checksum reuse; explicit contract-version tax-basis metadata matched against confirmed invoice tax basis; safe-cent bounds in the prototype money helper; and guards against aggregating mixed currency, tax basis or reporting periods. Contract tax basis defaults to unknown for legacy versions and blocks calculation until reviewed.
+
+This remains PR #25-only evidence. PR #25 and PR #26 are still separate, open drafts. No combined candidate, full API-CALC-T01–T14 financial acceptance suite, independent security certification, production deployment, customer pilot or G5 GO is evidenced. Payroll ingestion remains disabled pending privacy-safe mapping and reviewer workflow.
