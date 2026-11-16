@@ -336,3 +336,13 @@ A green unit-test suite alone does not pass these exit criteria.
 | Result | PASS / FAIL / BLOCKED / NOT RUN |
 
 Do not populate this template with assumed results. Only the test runner and reviewer can provide execution evidence.
+
+ 
+## 13. Targeted automated execution evidence — 17 November 2026
+
+The hardening branch adds a deterministic property subset and exact-money regression tests. CI run **#43982827602** on exact implementation head `ead10a236e33684c25c5c7613d1c5a2fbeb883fd` passed:
+- Node.js 22: 59 total, 56 passed, 0 failed, 3 skipped. The skips include the PostgreSQL-dependent API and TLS integration tests in the standalone Node job; those execute in the PostgreSQL job.
+- PostgreSQL 16: migrations through 013, tenant/FK catalogue audit across 20 protected/root tables, restricted-role RLS checks, authenticated API integration, production image build, real TLS trust/invalid-CA tests and production-mode API health check all passed.
+- Property subset: 500 seeded payroll bucket reconciliation cases (seed `0x5eed1234`), aggregation row-order invariance, null/sign preservation and mixed currency/tax-basis blocking passed.
+
+This is a targeted subset only. The complete DEC/TAX/PAY/PAYLED/INV/CON/VAR/IMP and property-based acceptance plan remains **NOT COMPLETE**. Locale parsing, approved rounding, GST/FX, full payroll restatement, invoice denominator/credit handling, variation lifecycle, source control totals, timezone and export injection cases remain unimplemented or not fully tested. Independent expected-value review and qualified accounting/payroll/tax approval are still required.
