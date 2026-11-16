@@ -1,6 +1,6 @@
 # ProfitPilot — Identity, Tenant Isolation and Security Implementation Plan
 
-**Status:** security architecture and control requirements. The prototype does not implement production authentication, server authorization, database RLS or secure file storage.
+**Status:** partial implementation scaffold. The API includes JWT/JWKS verification, tenant membership checks, role middleware, transaction-scoped tenant context and a PostgreSQL RLS migration. These controls have not been exercised against a running PostgreSQL instance or independently security-tested. Secure file storage is not implemented.
 
 ## Identity boundary
 Use a managed identity provider with OIDC/OAuth 2.0 Authorization Code + PKCE for browser clients. The application must not store raw passwords. Require MFA for privileged users; provide secure recovery, session revocation, rate limiting and account lifecycle controls.
@@ -29,7 +29,7 @@ Separate high-impact actions such as membership changes, exports, baseline appro
 - Log authorization denials and sensitive exports without logging secrets or unnecessary personal data.
 
 ## PostgreSQL row-level security deployment pattern
-The schema scaffold intentionally does not enable RLS because the trusted auth context and connection-pool strategy are not yet deployed. Before enabling:
+The tenant RLS migration enables and forces row-level security on tenant-owned tables using transaction-local `app.tenant_id`. The migration and policies remain unverified against a live PostgreSQL instance. Before any shared or production deployment:
 1. Define a server-only transaction-local tenant context.
 2. Set it only after verifying identity and membership.
 3. Ensure pooled connections cannot leak context between requests.
