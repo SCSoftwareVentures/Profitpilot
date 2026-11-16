@@ -43,23 +43,49 @@ export function isIsoDate(value){
   return Number.isFinite(date.getTime())&&date.toISOString().slice(0,10)===value;
 }
 export function parseCsv(text) {
-  const rows=[]; let row=[], cell="", quoted=false;
+  if(typeof text!=="string")throw new TypeError("CSV input must be text.");
+  if(text.charCodeAt(0)===0xFEFF)text=text.slice(1);
+  const rows=[]; let row=[],cell="",quoted=false,closedQuote=false;
+  const pushRecord=()=>{
+    row.push(cell);
+    if(row.some(v=>v.trim()!==""))rows.push(row);
+    row=[];cell="";closedQuote=false;
+  };
   for(let i=0;i<text.length;i++){
     const c=text[i], n=text[i+1];
-    if(c==='"' && quoted && n==='"'){cell+='"';i++;}
-    else if(c==='"'){quoted=!quoted;}
-    else if(c===',' && !quoted){row.push(cell);cell="";}
-    else if((c==="\\n"||c==="\\r")&&!quoted){if(c==="\\r"&&n==="\\n")i++;row.push(cell);if(row.some(v=>v.trim()!==""))rows.push(row);row=[];cell="";}
-    else cell+=c;
+    if(quoted){
+      if(c==='"'&&n==='"'){cell+='"';i++;}
+      else if(c==='"'){quoted=false;closedQuote=true;}
+      else cell+=c;
+      continue;
+    }
+    if(closedQuote){
+      if(c===","){row.push(cell);cell="";closedQuote=false;}
+      else if(c===" "||c==="\t"){cell+=c;}
+      else if(c==="\n"||c==="\r"){
+        if(c==="\r"&&n==="\n")i++;
+        pushRecord();
+      }else throw new Error("CSV contains unexpected characters after a closing quote.");
+      continue;
+    }
+    if(c==='"'){
+      if(cell.length!==0)throw new Error("CSV contains a quote inside an unquoted field.");
+      quoted=true;
+    }else if(c===","){row.push(cell);cell="";}
+    else if(c==="\n"||c==="\r"){
+      if(c==="\r"&&n==="\n")i++;
+      pushRecord();
+    }else cell+=c;
   }
-  if(quoted) throw new Error("CSV contains an unclosed quoted field.");
+  if(quoted)throw new Error("CSV contains an unclosed quoted field.");
   row.push(cell);if(row.some(v=>v.trim()!==""))rows.push(row);
-  if(!rows.length) return [];
+  if(!rows.length)return [];
   const headers=rows.shift().map(v=>v.trim());
-  if(headers.some(h=>!h)) throw new Error("CSV contains an empty column heading.");
-  if(new Set(headers).size!==headers.length) throw new Error("CSV contains duplicate column headings.");
+  if(headers.some(h=>!h))throw new Error("CSV contains an empty column heading.");
+  const normalised=headers.map(h=>h.toLocaleLowerCase("en"));
+  if(new Set(normalised).size!==headers.length)throw new Error("CSV contains duplicate column headings.");
   return rows.map((cells,index)=>{
-    if(cells.length!==headers.length) throw new Error("CSV row "+(index+2)+" has "+cells.length+" cells; expected "+headers.length+".");
+    if(cells.length!==headers.length)throw new Error("CSV row "+(index+2)+" has "+cells.length+" cells; expected "+headers.length+".");
     return Object.fromEntries(headers.map((h,i)=>[h,cells[i].trim()]).concat([["__rowNumber",String(index+2)]]));
   });
 }
