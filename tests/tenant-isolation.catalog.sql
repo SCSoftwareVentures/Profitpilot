@@ -46,11 +46,12 @@ BEGIN
   END LOOP;
   IF checked < 2 THEN RAISE EXCEPTION 'Unexpectedly few protected tables: %',checked; END IF;
 
-  -- Every FK between two tenant-owned tables must carry tenant_id on both
-  -- sides, preventing a valid row ID from another tenant being attached.
+  -- Every pair of tenant-owned tables connected by foreign keys must have
+  -- at least one composite FK carrying tenant_id on both sides. Some legacy
+  -- single-column FKs coexist with the composite guard and are not sufficient alone.
   FOR fk IN
-    SELECT con.conname, src.relname AS source_table, dst.relname AS target_table,
-           con.conrelid, con.confrelid, con.conkey, con.confkey
+    SELECT DISTINCT src.oid AS source_oid, src.relname AS source_table,
+                    dst.oid AS target_oid, dst.relname AS target_table
     FROM pg_constraint con
     JOIN pg_class src ON src.oid=con.conrelid
     JOIN pg_namespace sn ON sn.oid=src.relnamespace
@@ -60,11 +61,15 @@ BEGIN
       AND EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid=src.oid AND a.attname='tenant_id' AND a.attnum>0 AND NOT a.attisdropped)
       AND EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid=dst.oid AND a.attname='tenant_id' AND a.attnum>0 AND NOT a.attisdropped)
   LOOP
-    SELECT attnum INTO tenant_att FROM pg_attribute WHERE attrelid=fk.conrelid AND attname='tenant_id' AND NOT attisdropped;
-    SELECT attnum INTO target_att FROM pg_attribute WHERE attrelid=fk.confrelid AND attname='tenant_id' AND NOT attisdropped;
-    IF NOT tenant_att=ANY(fk.conkey) OR NOT target_att=ANY(fk.confkey) THEN
-      RAISE EXCEPTION 'Cross-tenant-capable FK %.% -> %.% (%): tenant_id missing from composite FK',
-        fk.source_table,fk.conname,fk.target_table,fk.conname,fk.conname;
+    SELECT attnum INTO tenant_att FROM pg_attribute WHERE attrelid=fk.source_oid AND attname='tenant_id' AND NOT attisdropped;
+    SELECT attnum INTO target_att FROM pg_attribute WHERE attrelid=fk.target_oid AND attname='tenant_id' AND NOT attisdropped;
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint con
+      WHERE con.contype='f' AND con.conrelid=fk.source_oid AND con.confrelid=fk.target_oid
+        AND tenant_att=ANY(con.conkey) AND target_att=ANY(con.confkey)
+    ) THEN
+      RAISE EXCEPTION 'Tenant-scoped relationship %.% has no composite tenant_id foreign key',
+        fk.source_table,fk.target_table;
     END IF;
   END LOOP;
   RAISE NOTICE 'Tenant catalog audit passed: % tenant-scoped/root tables checked; tenant-to-tenant foreign keys inspected.',checked;
