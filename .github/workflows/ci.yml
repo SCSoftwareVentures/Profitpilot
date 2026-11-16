@@ -93,6 +93,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/011_payroll_confirmation_integrity.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/012_contract_tax_basis.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/013_actor_authorization.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/014_match_decision_audit.sql
 
       - name: Audit every tenant-scoped table and tenant-to-tenant foreign key
         env:
