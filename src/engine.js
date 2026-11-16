@@ -129,7 +129,8 @@ export function matchInvoice(row,contract){
   const taxBasis=["gst_inclusive","gst_exclusive","no_gst"].includes(row.tax_basis)&&row.tax_basis===contract.taxBasis;
   const evidence={customer,contract:contractIdentity,site,servicePeriod:period,amount,currency,taxBasis};
   const complete=Object.values(evidence).every(Boolean);
-  const confidence=complete?"HIGH":Object.values(evidence).filter(Boolean).length>=5?"MEDIUM":Object.values(evidence).some(Boolean)?"LOW":"UNMATCHED";
+  const coreIdentity=customer&&contractIdentity&&site&&period&&amount;
+  const confidence=complete?"HIGH":coreIdentity&&(currency||taxBasis)?"MEDIUM":Object.values(evidence).some(Boolean)?"LOW":"UNMATCHED";
   return {contractId:contract.id,confidence,evidence,requiresHumanConfirmation:true,decision:"candidate"};
 }
 export function summariseContracts(contracts){
@@ -143,6 +144,15 @@ export function summariseContracts(contracts){
 }
 export function aggregateMetrics(contracts){
   const rows=summariseContracts(contracts);
+  const hasBasis=contracts.some(c=>c.currency!==undefined||c.taxBasis!==undefined||c.periodStart!==undefined||c.periodEnd!==undefined);
+  if(hasBasis){
+    const dimensions=["currency","taxBasis","periodStart","periodEnd"];
+    const inconsistent=dimensions.some(key=>{
+      const values=contracts.map(c=>c[key]);
+      return values.some(v=>v===undefined||v===null||v==="")||new Set(values).size!==1;
+    });
+    if(inconsistent)return {revenue:null,cost:null,contribution:null,margin:null,contracts:rows,complete:false,errors:["Cannot aggregate contracts across missing or mixed currency, tax basis or reporting periods"]};
+  }
   const revenue=sumCents(rows.map(r=>r.revenue)),cost=sumCents(rows.map(r=>r.cost));
   if(revenue===null||cost===null)return {revenue:NaN,cost:NaN,contribution:NaN,margin:null,contracts:rows};
   const contribution=revenue-cost;
