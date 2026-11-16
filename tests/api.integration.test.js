@@ -236,6 +236,22 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(duplicate.status,200);
     assert.equal((await duplicate.json()).idempotent,true);
 
+    const conflictingMetadata=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-analyst",method:"POST",body:{...importBody,fileName:"different-name.csv"}});
+    assert.equal(conflictingMetadata.status,409,"a repeated checksum with changed metadata must not be silently treated as the original registration");
+
+    const invoiceImport=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-analyst",method:"POST",body:{...importBody,sourceType:"customer_invoice",fileName:"invoices.csv",sha256:"d".repeat(64)}});
+    assert.equal(invoiceImport.status,201);
+    const invoiceBatch=(await invoiceImport.json()).batch.id;
+    const firstRows=await request(`/v1/tenants/${tenantA}/imports/${invoiceBatch}/rows`,{subject:"ci-api-analyst",method:"POST",body:{rows:[{invoice_id:"INV-1",site:"Site A",date:"2026-02-10",amount:"100.00"}]}});
+    assert.equal(firstRows.status,201);
+    const identicalReplay=await request(`/v1/tenants/${tenantA}/imports/${invoiceBatch}/rows`,{subject:"ci-api-analyst",method:"POST",body:{rows:[{invoice_id:"INV-1",site:"Site A",date:"2026-02-10",amount:"100.00"}]}});
+    assert.equal(identicalReplay.status,201);
+    assert.equal((await identicalReplay.json()).inserted,0,"identical source-row retries must be idempotent");
+    const conflictingReplay=await request(`/v1/tenants/${tenantA}/imports/${invoiceBatch}/rows`,{subject:"ci-api-analyst",method:"POST",body:{rows:[{invoice_id:"INV-1",site:"Site A",date:"2026-02-10",amount:"900.00"}]}});
+    assert.equal(conflictingReplay.status,409,"a changed payload at an existing source row number must be rejected");
+    const persistedInvoiceRow=await admin.query("SELECT payload->>'amount' AS amount FROM raw_import_rows WHERE batch_id=$1 AND row_number=1",[invoiceBatch]);
+    assert.equal(persistedInvoiceRow.rows[0].amount,"100.00","a conflicting replay must not overwrite or replace original source evidence");
+
     const readerWrite=await request(`/v1/tenants/${tenantA}/imports`,{
       subject:"ci-api-reader",method:"POST",
       body:{...importBody,sha256:"c".repeat(64)}
