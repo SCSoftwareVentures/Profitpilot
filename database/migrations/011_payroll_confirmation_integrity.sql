@@ -104,9 +104,12 @@ BEGIN
   IF OLD.status='confirmed' THEN
     RAISE EXCEPTION 'Confirmed payroll allocation runs are immutable' USING ERRCODE='55000';
   END IF;
-  RETURN OLD;
+  IF TG_OP='DELETE' THEN
+    RETURN OLD;
+  END IF;
+  RETURN NEW;
 END;
-$$;
+$;
 CREATE TRIGGER allocation_runs_confirmed_immutable
 BEFORE UPDATE OR DELETE ON allocation_runs
 FOR EACH ROW EXECUTE FUNCTION private.reject_confirmed_allocation_run_mutation();
