@@ -224,22 +224,7 @@ components:
     MoneyDecimal:
       type: string
       maxLength: 16
-      pattern: '^-?(0|[1-9][0-9]{0,11})(\.[0-9]{1,2})?    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-  parameters:
-    TenantId:
-      name: tenantId
-      in: path
-      required: true
-      schema: { type: string, format: uuid }
-    BatchId:
-      name: batchId
-      in: path
-      required: true
-      schema: { type: string, format: uuid }
-
+      pattern: '^-?(0|[1-9][0-9]{0,11})(\.[0-9]{1,2})?$'
       description: Exact decimal string only; no JSON number, exponent notation or implicit rounding. PostgreSQL numeric(14,2) bound.
       examples: ["1234.50", "-110.00", "0.00"]
     InvoiceSourceRow:
@@ -300,22 +285,7 @@ components:
         contribution: { type: [string, "null"], description: Always null while the source/cost model is incomplete }
         marginPercent: { type: [string, "null"], description: Always null while the source/cost model is incomplete }
         indicativeContribution: { $ref: '#/components/schemas/MoneyDecimal' }
-        currency: { type: string, pattern: '^[A-Z]{3}    bearerAuth:
-      type: http
-      scheme: bearer
-      bearerFormat: JWT
-  parameters:
-    TenantId:
-      name: tenantId
-      in: path
-      required: true
-      schema: { type: string, format: uuid }
-    BatchId:
-      name: batchId
-      in: path
-      required: true
-      schema: { type: string, format: uuid }
- }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
         taxBasis: { type: string }
         completeness: { type: string, enum: [incomplete] }
         limitations: { type: array, items: { type: string } }
