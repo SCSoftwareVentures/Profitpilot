@@ -97,7 +97,7 @@ export function validateInvoiceRows(rows){
     if(typeof r.invoice_id!=="string"||!r.invoice_id.trim())errors.push("Missing invoice_id");
     if(typeof r.site!=="string"||!r.site.trim())errors.push("Missing site");
     if(!isIsoDate(r.date))errors.push("Invalid date (expected a real YYYY-MM-DD date)");
-    if(!/^\\d+(?:\\.\\d{1,2})?$/.test(amountText)||!Number.isFinite(amount)||amount<=0)errors.push("Amount must be a positive decimal with at most two fractional digits");
+    if(!/^\d+(?:\.\d{1,2})?$/.test(amountText)||!Number.isFinite(amount)||amount<=0)errors.push("Amount must be a positive decimal with at most two fractional digits");
     return {rowNumber:r.__rowNumber||i+2,record:r,errors,status:errors.length?"held":"pending_review"};
   });
 }
@@ -120,7 +120,8 @@ export function allocatePayroll({pool,direct=[],approved=[],nonSite=0,excluded=0
 export function matchInvoice(row,contract){
   const identity=!!row.site&&row.site===contract.site;
   const period=!!row.date&&row.date>=contract.periodStart&&row.date<=contract.periodEnd;
-  const amount=Number.isFinite(Number(row.amount))&&Number(row.amount)>0;
+  const amountCents=decimalCents(row.amount);
+  const amount=amountCents!==null&&amountCents>0n;
   const evidence=[identity,period,amount].filter(Boolean).length;
   const confidence=identity&&period&&amount?"MEDIUM":identity&&amount?"LOW":"UNMATCHED";
   return {contractId:contract.id,confidence,evidence:{identity,period,amount},requiresHumanConfirmation:true};
