@@ -32,6 +32,13 @@ Further product, validation, architecture, roadmap and risk documentation will b
 - [Initial threat model](docs/THREAT_MODEL.md)
 - [Release and test plan](docs/RELEASE_AND_TEST_PLAN.md)
 
+## Data, calculation and workflow specifications
+
+
+- [Canonical data dictionary](docs/DATA_DICTIONARY.md)
+- [Core calculation specification](docs/CORE_CALCULATION_SPEC.md)
+- [Core UX workflows](docs/UX_WORKFLOWS.md)
+
 ## Visual prototypes
 
 - [Simplified dashboard concept](demo/dashboard.html) — responsive static HTML with fictional placeholder figures; no live data or connected services.
