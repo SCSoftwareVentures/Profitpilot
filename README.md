@@ -117,3 +117,8 @@ The owner has authorised staged implementation of the six approved differentiato
 - [Field Knowledge Memory](src/field-knowledge-memory.js) — tenant/scope/owner/visibility metadata with review/expiry states and access-policy primitives.
 
 These are initial domain foundations and synthetic demo workflows, not complete production features. Each has a dedicated test file. Database persistence, authenticated server-side enforcement, full workflows, operational controls and independent review remain outstanding. See the [six differentiators blueprint](docs/SIX_DIFFERENTIATORS_PRODUCT_BLUEPRINT.md).
+
+
+## Latest verified hardening CI — 17 November 2026
+
+PR #28 hardening branch exact head `b9821de5ad84a223d8f43e0fc53a85b437b56d5e` passed GitHub Actions run [#43990160842](https://github.com/luxhustle01-ux/Profitpilot/actions/runs/43990160842) (run #931). Node.js 22 completed with 115 passed, 0 failed and 3 database-dependent skips; the PostgreSQL 16 job passed migrations through 014, tenant/FK and restricted-role RLS checks, authenticated API integration, production image build, trusted/untrusted TLS verification and production-mode database health. This verifies the configured CI workflow on that exact head, not full product completion, independent assurance or production authorisation.
