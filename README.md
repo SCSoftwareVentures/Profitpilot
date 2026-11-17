@@ -19,6 +19,15 @@ Begin with an evidence-led concierge workflow using authorised data. Validate da
 - AI may assist extraction and explanation, but must not authorise financial calculations, approvals, payments, disputes, or ratings.
 - Never commit credentials, customer exports, employee records, or other sensitive information.
 
+## Buyer trust and diligence pack
+
+- [Buyer Trust Pack Index](docs/BUYER_TRUST_PACK_INDEX.md) — five-minute entry point for prospective acquirers.
+- [Security, Trust & Privacy Overview](docs/BUYER_SECURITY_PRIVACY_OVERVIEW.md)
+- [Security Architecture Diagram](docs/SECURITY_ARCHITECTURE_DIAGRAM.md)
+- [Security & Privacy Control Evidence Matrix](docs/SECURITY_PRIVACY_EVIDENCE_MATRIX.md)
+- [Preliminary Privacy Data Inventory](docs/PRIVACY_DATA_INVENTORY.md)
+- [Audit Evidence Format](docs/AUDIT_EVIDENCE_FORMAT.md)
+
 ## Documentation
 
 Further product, validation, architecture, roadmap and risk documentation will be added as the repository foundation is populated.
