@@ -1,33 +1,51 @@
 # ProfitPilot — Field Knowledge Memory
 
 **Capability:** sixth approved differentiator  
-**Implementation stage:** deterministic in-memory domain model and permission-filtered retrieval  
-**Status:** prototype only; no database persistence, authenticated API, encryption-at-rest or production access-control integration
+**Implementation stage:** synthetic, in-memory, permission-aware knowledge ledger  
+**Status:** prototype only; not a production knowledge store
 
-## Implemented in this slice
+## Purpose
 
-- Explicit knowledge classes: verified instruction, customer preference, observation, suggestion and unverified note.
-- Required source provenance, owner, confidence, scope, visibility, review date and optional expiry.
-- Verified instructions require an evidence reference, reviewer and confirmed review outcome.
-- Private, site and team visibility scopes.
-- Retrieval requires an explicit tenant, actor, site and team access context; missing context returns no results.
-- Tenant, site, team and private-owner filtering is applied before text matching.
-- Stale, expired, rejected and unreviewed knowledge is not surfaced as current reviewed knowledge.
-- Reviews append events and immutable versions; rejection retains history while removing the item from retrieval.
-- Retrieved knowledge is not an automatic instruction or safety/compliance approval.
+Preserve useful, permissioned operational knowledge so a cleaning business does not repeatedly rediscover site requirements, scope clarifications, equipment constraints and proven issue resolutions.
 
-## Safety boundaries
+## Implemented
 
-This is a pure in-memory domain model. It does not persist data, authenticate users, prove that caller-supplied access context is genuine, encrypt content, manage consent, or enforce retention/deletion. Those controls must be implemented at the authenticated service and storage layers before any real site, access, customer or employee information is entered. Do not treat this prototype as a security boundary.
+- Typed knowledge categories for site requirements, scope clarifications, equipment constraints, recurring issues, resolutions, safety references and customer preferences.
+- Tenant-bound records with stable item IDs, event IDs and immutable version history.
+- Required owner, source reference, permission reference, source date and review date.
+- Optional evidence reference, expiry date and explicit confidence state.
+- Visibility levels: tenant, site team and owner/admin.
+- Site-team access filtered against the actor's assigned site IDs.
+- Restricted knowledge requires owner/admin visibility.
+- Authentication secrets, access codes and selected financial identifiers are rejected.
+- Verified knowledge requires an evidence reference.
+- Append-only corrections with actor, timestamp, reason and prior-version reference.
+- Dynamic stale, expired and conflicting status assessment.
+- Tenant- and role-filtered search.
+- Synthetic mobile-friendly demonstration.
 
-## Acceptance coverage
+## Integrity and privacy rules
 
-Automated tests cover provenance requirements, visibility scope, tenant/site/team/owner isolation, stale and expired suppression, review/version history, rejection, chronology, duplicate event IDs and fail-closed retrieval without access context.
+- A record is not authoritative merely because it was used before.
+- Stale and conflicting instructions remain visible for review; the engine does not silently select a winner.
+- A version change creates a new snapshot; old versions are retained.
+- Site-team visibility does not grant access to another site.
+- Owner/admin-only records are not exposed to ordinary site staff.
+- The prototype is not a credential vault. Do not store passwords, door codes, alarm codes, API keys, bank details, tax identifiers or other secrets.
+- No real customer, employee, access or confidential business data belongs in this public repository or demonstration.
 
-## Remaining work
+## Known limitations
 
-- Tenant-scoped database schema, forced RLS and immutable event/version persistence.
-- Authenticated API integration using server-derived permissions, never client-supplied authority.
-- Encryption, retention/deletion, consent and privacy classification.
-- Conflict/staleness review queues, searchable indexing and auditable correction workflow.
-- Mobile UX and synthetic end-to-end demonstration.
+- In-memory only; no database persistence, API, full-text search service or tenant identity-provider integration.
+- Actor roles and site assignments are synthetic claims supplied to the domain function; production authorization must be enforced by the authenticated server and database.
+- No attachments, malware scanning, retention/deletion scheduler, notifications or offline synchronization.
+- No AI extraction or retrieval; all content and status transitions are explicit.
+- No customer validation or measured time-saving evidence.
+
+## Acceptance evidence
+
+Tests cover provenance, permission references, verified-evidence requirements, secret rejection, tenant isolation, site scoping, owner/admin visibility, version chronology, append-only history, stale/expired/conflict detection and search filtering.
+
+## Definition of done for this stage
+
+Synthetic knowledge records can be created, versioned, searched and assessed without persistence; stale and conflicting knowledge is surfaced; tenant/site/role visibility rules are test-covered; limitations are explicit.

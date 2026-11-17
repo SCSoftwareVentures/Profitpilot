@@ -227,3 +227,32 @@ AUD 30,000–50,000 is an initial reference target only, not a ceiling, minimum,
 The previous AUD 500 initial and AUD 100 recurring monthly project caps are withdrawn as planning constraints. Product scope and engineering priorities must not be constrained by those caps. Actual purchases, subscriptions, contractor engagements, external services or other financial commitments still require explicit owner approval.
 
 A live owner-operated production launch, real customer pilot or recurring revenue is not a prerequisite for the intended sale. Continue repository-level implementation and synthetic/test-environment development toward a complete buyer-ready asset. G5 and other release approvals remain necessary for production deployment or real sensitive-data handling, not for the explicitly authorised synthetic/test-only engineering work. No merge, deployment, real-data intake, buyer outreach, sale or transfer of ownership is authorised by this direction.
+
+
+## Six differentiators — staged implementation position, 17 November 2026
+
+The six approved differentiators now have code-level prototype slices across staged draft branches. This is a development milestone, **not completion of the product or integration into the release branch**.
+
+| Differentiator | Review unit | Current implementation boundary | Exact-head CI evidence |
+|---|---:|---|---|
+| Job Readiness Engine | [PR #29](https://github.com/luxhustle01-ux/Profitpilot/pull/29) | Versioned readiness template and explicit blocking states; synthetic/in-memory | Run #43989552815 (run #874) passed |
+| Promise Ledger | [PR #30](https://github.com/luxhustle01-ux/Profitpilot/pull/30) | Append-only promise/task lifecycle and acknowledgement distinctions; synthetic/in-memory | Run #43990016565 (run #920) passed |
+| Profit Leak Radar | [PR #32](https://github.com/luxhustle01-ux/Profitpilot/pull/32) | Evidence-gated candidate/unknown exception calculations; synthetic fixtures | Run #43990492148 (run #950) passed |
+| Verified Value Ledger | [PR #33](https://github.com/luxhustle01-ux/Profitpilot/pull/33) | Separate value lifecycle events, adjustment controls and reporting-basis grouping; synthetic/in-memory | Run #43991009508 (run #973) passed |
+| SwitchProof Migration | [PR #34](https://github.com/luxhustle01-ux/Profitpilot/pull/34) | CSV-only source profile, explicit mapping, lineage, exception and reconciliation preview; zero target writes | Earlier exact feature head passed run #43992553047 (run #979); latest documentation-reconciled head is under runs #43993230246 and #43993238829 |
+| Field Knowledge Memory | [PR #35](https://github.com/luxhustle01-ux/Profitpilot/pull/35) | Tenant/site visibility, provenance, immutable versions, stale/conflict assessment and synthetic search; in-memory | Run #43993086614 (run #984) passed |
+
+All these review units remain draft/unmerged. The feature branches are staged/stacked and are not one fully integrated release. The in-memory records and demo-supplied actor context are not production persistence or authenticated authorization. CI proves only the configured tests on the exact recorded commit.
+
+### Remaining integration and acquisition work
+
+- Reconcile and integrate the stacked feature branches through one reviewed candidate; resolve duplicate/stale PR paths before any merge decision.
+- Connect the domain models to shared tenant-scoped persistent records and authenticated server-side authorization, with migrations, audit history, idempotency and concurrency controls.
+- Complete the iPhone-first end-to-end workflows and eliminate demo-only disconnected surfaces.
+- Complete financial calculation and source-completeness acceptance; payroll ingestion remains disabled.
+- Complete private file lifecycle, production identity/MFA, managed secrets, shared rate limiting, backup/restore, monitoring and incident response.
+- Obtain independent penetration testing, Australian privacy/legal and qualified accounting/payroll/tax review.
+- Complete G0–G4 customer/commercial evidence and preserve the G5 signed-build gate for any production or real-data use.
+- Complete IP/licence diligence, reproducible clean setup and buyer handover materials.
+
+No staged feature CI result authorises merge to main, deployment, live-data intake, customer pilot, payment processing or external buyer outreach. The owner's sale objective remains an aspiration, not an established valuation.

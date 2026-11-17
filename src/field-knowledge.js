@@ -1,67 +1,201 @@
-const KNOWLEDGE_TYPES=new Set(["verified_instruction","customer_preference","observation","suggestion","unverified_note"]);
-const VISIBILITIES=new Set(["private","site","team"]);
-const REVIEW_OUTCOMES=new Set(["confirmed","corrected","rejected","needs_review"]);
-const OFFSET_TIMESTAMP=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-]\d{2}:\d{2})$/;
-function text(value,label,max=500){if(typeof value!=="string"||!value.trim()||value.trim().length>max)throw new TypeError(label+" is required and must be within its length limit");return value.trim();}
-function time(value,label){if(typeof value!=="string"||!OFFSET_TIMESTAMP.test(value)||!Number.isFinite(Date.parse(value)))throw new TypeError(label+" must be an ISO timestamp with an explicit UTC offset");return value;}
-function list(value,label){if(!Array.isArray(value)||value.length>100||value.some(x=>typeof x!=="string"||!x.trim()||x.trim().length>255))throw new TypeError(label+" must be an array of non-empty identifiers");return [...new Set(value.map(x=>x.trim()))].sort();}
-function validateItem(item){if(!item||typeof item!=="object"||Array.isArray(item)||!Array.isArray(item.events)||!Array.isArray(item.versions)||!item.current||!Number.isInteger(item.currentVersion)||item.currentVersion<1||item.current.version!==item.currentVersion||item.versions.length!==item.currentVersion||!item.events.length)throw new TypeError("Knowledge record is malformed");}
-function snapshot(input,version){
- if(!KNOWLEDGE_TYPES.has(input.knowledgeType))throw new TypeError("knowledgeType is invalid");
- if(!VISIBILITIES.has(input.visibility))throw new TypeError("visibility is invalid");
- if(!Number.isInteger(input.confidence)||input.confidence<0||input.confidence>100)throw new TypeError("confidence must be an integer from 0 to 100");
- const reviewAt=time(input.reviewAt,"reviewAt"),expiresAt=input.expiresAt==null?null:time(input.expiresAt,"expiresAt");
- if(expiresAt&&Date.parse(expiresAt)<=Date.parse(input.recordedAt))throw new TypeError("expiresAt must be later than recordedAt");
- const evidenceRef=input.evidenceRef==null?null:text(input.evidenceRef,"evidenceRef",255),reviewerId=input.reviewerId==null?null:text(input.reviewerId,"reviewerId",255);
- if(input.knowledgeType==="verified_instruction"&&(!evidenceRef||!reviewerId))throw new TypeError("verified_instruction requires evidenceRef and reviewerId");
- if(input.knowledgeType==="customer_preference"&&!evidenceRef)throw new TypeError("customer_preference requires evidenceRef");
- return {version,knowledgeType:input.knowledgeType,title:text(input.title,"title",200),content:text(input.content,"content",4000),siteId:input.siteId==null?null:text(input.siteId,"siteId",255),visibility:input.visibility,teamIds:list(input.teamIds??[],"teamIds"),sourceRef:text(input.sourceRef,"sourceRef",255),evidenceRef,confidence:input.confidence,ownerId:text(input.ownerId,"ownerId",255),reviewerId,recordedAt:time(input.recordedAt,"recordedAt"),reviewAt,expiresAt,reviewOutcome:input.reviewOutcome??"needs_review"};
+// Field Knowledge Memory: versioned, permission-aware knowledge records.
+// In-memory domain logic only; no network, filesystem or persistence.
+const ROLES = new Set(["owner","admin","manager","site_staff","analyst","reviewer"]);
+const TYPES = new Set(["site_requirement","scope_clarification","equipment_constraint","recurring_issue","resolution","safety_reference","customer_preference"]);
+const VISIBILITY = new Set(["tenant","site_team","owner_admin"]);
+const CONFIDENCE = new Set(["verified","unverified","needs_review"]);
+const STATUSES = new Set(["active","disputed","superseded"]);
+const KEY = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const DATETIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
+const SECRET = /\b(password|passcode|pin\s*code|alarm\s*code|api\s*key|secret\s*key|bank\s*account|tax\s*file\s*number)\b/i;
+
+function validDate(value) {
+  if (typeof value !== "string" || !DATE.test(value)) return false;
+  const d = new Date(value + "T00:00:00.000Z");
+  return Number.isFinite(d.getTime()) && d.toISOString().slice(0,10) === value;
 }
-/** Create a versioned in-memory knowledge record; no persistence is performed. */
-export function createKnowledgeItem(input){
- if(!input||typeof input!=="object"||Array.isArray(input))throw new TypeError("Knowledge input is required");
- const id=text(input.id,"id",255),tenantId=text(input.tenantId,"tenantId",255),current=snapshot(input,1);
- if(current.visibility==="site"&&!current.siteId)throw new TypeError("site visibility requires siteId");
- if(current.visibility==="team"&&!current.teamIds.length)throw new TypeError("team visibility requires at least one teamId");
- if(current.knowledgeType==="verified_instruction"&&current.reviewOutcome!=="confirmed")throw new TypeError("verified_instruction must have a confirmed review outcome");
- const event={id:text(input.eventId,"eventId",255),type:"created",actorId:current.ownerId,occurredAt:current.recordedAt,itemVersion:1,reason:null};
- return {id,tenantId,status:"active",currentVersion:1,current,versions:[current],events:[event]};
+function validDateTime(value) {
+  return typeof value === "string" && DATETIME.test(value) && validDate(value.slice(0,10)) && Number.isFinite(Date.parse(value));
 }
-/** Append a review/version; previous knowledge is retained rather than overwritten. */
-export function reviewKnowledgeItem(item,review){
- validateItem(item);if(!review||typeof review!=="object"||Array.isArray(review))throw new TypeError("A review event is required");
- const eventId=text(review.eventId,"eventId",255);if(item.events.some(e=>e.id===eventId))throw new TypeError("Knowledge event ID must be unique");
- const actorId=text(review.actorId,"actorId",255),occurredAt=time(review.occurredAt,"occurredAt");
- if(Date.parse(occurredAt)<Date.parse(item.events.at(-1).occurredAt))throw new TypeError("Knowledge events must be chronological");
- if(!REVIEW_OUTCOMES.has(review.outcome))throw new TypeError("Review outcome is invalid");
- const reason=text(review.reason,"reason",1000);
- if(review.outcome==="rejected"||review.outcome==="needs_review"){
-  const event={id:eventId,type:review.outcome,actorId,occurredAt,itemVersion:item.currentVersion,reason};
-  return {...item,status:review.outcome==="rejected"?"rejected":"review_required",events:[...item.events,event]};
- }
- if(!review.revision||typeof review.revision!=="object"||Array.isArray(review.revision))throw new TypeError("A review revision is required");
- const allowed=new Set(["knowledgeType","title","content","siteId","visibility","teamIds","sourceRef","evidenceRef","confidence","reviewAt","expiresAt","reviewerId"]);
- if(Object.keys(review.revision).some(k=>!allowed.has(k)))throw new TypeError("Knowledge revision contains unsupported fields");
- const nextInput={...item.current,...review.revision,recordedAt:occurredAt,reviewerId:actorId,reviewOutcome:"confirmed"};
- if(review.evidenceRef)nextInput.evidenceRef=review.evidenceRef;
- const next=snapshot(nextInput,item.currentVersion+1);
- if(next.visibility==="site"&&!next.siteId)throw new TypeError("site visibility requires siteId");
- if(next.visibility==="team"&&!next.teamIds.length)throw new TypeError("team visibility requires at least one teamId");
- if(next.knowledgeType==="verified_instruction"&&!next.evidenceRef)throw new TypeError("verified_instruction requires review evidence");
- const event={id:eventId,type:review.outcome,actorId,occurredAt,itemVersion:next.version,reason,evidenceRef:review.evidenceRef??next.evidenceRef};
- return {...item,status:"active",currentVersion:next.version,current:next,versions:[...item.versions,next],events:[...item.events,event]};
+function requireText(value, label, max=500) {
+  if (typeof value !== "string" || !value.trim() || value.trim().length > max) throw new TypeError(label + " is required and must be no longer than " + max + " characters.");
+  return value.trim();
 }
-/** Permission-filtered retrieval. Missing access context returns no records. */
-export function searchKnowledge(items,query,access,now){
- if(!Array.isArray(items))throw new TypeError("Knowledge items must be an array");
- if(!access||typeof access!=="object"||Array.isArray(access)||typeof access.tenantId!=="string"||typeof access.actorId!=="string"||!Array.isArray(access.siteIds)||!Array.isArray(access.teamIds))return [];
- const instant=time(now,"now"),needle=typeof query==="string"?query.trim().toLocaleLowerCase("en"):"";
- return items.filter(item=>{
-  try{validateItem(item);}catch{return false;}
-  if(item.tenantId!==access.tenantId||item.status!=="active")return false;
-  const k=item.current;
-  if(k.reviewOutcome!=="confirmed"||Date.parse(k.reviewAt)<=Date.parse(instant)||(k.expiresAt&&Date.parse(k.expiresAt)<=Date.parse(instant)))return false;
-  const allowed=k.visibility==="private"?k.ownerId===access.actorId:k.visibility==="site"?access.siteIds.includes(k.siteId):k.visibility==="team"?k.teamIds.some(id=>access.teamIds.includes(id)):false;
-  return allowed&&(!needle||(k.title+" "+k.content+" "+(k.siteId??"")).toLocaleLowerCase("en").includes(needle));
- }).map(item=>({id:item.id,version:item.currentVersion,...item.current,reviewStatus:"current_reviewed",interpretation:"Stored operational knowledge, not an automatic instruction or safety/compliance approval."}));
+function validateActor(actor, tenantId) {
+  if (!actor || typeof actor !== "object" || actor.tenantId !== tenantId ||
+      !ID.test(actor.id || "") || !ROLES.has(actor.role)) throw new TypeError("A valid actor with active tenant context is required.");
+  if (actor.siteIds !== undefined && (!Array.isArray(actor.siteIds) || actor.siteIds.some(id => typeof id !== "string"))) throw new TypeError("Actor siteIds must be an array of site identifiers.");
+}
+function validateScope(scope) {
+  if (!scope || !["site","customer","contract"].includes(scope.type) || !ID.test(scope.id || "")) throw new TypeError("Scope must identify a site, customer or contract.");
+}
+function validateDates({sourceDate,reviewBy,expiresOn}) {
+  if (!validDate(sourceDate) || !validDate(reviewBy) || (expiresOn !== null && expiresOn !== undefined && !validDate(expiresOn))) throw new TypeError("Source, review and expiry dates must be real ISO calendar dates.");
+  if (reviewBy < sourceDate || (expiresOn && expiresOn < sourceDate)) throw new RangeError("Review and expiry dates cannot precede the source date.");
+}
+function validateContent(title, content) {
+  const combined = title + "\n" + content;
+  if (SECRET.test(combined)) throw new TypeError("Authentication secrets, access codes and financial identifiers must not be stored in Field Knowledge Memory.");
+}
+
+export function createKnowledgeRecord(input={}) {
+  const tenantId = requireText(input.tenantId,"Tenant ID",128);
+  validateActor(input.actor,tenantId);
+  validateScope(input.scope);
+  if (!TYPES.has(input.knowledgeType)) throw new TypeError("Unsupported knowledge type.");
+  if (!KEY.test(input.key || "")) throw new TypeError("Knowledge key must be a stable lowercase slug.");
+  if (!VISIBILITY.has(input.visibility)) throw new TypeError("Unsupported visibility.");
+  if (!CONFIDENCE.has(input.confidence)) throw new TypeError("Unsupported confidence state.");
+  if (input.sensitivity !== undefined && !["standard","restricted"].includes(input.sensitivity)) throw new TypeError("Unsupported sensitivity classification.");
+  if (input.visibility === "owner_admin" && !["owner","admin"].includes(input.actor.role)) throw new TypeError("Owner/admin-only knowledge must be created by an owner or administrator.");
+  if (input.confidence === "verified" && !["owner","admin","manager","reviewer"].includes(input.actor.role)) throw new TypeError("Only an authorised reviewer or manager can mark knowledge verified.");
+  if (!STATUSES.has(input.status || "active")) throw new TypeError("Unsupported knowledge status.");
+  if (input.visibility === "site_team" && input.scope.type !== "site") throw new TypeError("Site-team visibility is only valid for site-scoped knowledge.");
+  if (input.sensitivity === "restricted" && input.visibility !== "owner_admin") throw new TypeError("Restricted knowledge must use owner/admin visibility.");
+  const title = requireText(input.title,"Title",120);
+  const content = requireText(input.content,"Content",2000);
+  validateContent(title,content);
+  const sourceRef = requireText(input.sourceRef,"Source reference",200);
+  const permissionRef = requireText(input.permissionRef,"Permission reference",200);
+  const sourceDate = input.sourceDate;
+  const reviewBy = input.reviewBy;
+  const expiresOn = input.expiresOn ?? null;
+  validateDates({sourceDate,reviewBy,expiresOn});
+  if (input.confidence === "verified" && !input.evidenceRef) throw new TypeError("Verified knowledge requires an evidence reference.");
+  const evidenceRef = input.evidenceRef == null ? null : requireText(input.evidenceRef,"Evidence reference",200);
+  const occurredAt = input.occurredAt;
+  if (!validDateTime(occurredAt)) throw new TypeError("Occurred-at timestamp must include an explicit timezone offset.");
+  return {
+    tenantId,
+    itemId: requireText(input.itemId,"Item ID",128),
+    eventId: requireText(input.eventId,"Event ID",128),
+    version: 1,
+    previousVersion: null,
+    knowledgeType: input.knowledgeType,
+    key: input.key,
+    scope: {type:input.scope.type,id:input.scope.id},
+    title,
+    content,
+    ownerId: requireText(input.ownerId,"Knowledge owner",128),
+    sourceRef,
+    permissionRef,
+    evidenceRef,
+    sourceDate,
+    reviewBy,
+    expiresOn,
+    visibility: input.visibility,
+    sensitivity: input.sensitivity === "restricted" ? "restricted" : "standard",
+    confidence: input.confidence,
+    status: input.status || "active",
+    actorId: input.actor.id,
+    actorRole: input.actor.role,
+    reason: requireText(input.reason || "Initial knowledge record","Reason",500),
+    occurredAt
+  };
+}
+
+/**
+ * Append a new immutable version. The caller's history array is never mutated.
+ * Scope and key remain stable; a correction is a new event, not an overwrite.
+ */
+export function appendKnowledgeVersion(history, update={}) {
+  if (!Array.isArray(history)) throw new TypeError("Knowledge history must be an array.");
+  const itemId = requireText(update.itemId,"Item ID",128);
+  const tenantId = requireText(update.tenantId,"Tenant ID",128);
+  const versions = history.filter(item => item.itemId === itemId && item.tenantId === tenantId);
+  if (!versions.length) throw new RangeError("Knowledge item does not exist in this tenant.");
+  const ordered = versions.slice().sort((a,b)=>a.version-b.version);
+  const latest = ordered[ordered.length-1];
+  if (new Set(ordered.map(x=>x.version)).size !== ordered.length || latest.version !== ordered.length) throw new Error("Knowledge history has a missing or duplicate version.");
+  validateActor(update.actor,tenantId);
+  const occurredAt = update.occurredAt;
+  if (!validDateTime(occurredAt) || Date.parse(occurredAt) <= Date.parse(latest.occurredAt)) throw new RangeError("New knowledge events must have a later timezone-aware timestamp.");
+  const reason = requireText(update.reason,"Change reason",500);
+  const title = update.title === undefined ? latest.title : requireText(update.title,"Title",120);
+  const content = update.content === undefined ? latest.content : requireText(update.content,"Content",2000);
+  validateContent(title,content);
+  const reviewBy = update.reviewBy === undefined ? latest.reviewBy : update.reviewBy;
+  const expiresOn = update.expiresOn === undefined ? latest.expiresOn : update.expiresOn;
+  const sourceDate = update.sourceDate === undefined ? latest.sourceDate : update.sourceDate;
+  validateDates({sourceDate,reviewBy,expiresOn});
+  const confidence = update.confidence === undefined ? latest.confidence : update.confidence;
+  if (!CONFIDENCE.has(confidence)) throw new TypeError("Unsupported confidence state.");
+  const evidenceRef = update.evidenceRef === undefined ? latest.evidenceRef : update.evidenceRef;
+  if (confidence === "verified" && !evidenceRef) throw new TypeError("Verified knowledge requires an evidence reference.");
+  const visibility = update.visibility === undefined ? latest.visibility : update.visibility;
+  if (!VISIBILITY.has(visibility) || (visibility === "site_team" && latest.scope.type !== "site")) throw new TypeError("Invalid visibility for this knowledge scope.");
+  if (visibility === "owner_admin" && !["owner","admin"].includes(update.actor.role)) throw new TypeError("Owner/admin-only knowledge must be changed by an owner or administrator.");
+  const sensitivity = update.sensitivity === undefined ? latest.sensitivity : update.sensitivity;
+  if (!["standard","restricted"].includes(sensitivity)) throw new TypeError("Unsupported sensitivity classification.");
+  if (sensitivity === "restricted" && visibility !== "owner_admin") throw new TypeError("Restricted knowledge must use owner/admin visibility.");
+  const status = update.status === undefined ? "active" : update.status;
+  if (!STATUSES.has(status)) throw new TypeError("Unsupported knowledge status.");
+  const next = {
+    ...latest,
+    eventId: requireText(update.eventId,"Event ID",128),
+    version: latest.version + 1,
+    previousVersion: latest.version,
+    title,content,sourceDate,reviewBy,expiresOn,confidence,evidenceRef,visibility,sensitivity,status,
+    sourceRef:update.sourceRef===undefined?latest.sourceRef:requireText(update.sourceRef,"Source reference",200),
+    permissionRef:update.permissionRef===undefined?latest.permissionRef:requireText(update.permissionRef,"Permission reference",200),
+    actorId:update.actor.id,
+    actorRole:update.actor.role,
+    reason,
+    occurredAt
+  };
+  if (history.some(item => item.eventId === next.eventId)) throw new Error("Knowledge event ID must be unique.");
+  return [...history,next];
+}
+
+function latestRecords(records) {
+  const latest = new Map();
+  for (const record of records) {
+    const key = record.tenantId + "\n" + record.itemId;
+    const old = latest.get(key);
+    if (!old || record.version > old.version) latest.set(key,record);
+  }
+  return [...latest.values()];
+}
+
+export function assessKnowledge(records, asOf) {
+  if (!Array.isArray(records) || !validDate(asOf)) throw new TypeError("Records and a valid as-of date are required.");
+  const latest = latestRecords(records);
+  const activeGroups = new Map();
+  for (const item of latest) {
+    if (item.status !== "active") continue;
+    const groupKey = [item.tenantId,item.scope.type,item.scope.id,item.key].join("\n");
+    const group = activeGroups.get(groupKey) || [];
+    group.push(item);activeGroups.set(groupKey,group);
+  }
+  const conflicts = new Set();
+  for (const group of activeGroups.values()) {
+    if (new Set(group.map(item=>item.content)).size > 1) for (const item of group) conflicts.add(item.tenantId+"\n"+item.itemId);
+  }
+  return latest.map(item=>{
+    let computedStatus = item.status;
+    if (item.status === "active" && item.expiresOn && item.expiresOn < asOf) computedStatus = "expired";
+    else if (item.status === "active" && item.reviewBy < asOf) computedStatus = "stale";
+    else if (item.status === "active" && conflicts.has(item.tenantId+"\n"+item.itemId)) computedStatus = "conflicting";
+    return {...item,computedStatus};
+  });
+}
+
+function canView(item,actor) {
+  if (item.visibility === "owner_admin") return actor.role === "owner" || actor.role === "admin";
+  if (item.visibility === "site_team") return item.scope.type === "site" && Array.isArray(actor.siteIds) && actor.siteIds.includes(item.scope.id);
+  return true;
+}
+
+export function searchKnowledge(records,{tenantId,actor,query="",scopeId=null,includeInactive=false,asOf}={}) {
+  if (!Array.isArray(records)) throw new TypeError("Knowledge records must be an array.");
+  validateActor(actor,tenantId);
+  const needle = typeof query === "string" ? query.trim().toLocaleLowerCase("en") : "";
+  return assessKnowledge(records,asOf)
+    .filter(item=>item.tenantId===tenantId&&canView(item,actor))
+    .filter(item=>!scopeId||item.scope.id===scopeId)
+    .filter(item=>includeInactive||["active","stale","conflicting"].includes(item.computedStatus))
+    .filter(item=>!needle||(item.title+" "+item.content+" "+item.key+" "+item.knowledgeType).toLocaleLowerCase("en").includes(needle))
+    .sort((a,b)=>b.occurredAt.localeCompare(a.occurredAt));
 }

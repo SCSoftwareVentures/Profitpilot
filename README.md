@@ -70,11 +70,9 @@ Commercial validation remains evidence-led: use authorised data only through an 
 
 ## Application prototype and development
 
-- [SwitchProof Migration synthetic demo](demo/switchproof.html)
+- [SwitchProof Migration synthetic demo](demo/switchproof.html)\n- [Field Knowledge Memory synthetic demo](demo/field-knowledge.html)\n- [Field Knowledge Memory engine](src/field-knowledge.js)\n- [Field Knowledge Memory specification](docs/FIELD_KNOWLEDGE_MEMORY.md)
 - [SwitchProof Migration engine](src/switchproof.js)
 - [SwitchProof Migration specification](docs/SWITCHPROOF_MIGRATION.md)
-- [Field Knowledge Memory engine](src/field-knowledge.js)
-- [Field Knowledge Memory specification](docs/FIELD_KNOWLEDGE_MEMORY.md)
 - [PostgreSQL schema scaffold](database/schema.sql)
 - [Prototype calculation/import engine](src/engine.js)
 - [Interactive application prototype](app/index.html)

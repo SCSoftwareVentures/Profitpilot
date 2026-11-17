@@ -59,3 +59,12 @@ test("dashboard exposes the synthetic job readiness workflow and its human-autho
   assert.match(html,/escapeHtml\(x\.label\)/);
   assert.match(html,/escapeHtml\(x\.reason\|\|x\.issue\|\|x\.evidenceRef/);
 });
+
+test("main dashboard links to both staged differentiator demonstrations",async()=>{
+  const html=await readFile(htmlPath,"utf8");
+  assert.match(html,/<a href="\.\.\/demo\/switchproof\.html">SwitchProof<\/a>/);
+  assert.match(html,/<a href="\.\.\/demo\/field-knowledge\.html">Field Knowledge<\/a>/);
+  await access(resolve(dirname(htmlPath),"../demo/switchproof.html"));
+  await access(resolve(dirname(htmlPath),"../demo/field-knowledge.html"));
+  assert.match(html,/\.side a:focus-visible/);
+});
