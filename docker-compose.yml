@@ -39,6 +39,7 @@ services:
       - ./database/migrations/024_audit_chain_integrity.sql:/docker-entrypoint-initdb.d/026-audit-chain-integrity.sql:ro
       - ./database/migrations/025_identity_admin_recovery.sql:/docker-entrypoint-initdb.d/027-identity-admin-recovery.sql:ro
       - ./database/migrations/026_quarantine_promotion.sql:/docker-entrypoint-initdb.d/028-quarantine-promotion.sql:ro
+      - ./database/migrations/027_audit_checkpoint_reader.sql:/docker-entrypoint-initdb.d/029-audit-checkpoint-reader.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
