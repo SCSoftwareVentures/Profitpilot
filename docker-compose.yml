@@ -66,6 +66,11 @@ services:
     restart: unless-stopped
   api:
     build: .
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
       # Local-only Compose; production TLS configuration is separate.
       NODE_ENV: development

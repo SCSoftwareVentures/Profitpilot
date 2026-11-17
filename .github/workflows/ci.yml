@@ -30,8 +30,15 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
+      - name: Install dependencies without package lifecycle scripts
+        run: npm install --ignore-scripts --no-audit --no-fund
+
+      # Security-branch bootstrap only: capture generated public npm dependency metadata.
+      # Remove after committing the lock and switching every install to npm ci.
+      - name: Capture resolved public dependency lock
+        if: github.head_ref == 'security/comprehensive-hardening' || github.ref == 'refs/heads/security/comprehensive-hardening'
+        run: |
+          node --input-type=module -e 'import fs from "node:fs"; import crypto from "node:crypto"; const raw=fs.readFileSync("package-lock.json"); const parsed=JSON.parse(raw); for(const p of Object.values(parsed.packages)){if(p.resolved&&!p.resolved.startsWith("https://registry.npmjs.org/"))throw Error("Unexpected resolved registry");} console.log("PP_LOCK_SHA:"+crypto.createHash("sha256").update(raw).digest("hex")); const s=raw.toString("base64"); for(let i=0;i<s.length;i+=2048) console.log("PP_LOCK_CHUNK:"+(i/2048)+":"+s.slice(i,i+2048)); console.log("PP_LOCK_END:"+Math.ceil(s.length/2048));'
 
       - name: Audit production dependencies for high-severity vulnerabilities
         run: npm audit --omit=dev --audit-level=high
@@ -144,7 +151,7 @@ jobs:
         env:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
-          npm install --no-audit --no-fund
+          npm install --ignore-scripts --no-audit --no-fund
           export TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot"
           # Run route isolation before the API suite's deliberate tenant-key rotation/revocation.
           node --test tests/route-tenant-isolation.integration.test.js
@@ -208,7 +215,7 @@ jobs:
           DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@127.0.0.1:5432/profitpilot"
           trap 'status=$?; if [ "$status" -ne 0 ]; then docker ps -a --filter name=profitpilot-api-ci; docker logs profitpilot-api-ci 2>&1 || true; fi; docker rm -f profitpilot-api-ci >/dev/null 2>&1 || true' EXIT
           # NODE_ENV=test deliberately disables app.listen() for unit tests; use ci for the running-container smoke test.
-          docker run -d --network host --name profitpilot-api-ci -e NODE_ENV=ci -e PORT=8080 -e DATABASE_URL="$DATABASE_URL" -e DATABASE_SSL=false -e CORS_ORIGIN="$CORS_ORIGIN" -e AUTH_ISSUER="$AUTH_ISSUER" -e AUTH_AUDIENCE="$AUTH_AUDIENCE" -e AUTH_JWKS_URL="$AUTH_JWKS_URL" -e TENANT_CONTEXT_HMAC_SECRET="$TENANT_CONTEXT_HMAC_SECRET" profitpilot-api:ci
+          docker run -d --read-only --cap-drop ALL --security-opt no-new-privileges --network host --name profitpilot-api-ci -e NODE_ENV=ci -e PORT=8080 -e DATABASE_URL="$DATABASE_URL" -e DATABASE_SSL=false -e CORS_ORIGIN="$CORS_ORIGIN" -e AUTH_ISSUER="$AUTH_ISSUER" -e AUTH_AUDIENCE="$AUTH_AUDIENCE" -e AUTH_JWKS_URL="$AUTH_JWKS_URL" -e TENANT_CONTEXT_HMAC_SECRET="$TENANT_CONTEXT_HMAC_SECRET" profitpilot-api:ci
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8080/health | grep -q '"database":"connected"'; then
               echo 'Production container health check passed'
