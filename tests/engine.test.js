@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {money,parseCsv,validateInvoiceRows,allocatePayroll,matchInvoice,aggregateMetrics,isIsoDate,normalizePayrollRows} from "../src/engine.js";
 
+const BASIS={currency:"AUD",taxBasis:"gst_exclusive",periodStart:"2026-11-01",periodEnd:"2026-11-30"};
+
 test("money accepts canonical decimal strings and returns exact decimal strings",()=>{assert.equal(money("10.13"),"10.13");assert.equal(Number.isNaN(money(10.13)),true);});
 test("ISO date accepts a valid calendar date",()=>assert.equal(isIsoDate("2026-11-16"),true));
 test("ISO date accepts leap day only in leap years",()=>{assert.equal(isIsoDate("2024-02-29"),true);assert.equal(isIsoDate("2025-02-29"),false);});
@@ -32,7 +34,8 @@ test("over-allocation is rejected",()=>assert.equal(allocatePayroll({pool:"100.0
 test("negative allocation is rejected",()=>assert.equal(allocatePayroll({pool:"100.00",direct:[{site:"A",amount:"-1.00"}]}).reconciles,false));
 test("amount-only match remains low-confidence and unconfirmed",()=>{const r=matchInvoice({amount:"100.00"},{id:"c",periodStart:"2026-11-01",periodEnd:"2026-11-30"});assert.equal(r.confidence,"LOW");assert.equal(r.requiresHumanConfirmation,true);assert.equal(r.decision,"candidate");});
 test("match candidate always needs human confirmation",()=>assert.equal(matchInvoice({site:"A",date:"2026-11-05",amount:"100.00"},{id:"c",site:"A",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).requiresHumanConfirmation,true));
-test("metrics aggregate totals and margin",()=>{const r=aggregateMetrics([{revenue:"1000.00",cost:"600.00"},{revenue:"500.00",cost:"250.00"}]);assert.deepEqual([r.revenue,r.cost,r.contribution,r.margin],["1500.00","850.00","650.00","43.33"]);});
+test("metrics aggregate totals and margin only with explicit common reporting basis",()=>{const r=aggregateMetrics([{...BASIS,revenue:"1000.00",cost:"600.00"},{...BASIS,revenue:"500.00",cost:"250.00"}]);assert.deepEqual([r.revenue,r.cost,r.contribution,r.margin,r.complete],["1500.00","850.00","650.00","43.33",true]);});
+test("contract aggregation refuses missing basis and invalid money rather than emitting totals",()=>{const missingBasis=aggregateMetrics([{revenue:"100.00",cost:"50.00"},{revenue:"200.00",cost:"100.00"}]);assert.equal(missingBasis.complete,false);assert.equal(missingBasis.contribution,null);const invalidMoney=aggregateMetrics([{...BASIS,revenue:"100.00",cost:"50.00"},{...BASIS,revenue:"not-money",cost:"25.00"}]);assert.equal(invalidMoney.complete,false);assert.equal(invalidMoney.contribution,null);});
 
 test("money accepts exact cent values and preserves negative values",()=>{
   assert.equal(Number.isNaN(money("1.005")),true);
@@ -49,7 +52,7 @@ test("payroll allocation sums decimal amounts without binary floating drift",()=
   assert.equal(result.siteTotals.A,"0.30");
 });
 test("contract aggregation preserves cents over repeated decimal values",()=>{
-  const result=aggregateMetrics([{revenue:"0.10",cost:"0.03"},{revenue:"0.20",cost:"0.06"}]);
+  const result=aggregateMetrics([{...BASIS,revenue:"0.10",cost:"0.03"},{...BASIS,revenue:"0.20",cost:"0.06"}]);
   assert.deepEqual([result.revenue,result.cost,result.contribution,result.margin],["0.30","0.09","0.21","70.00"]);
 });
 
