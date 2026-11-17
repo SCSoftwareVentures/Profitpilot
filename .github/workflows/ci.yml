@@ -133,6 +133,28 @@ jobs:
         run: |
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/shared-rate-limit.test.js
 
+      - name: Restore synthetic database backup and verify security after recovery
+        env:
+          PGPASSWORD: ci-admin-password
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
+        run: |
+          set -eu
+          umask 077
+          DUMP="$(mktemp "$RUNNER_TEMP/profitpilot-restore-XXXXXX")"
+          trap 'rm -f "$DUMP"' EXIT
+          PG_CONTAINER="$(docker ps --filter "ancestor=postgres:16-alpine" --format '{{.ID}}' | head -n 1)"
+          test -n "$PG_CONTAINER"
+          docker exec -e PGPASSWORD "$PG_CONTAINER" pg_dump -h 127.0.0.1 -U profitpilot_admin -Fc profitpilot > "$DUMP"
+          test -s "$DUMP"
+          psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'CREATE DATABASE profitpilot_restore_ci'
+          docker exec -i -e PGPASSWORD "$PG_CONTAINER" pg_restore -h 127.0.0.1 -U profitpilot_admin --exit-on-error --single-transaction -d profitpilot_restore_ci < "$DUMP"
+          RESTORE_ADMIN_URL="postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot_restore_ci"
+          RESTORE_APP_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot_restore_ci"
+          psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.catalog.sql
+          psql "$RESTORE_APP_URL" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.runtime.sql
+          TEST_RESTORE_ADMIN_DATABASE_URL="$RESTORE_ADMIN_URL" TEST_RESTORE_APP_DATABASE_URL="$RESTORE_APP_URL" node --test tests/backup-restore.integration.test.js
+          psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DROP DATABASE profitpilot_restore_ci'
+
       - name: Build production API image
         run: docker build --pull -t profitpilot-api:ci .
 
@@ -218,6 +240,6 @@ jobs:
             echo "## ProfitPilot security CI gate"
             echo "- Commit: \`$TESTED_SHA\`"
             echo "- Node.js application checks: $VERIFY_RESULT"
-            echo "- PostgreSQL, tenant RLS, authenticated API, TLS and container checks: $DATABASE_RESULT"
+            echo "- PostgreSQL, tenant RLS, authenticated API, distributed limits, synthetic recovery, TLS and container checks: $DATABASE_RESULT"
             echo "- Scope: automated repository CI only; not penetration testing or production certification"
           } >> "$GITHUB_STEP_SUMMARY"
