@@ -5,3 +5,19 @@ node_modules/
 coverage/
 .DS_Store
 *.log
+
+# Private operator artefacts. Never commit actual backups, credentials or checkpoints.
+/backups/
+*.dump
+*.dump.*
+*.enc
+*.pem
+*.key
+*.p12
+*.pfx
+/privacy-checkpoint*.json
+
+/BUILD_REVISION
+/release-approval.json
+/release-evidence.json
+/release-signature*.txt

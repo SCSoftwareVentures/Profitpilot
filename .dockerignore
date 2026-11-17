@@ -1,0 +1,21 @@
+# Deny all build-context content except explicit runtime sources and dependency metadata.
+**
+!Dockerfile
+!package.json
+!package-lock.json
+!server/
+!server/**
+!src/
+!src/**
+# No tests or temporary artefacts in the runtime context even if misplaced under source.
+**/*.test.js
+**/*.log
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*.dump
+**/*.enc
+**/node_modules/**

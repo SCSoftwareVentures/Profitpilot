@@ -15,6 +15,301 @@ paths:
       responses:
         "200": { description: Verified identity only; membership discovery requires a separately reviewed endpoint. }
         "401": { description: Unauthenticated }
+  /tenants/{tenantId}/privacy/requests:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      summary: List privacy requests submitted by the authenticated tenant member
+      responses:
+        "200": { description: The caller's tenant-scoped privacy requests }
+        "403": { description: Privacy request read permission not granted }
+    post:
+      summary: Submit a privacy request for the authenticated tenant member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestType, details]
+              properties:
+                requestType: { type: string, enum: [access, correction, export, deletion, restriction, account_closure] }
+                details: { type: string, minLength: 3, maxLength: 2000 }
+      responses:
+        "201": { description: Privacy request recorded for review; no data is automatically exported or deleted }
+        "400": { description: Invalid request }
+  /tenants/{tenantId}/privacy/requests/manage:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      summary: List tenant privacy request metadata for authorised administrators with fresh MFA
+      responses:
+        "200": { description: Tenant privacy request queue }
+        "403": { description: Privacy administration permission not granted }
+  /tenants/{tenantId}/privacy/requests/{requestId}/read-details:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Access one privacy request narrative with fresh MFA and an audited purpose
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        "200": { description: Specific request details, access recorded in audit chain }
+        "400": { description: Invalid ID or access purpose }
+        "403": { description: Missing manager permission or fresh MFA }
+        "404": { description: Request not found in tenant }
+  /tenants/{tenantId}/privacy/requests/{requestId}/correct-local-email:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Correct local profile email from a newly verified provider claim
+      description: Own independently reviewed correction request, new MFA, one membership and no hold required. No arbitrary email or provider identity change. Does not fulfil the entire correction request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [localProfileOnly]
+              properties:
+                localProfileOnly: { type: boolean, const: true }
+      responses:
+        "200": { description: Scoped local correction receipt }
+        "403": { description: Missing verified claim or authority }
+        "409": { description: Review, hold, eligibility or replay conflict }
+  /tenants/{tenantId}/privacy/requests/{requestId}/source-ingestion-restriction:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Apply or release a reviewed limited source ingestion restriction
+      description: Requester-only fresh MFA after independent review. A release requires a separate subsequent restriction request and no active hold. This does not restrict all processing of existing personal data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode, acknowledgeLimitedScope]
+              properties:
+                mode: { type: string, enum: [activate, release] }
+                acknowledgeLimitedScope: { type: boolean, const: true }
+      responses:
+        "200": { description: Limited restriction changed and audited }
+        "403": { description: Permission or MFA required }
+        "404": { description: Request not found }
+        "409": { description: Scope, review, hold or state conflict }
+  /tenants/{tenantId}/privacy/requests/{requestId}/confirm-account:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Confirm control of the requesting account using fresh MFA
+      description: Only the requester can confirm their own account. This establishes account control, not government identity proofing.
+      responses:
+        "200": { description: Account confirmation recorded and audited }
+        "403": { description: Fresh MFA or permission required }
+        "404": { description: Request not found or not owned by caller }
+        "409": { description: Request state or authentication event is not suitable }
+  /tenants/{tenantId}/privacy/requests/{requestId}/decision:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Advance a privacy request through verified review and resolution
+      description: Requires privacy administration permission and fresh step-up authentication. Review requires recent requester account confirmation and a separate manager. Legal hold release returns to identity verification and clears confirmation. The API does not support marking a request fulfilled because export, correction, restriction and deletion executors are not implemented; attempted fulfilment returns 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, reason]
+              properties:
+                action: { type: string, enum: [verify_identity, begin_review, place_legal_hold, release_legal_hold, reject] }
+                reason: { type: string, minLength: 3, maxLength: 1000 }
+                resolutionSummary: { type: string, minLength: 3, maxLength: 2000, description: "Required only when rejecting a request." }
+      responses:
+        "200": { description: Privacy request status advanced and audit event appended }
+        "400": { description: Invalid action or missing resolution summary }
+        "403": { description: Not authorised or step-up authentication required }
+        "404": { description: Request not found in this tenant }
+        "409": { description: Invalid state transition or fulfilment unavailable because no privacy execution workflow is implemented }
+  /tenants/{tenantId}/privacy/requests/{requestId}/approve-export:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Independently approve a restricted account-data export
+      description: Requires manager MFA, reviewed access/export request and recent requester account confirmation. Approval expires after 15 minutes; no data is returned.
+      responses:
+        "200": { description: One-use approval recorded }
+        "403": { description: Permission or fresh MFA required }
+        "404": { description: Request not found }
+        "409": { description: Ineligible request or existing active approval }
+  /tenants/{tenantId}/privacy/requests/{requestId}/export:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Download a restricted JSON account and attributed-activity export
+      description: Requester only, recent MFA and valid one-use approval required. No cache or persisted file. This partial export does not complete the privacy request.
+      responses:
+        "200":
+          description: Allowlisted JSON attachment
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { description: Permission or fresh MFA required }
+        "404": { description: Request not found or not owned by caller }
+        "409": { description: Approval invalid, consumed, expired, blocked by request state or export exceeds limits }
+  /tenants/{tenantId}/privacy/requests/{requestId}/approve-redaction:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Independently approve deletion of an eligible closed request narrative
+      description: Requires reviewed deletion request, manager MFA, explicitly enabled retention policy and no holds.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetRequestId]
+              properties:
+                targetRequestId: { type: string, format: uuid }
+      responses:
+        "200": { description: One-use target-specific approval for 15 minutes }
+        "403": { description: Permission or MFA required }
+        "404": { description: Request or eligible target not found }
+        "409": { description: Retention, hold, state or approval conflict }
+  /tenants/{tenantId}/privacy/requests/{requestId}/execute-redaction:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Remove approved closed-request narrative from active database
+      description: Requester only, new MFA after approval, policy and hold rechecked. Preserves records and audit chain. Does not fulfil the deletion request or erase backups.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetRequestId]
+              properties:
+                targetRequestId: { type: string, format: uuid }
+      responses:
+        "200": { description: Narrow deletion receipt, not full fulfilment }
+        "403": { description: Permission or MFA required }
+        "404": { description: Request or eligible target not found }
+        "409": { description: Retention, hold, expiry or approval conflict }
+  /tenants/{tenantId}/privacy/requests/{requestId}/approve-closure:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Independently approve local account closure
+      description: Each active organization must independently approve; another active owner must remain in each organization. No holds or outstanding non-closure requests. Optional email erasure requires explicitly enabled policy.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eraseEmail]
+              properties:
+                eraseEmail: { type: boolean }
+      responses:
+        "200": { description: Binding one-use approval valid for 15 minutes }
+        "403": { description: Permission or MFA required }
+        "404": { description: Request not found }
+        "409": { description: Ineligible account or retention conflict }
+  /tenants/{tenantId}/privacy/requests/{requestId}/execute-closure:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Execute independently approved local account closure
+      description: Requester only, new MFA after approval, rechecks eligibility and policy. Revokes local sessions and disables account; does not delete external identity or backup data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eraseEmail]
+              properties:
+                eraseEmail: { type: boolean }
+      responses:
+        "200": { description: Local closure receipt }
+        "403": { description: Permission or MFA required }
+        "404": { description: Request not owned by caller }
+        "409": { description: Approval, policy or account conflict }
+  /tenants/{tenantId}/privacy/requests/{requestId}/withdraw:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Withdraw the authenticated member's privacy request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 1000 }
+      responses:
+        "200": { description: Request withdrawn }
+        "404": { description: Withdrawable request not found }
   /tenants/{tenantId}/contracts:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -28,7 +323,7 @@ paths:
       - $ref: '#/components/parameters/TenantId'
     post:
       summary: Create an import batch from an authorised source file
-      description: Server must verify membership, permission basis, file checksum, limits and idempotency.
+      description: Source metadata and checksum are declared, not independently verified. Only the original importer with identical metadata can recover the existing batch.
       requestBody:
         required: true
         content:
@@ -53,13 +348,53 @@ paths:
       - $ref: '#/components/parameters/TenantId'
       - $ref: '#/components/parameters/BatchId'
     post:
-      summary: Persist parsed invoice row objects for a source batch
-      description: Accepts 1–200 JSON row objects per request. Client-side parsing only; raw file upload/storage is not implemented.
+      summary: Persist parsed invoice or payroll row objects for a source batch
+      description: One complete submission of 1–200 minimised financial row objects by the original importer. Only exact JSONB replay is idempotent. Unknown fields, nested values and excessive lengths are rejected. No raw binary file upload.
       responses:
-        "201": { description: Rows persisted; duplicates are idempotently ignored }
+        "201": { description: Rows persisted; exact identical replay is idempotent }
         "400": { description: Invalid row payload }
         "403": { description: Not authorised }
         "404": { description: Batch not found }
+        "409": { description: Conflicting replay or closed batch }
+        "422": { description: Unsupported or excessive source fields }
+  /tenants/{tenantId}/imports/{batchId}/rows/csv:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    post:
+      summary: Stage a bounded UTF-8 CSV after verifying the declared source checksum
+      description: Original importer and fresh MFA required. Only raw text/csv, maximum 100 KiB and 200 rows. The original file is not stored; no archive, executable content or arbitrary attachment storage.
+      requestBody:
+        required: true
+        content:
+          text/csv:
+            schema: { type: string }
+      responses:
+        "201": { description: Checksum verified and minimized rows staged }
+        "403": { description: Permission, importer identity or MFA failure }
+        "409": { description: Already staged or checksum mismatch }
+        "413": { description: Size limit exceeded }
+        "415": { description: Unsupported media type or encoding }
+        "422": { description: Unsupported or malformed CSV }
+  /tenants/{tenantId}/imports/{batchId}/review:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    get:
+      summary: Return a redacted import review queue
+      description: Tenant-scoped decision counts, row numbers and held reasons only. Never returns raw source records, amounts or identities. No automatic financial approval.
+      parameters:
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 9999999, default: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+      responses:
+        "200": { description: Validation review summary and paginated decisions }
+        "400": { description: Invalid identifier or pagination }
+        "403": { description: Insufficient tenant permission }
+        "404": { description: Import batch absent in this tenant }
   /tenants/{tenantId}/imports/{batchId}/validate:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -67,9 +402,160 @@ paths:
     post:
       summary: Validate source rows and produce held/review candidates
       responses:
-        "202": { description: Invoice rows structurally validated into candidate/held states; payroll validation is not yet supported }
+        "200": { description: Invoice or payroll rows structurally validated into candidate/held states, never automatically accepted }
+        "422": { description: Unsupported source type or missing persisted rows }
         "403": { description: Not authorised }
         "404": { description: Batch not found in this tenant }
+  /tenants/{tenantId}/financial-periods/reconcile:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      summary: Check a reviewed period inventory against recorded source batches and exceptions
+      description: Read-only repeatable-read diagnostic; fresh MFA and both financial review and payroll read permissions required. Does not establish external financial completeness.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [periodStart, periodEnd, expectedBatches, declaredEmptyTypes, inventoryReviewed]
+              properties:
+                periodStart: { type: string, format: date }
+                periodEnd: { type: string, format: date }
+                inventoryReviewed: { type: boolean, const: true }
+                expectedBatches:
+                  type: array
+                  maxItems: 30
+                  items:
+                    type: object
+                    required: [batchId, sourceType]
+                    properties:
+                      batchId: { type: string, format: uuid }
+                      sourceType: { type: string, enum: [customer_invoice, supplier_invoice, payroll] }
+                declaredEmptyTypes:
+                  type: array
+                  maxItems: 3
+                  items: { type: string, enum: [customer_invoice, supplier_invoice, payroll] }
+      responses:
+        "200": { description: Recorded inventory comparison and unresolved exceptions }
+        "400": { description: Invalid or incomplete source declaration }
+        "403": { description: Permission or MFA required }
+  /tenants/{tenantId}/imports/{batchId}/reconciliation:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    get:
+      summary: Compare sealed source rows, recorded amounts and approval evidence
+      description: Requires fresh MFA and both financial review and payroll read permissions. Single-batch reconciliation only; no external completeness or verification claim.
+      responses:
+        "200": { description: Source and approval status, aggregate amounts only }
+        "403": { description: Permission or MFA required }
+        "404": { description: Batch absent }
+  /tenants/{tenantId}/imports/{batchId}/invoices/candidates:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    get:
+      summary: Recover prepared invoice match IDs and limited financial evidence
+      description: Fresh MFA and matching decision permission required. No source payloads or descriptions. No mutation.
+      responses:
+        "200": { description: Scoped candidate list and exact source amounts }
+        "403": { description: Permission or MFA required }
+        "404": { description: Batch absent }
+        "409": { description: No prepared or unambiguous canonical batch }
+  /tenants/{tenantId}/imports/{batchId}/invoices/prepare:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    post:
+      summary: Reconcile staged invoice rows and prepare match candidates
+      description: Fresh MFA and an independent source reviewer required. Exact cents and explicit manifest. No match automatically confirmed. Separate reviewer required for confirmation.
+      responses:
+        "201": { description: Reconciled batch and unconfirmed match candidates }
+        "403": { description: Missing permission, MFA or independent reviewer }
+        "404": { description: Batch absent }
+        "409": { description: Duplicate invoice or closed batch }
+        "422": { description: Invalid or unreconciled source }
+  /tenants/{tenantId}/imports/{batchId}/payroll/rows/{rowNumber}/decision:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+      - name: rowNumber
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1, maximum: 9999999 }
+    post:
+      summary: Independently accept or reject a structurally validated payroll row
+      description: Fresh MFA and payroll.rows.decide permission required. Import creator cannot approve their own source rows. Held rows can only be rejected. Every row decision is audited.
+      responses:
+        "200": { description: Source row decision recorded, no automatic cost allocation }
+        "403": { description: Missing permission, step-up or independent reviewer }
+        "404": { description: Source batch or row not found }
+        "409": { description: Source not validated or decision already final }
+  /tenants/{tenantId}/imports/{batchId}/payroll/pool:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    post:
+      summary: Reconcile accepted payroll rows to a separately declared source total
+      description: Source-declared amount is NOT externally verified. All rows need independent decisions, accepted references must be unique and pay periods must equal the batch period. The importer cannot reconcile their own batch. No financial allocations are created automatically.
+      responses:
+        "201": { description: Immutable reconciled source pool; import batch sealed }
+        "403": { description: Missing independent authority or step-up }
+        "409": { description: Incomplete review or already reconciled }
+        "422": { description: Source amount, references or pay periods do not reconcile }
+  /tenants/{tenantId}/payroll/pools/{poolId}/allocations:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: poolId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Draft an evidence-referenced payroll allocation
+      description: Accepted payroll pool divided into direct, approved-allocated, non-site, excluded and automatic unallocated residual. Exact cents reconciliation required. Draft is excluded from calculations until separately confirmed.
+      responses:
+        "201": { description: Immutable allocation-line draft pending independent approval }
+        "403": { description: Insufficient permission }
+        "404": { description: Pool absent or outside tenant }
+        "422": { description: Foreign site or sum exceeds source pool }
+  /tenants/{tenantId}/payroll/pools/{poolId}/allocations/{allocationId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: poolId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: allocationId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read tenant allocation summaries and line buckets without raw source refs
+      responses:
+        "200": { description: Reviewable allocation ledger without personal source payloads }
+        "403": { description: Insufficient permission }
+        "404": { description: Allocation absent or outside tenant }
+  /tenants/{tenantId}/payroll/pools/{poolId}/allocations/{allocationId}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: poolId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: allocationId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Confirm an exactly reconciled allocation with an independent MFA reviewer
+      description: Re-verifies allocation lines and source pool under a transaction. Only one confirmed allocation per source pool. Confirmation makes included direct and approved site costs eligible for management calculations, not statutory profit.
+      responses:
+        "200": { description: Confirmed immutable allocation and audit event }
+        "403": { description: Not independent or step-up failed }
+        "404": { description: Foreign or missing allocation }
+        "409": { description: Already confirmed, rejected or stale }
+        "422": { description: Source pool or allocation mismatch }
   /tenants/{tenantId}/matches/{matchId}/decision:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -79,7 +565,7 @@ paths:
         schema: { type: string, format: uuid }
     post:
       summary: Record a human invoice-match decision
-      description: Candidate scores never auto-confirm a match. Append reviewer, reason and timestamp.
+      description: Candidate scores never auto-confirm a match. Supplier confirmation requires a direct delivery cost category and affirmative human review of payroll overlap and duplicate expenses. Fresh MFA required.
       requestBody:
         required: true
         content:
@@ -88,10 +574,29 @@ paths:
               type: object
               required: [decision, reason]
               properties:
-                decision: { type: string, enum: [confirmed, rejected, held] }
+                decision: { type: string, enum: [confirmed, rejected, held, propose_shared_overhead] }
                 reason: { type: string, minLength: 3, maxLength: 2000 }
+                expectedDirection: { type: string, enum: [customer, supplier], description: Optional direction guard for selected match. }
+                costCategory: { type: string, enum: [supplier, subcontractor, other_delivery, site_overhead, shared_overhead] }
+                sharedOverheadReviewed: { type: boolean }
+                sharedOverheadProposalId: { type: string, format: uuid, description: Required for final shared overhead confirmation; no replacement shares allowed. }
+                sharedOverheadBasis: { type: string, minLength: 3, maxLength: 1000 }
+                sharedOverheadShares:
+                  type: array
+                  minItems: 2
+                  maxItems: 50
+                  items:
+                    type: object
+                    required: [siteId, amount]
+                    properties:
+                      siteId: { type: string, format: uuid }
+                      amount: { type: string }
+                siteOverheadReviewed: { type: boolean, description: Required for site_overhead; exclusive attribution and no overlap. }
+                payrollOverlapReviewed: { type: boolean }
+                duplicateExpenseReviewed: { type: boolean }
       responses:
         "201": { description: Decision appended }
+        "422": { description: Supplier cost review lacks required evidence }
         "403": { description: Reviewer role required }
         "409": { description: Match state changed; refresh required }
   /tenants/{tenantId}/calculations:
@@ -99,7 +604,7 @@ paths:
       - $ref: '#/components/parameters/TenantId'
     post:
       summary: Create a versioned contract/site/period calculation run
-      description: Server calculates from immutable input versions; no client-supplied output totals are trusted.
+      description: Version 0.5.0 adds approved shared overhead shares to the prior calculation, and captures confirmed customer invoices, approved site payroll, reviewed supplier delivery expenses, wholly attributable site overhead and observed coverage in one service-period snapshot. Single-contract businesses only; exact AUD decimal strings, partial contribution and included-cost ratio only. Definitive margin suppressed. No client-supplied totals.
       responses:
         "201": { description: Calculation run created }
         "422": { description: Insufficient or unreconciled source evidence }
@@ -115,6 +620,131 @@ paths:
       responses:
         "200": { description: Calculation output }
         "404": { description: Run not found in this tenant }
+  /me/security:
+    get:
+      summary: Inspect current authentication assurance and session context
+      responses:
+        "200": { description: Current authentication configuration and session assurance metadata }
+  /me/sessions:
+    get:
+      summary: List active and recently revoked sessions for the authenticated identity
+      responses:
+        "200": { description: Session identifiers, issue/expiry/last-seen and revocation timestamps }
+  /me/sessions/revoke-all:
+    post:
+      summary: Revoke every local access session, including the caller
+      description: Fresh verified MFA and explicit confirmation required. Old authentication events cannot admit new tokens after revocation. External identity-provider sessions are not revoked by this operation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm: { type: boolean, enum: [true] }
+      responses:
+        "200": { description: Local sessions revoked; reauthentication required; provider revocation unconfirmed }
+        "400": { description: Explicit confirmation required }
+        "401": { description: Session unavailable }
+        "403": { description: Recent MFA required }
+  /me/sessions/{jti}:
+    parameters:
+      - name: jti
+        in: path
+        required: true
+        schema: { type: string, minLength: 16, maxLength: 128 }
+    delete:
+      summary: Revoke one session belonging to the authenticated identity
+      responses:
+        "200": { description: Session revoked }
+        "404": { description: Session not found or not owned by identity }
+  /tenants/{tenantId}/security/permissions:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      summary: Read tenant permission catalogue and member overrides
+      description: Requires fresh verified step-up authentication and tenant-specific administrative permission. Direct database reads of individual overrides are denied to the runtime role. The response returns at most 500 overrides, with overridesTruncated indicating whether more records exist.
+      responses:
+        "200":
+          description: Permission catalogue and tenant-scoped overrides
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [catalogue, overrides, overridesTruncated]
+                properties:
+                  catalogue:
+                    type: array
+                    items: { type: object }
+                  overrides:
+                    type: array
+                    maxItems: 500
+                    items: { type: object }
+                  overridesTruncated: { type: boolean }
+        "403": { description: Security permission not granted or fresh step-up authentication required }
+  /tenants/{tenantId}/security/permissions/overrides:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      summary: Grant or deny a non-security permission for a tenant member
+      description: Requires tenant permission and fresh step-up authentication. Every change requires a reason and is written to the append-only audit chain.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId, permissionKey, effect, reason]
+              properties:
+                userId: { type: string, format: uuid }
+                permissionKey: { type: string, maxLength: 128 }
+                effect: { type: string, enum: [grant, deny] }
+                reason: { type: string, minLength: 3, maxLength: 1000 }
+      responses:
+        "201": { description: Permission override recorded }
+        "400": { description: Invalid override }
+        "403": { description: Not authorised or step-up authentication required }
+        "404": { description: Active member not found }
+  /tenants/{tenantId}/security/permissions/overrides/{userId}/{permissionKey}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: permissionKey
+        in: path
+        required: true
+        schema: { type: string, maxLength: 128 }
+    delete:
+      summary: Remove a tenant member permission override
+      description: Requires fresh step-up authentication and a reason; security and privacy permissions cannot be overridden.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 1000 }
+      responses:
+        "200": { description: Override removed }
+        "403": { description: Not authorised or step-up authentication required }
+        "404": { description: Override not found }
+  /tenants/{tenantId}/security/audit:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      summary: Retrieve recent tenant audit events and verify the audit hash chain
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200": { description: Audit entries and chain-integrity verification result }
+        "403": { description: Audit read permission not granted }
 components:
   securitySchemes:
     bearerAuth:

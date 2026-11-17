@@ -4,12 +4,15 @@
   "private": true,
   "type": "module",
   "description": "ProfitPilot contract economics API prototype",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "test": "node --test",
-    "check": "node --check server/index.js && node --check server/auth.js && node --check server/db.js && node --check src/engine.js"
+    "check": "node --check server/index.js && node --check server/auth.js && node --check server/db.js && node --check src/engine.js",
+    "sbom": "npm sbom --omit=dev --sbom-format cyclonedx"
   },
   "dependencies": {
     "cors": "^2.8.5",

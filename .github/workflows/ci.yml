@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: profitpilot-ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   verify:
@@ -23,15 +23,25 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, reviewed immutable revision
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4, reviewed immutable revision
         with:
           node-version: 22
 
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
+      - name: Install dependencies without package lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Generate CycloneDX software bill of materials
+        run: |
+          npm sbom --omit=dev --sbom-format cyclonedx > "$RUNNER_TEMP/profitpilot-sbom.json"
+          node --input-type=module -e 'import fs from "node:fs"; const report=JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP+"/profitpilot-sbom.json")); if(report.bomFormat!=="CycloneDX"||!report.components?.length)throw Error("Missing dependency evidence");'
+
+      - name: Audit production dependencies for high-severity vulnerabilities
+        run: npm audit --omit=dev --audit-level=high
 
       - name: Syntax checks
         run: npm run check
@@ -59,7 +69,9 @@ jobs:
           --health-retries 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, reviewed immutable revision
+        with:
+          persist-credentials: false
 
       - name: Generate ephemeral tenant context signing key
         run: |
@@ -80,6 +92,53 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/005_prevent_duplicate_confirmations.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/006_tenant_actor_membership_fks.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/007_users_self_rls.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/008_granular_permissions.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/009_auth_session_registry.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/010_audit_and_security_admin.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/011_privacy_request_workflow.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/012_privacy_subject_isolation.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/013_privacy_account_confirmation.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/014_privacy_account_export.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/015_privacy_export_coverage.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/016_privacy_controlled_redaction.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/017_privacy_approval_invalidation.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/018_account_closure.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/019_privacy_restore_safeguards.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/020_multi_tenant_account_closure.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/021_closed_session_retention.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/022_provider_erasure_authorization.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/023_identity_issuer_binding.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/024_discarded_import_retention.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/025_runtime_acl_and_catalog_guard.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/026_payroll_allocation_approval.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/027_shared_overhead_immutability.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/028_shared_overhead_proposals.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/029_exact_access_session_binding.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/030_privacy_read_minimisation.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/031_audit_read_isolation.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/032_signed_audit_writes.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/033_csv_ingestion_audit.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/034_signing_key_lifecycle.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/035_local_profile_correction.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/036_encrypted_attachment_quarantine.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/037_source_ingestion_restriction.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/038_reviewed_permission_changes.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/039_verified_session_operations.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/040_permission_read_isolation.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/041_account_session_revocation.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/042_session_revocation_restore_integrity.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/043_individual_session_restore_integrity.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/044_account_compromise_containment.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/045_transaction_bound_tenant_context.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/046_restrict_runtime_database_creation.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/047_audit_and_key_restore_anchors.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/048_runtime_financial_write_boundary.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/049_financial_step_up_boundary.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/050_source_payload_read_isolation.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/051_verified_source_staging.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/052_transaction_session_continuity.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/053_dual_control_access_provisioning.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/054_role_scoped_financial_reads.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:
@@ -91,17 +150,76 @@ jobs:
           psql "$APP_URL" -v ON_ERROR_STOP=1 -c "DO \$\$ BEGIN IF (SELECT count(*) FROM tenants) <> 0 THEN RAISE EXCEPTION 'RLS without tenant context did not deny rows'; END IF; END \$\$;"
           psql "$APP_URL" -v ON_ERROR_STOP=1 -c "BEGIN; SELECT set_config('app.tenant_id','11111111-1111-4111-8111-111111111111',true); DO \$\$ BEGIN IF (SELECT count(*) FROM tenants) <> 0 THEN RAISE EXCEPTION 'Raw tenant GUC must not grant access without a valid HMAC'; END IF; END \$\$; COMMIT;"
 
+      - name: Capture isolated pre-privacy-action backup
+        env:
+          PGPASSWORD: ci-admin-password
+          PG_CI_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          umask 077
+          docker exec -e PGPASSWORD "$PG_CI_CONTAINER" pg_dump -h 127.0.0.1 -U profitpilot_admin -Fc profitpilot > "$RUNNER_TEMP/privacy-before.dump"
+
       - name: Run authenticated API integration tests
         env:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
-          npm install --no-audit --no-fund
-          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/api.integration.test.js
+          npm ci --ignore-scripts --no-audit --no-fund
+          export TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot"
+          # Run route isolation before the API suite's deliberate tenant-key rotation/revocation.
+          node --test tests/route-tenant-isolation.integration.test.js
+          node --test tests/payroll-allocation.integration.test.js
+          node --test tests/account-closure.integration.test.js
+          node --test tests/attachment-quarantine.integration.test.js
+          node --test tests/import-retention.integration.test.js
+          node --test tests/api.integration.test.js
+          node --test tests/tenant-isolation-catalog.integration.test.js
+
+      - name: Exercise real PostgreSQL backup and recovery privacy gate
+        env:
+          PGPASSWORD: ci-admin-password
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
+          PRIVACY_RESTORE_CI: "1"
+          PG_CI_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          set -eu
+          umask 077
+          trap 'rm -f "$RUNNER_TEMP/privacy-before.dump" "$RUNNER_TEMP/privacy-after.dump" "$RUNNER_TEMP/privacy-after.sealed" "$RUNNER_TEMP/privacy-after.verified.dump"; dropdb -h localhost -U profitpilot_admin --if-exists privacy_restore_old_ci; dropdb -h localhost -U profitpilot_admin --if-exists privacy_restore_new_ci' EXIT
+          psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c "BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT private.capture_audit_restore_anchors(); COMMIT;"
+          docker exec -e PGPASSWORD "$PG_CI_CONTAINER" pg_dump -h 127.0.0.1 -U profitpilot_admin -Fc profitpilot > "$RUNNER_TEMP/privacy-after.dump"
+          node tests/encrypted-backup-drill.js "$RUNNER_TEMP/privacy-after.dump" "$RUNNER_TEMP/privacy-after.sealed" "$RUNNER_TEMP/privacy-after.verified.dump"
+          createdb -h localhost -U profitpilot_admin privacy_restore_old_ci
+          createdb -h localhost -U profitpilot_admin privacy_restore_new_ci
+          docker exec -i -e PGPASSWORD "$PG_CI_CONTAINER" pg_restore -h 127.0.0.1 -U profitpilot_admin --exit-on-error -d privacy_restore_old_ci < "$RUNNER_TEMP/privacy-before.dump"
+          docker exec -i -e PGPASSWORD "$PG_CI_CONTAINER" pg_restore -h 127.0.0.1 -U profitpilot_admin --exit-on-error -d privacy_restore_new_ci < "$RUNNER_TEMP/privacy-after.verified.dump"
+          PRIVACY_DRILL_KEY="$(openssl rand -hex 32)" node tests/physical-restore-drill.js
+
+      - name: Verify production database TLS configuration fails closed
+        run: |
+          set -eu
+          if NODE_ENV=production DATABASE_SSL=false DATABASE_URL="postgresql://profitpilot:placeholder@127.0.0.1:5432/profitpilot" node --input-type=module -e "await import('./server/db.js')" >tls-check.log 2>&1; then
+            echo "Production database configuration unexpectedly accepted plaintext connections"
+            exit 1
+          fi
+          grep -q "DATABASE_SSL=true is required in production" tls-check.log
+          NODE_ENV=production DATABASE_SSL=true DATABASE_URL="postgresql://profitpilot:placeholder@127.0.0.1:5432/profitpilot" node --input-type=module -e "await import('./server/db.js')"
+          echo "Production startup rejects disabled TLS and accepts verified-TLS configuration"
 
       - name: Build production API image
-        run: docker build --pull -t profitpilot-api:ci .
+        run: |
+          docker build --pull --build-arg PROFITPILOT_BUILD_REVISION="$GITHUB_SHA" -t profitpilot-api:ci .
+          test "$(docker run --rm --entrypoint cat profitpilot-api:ci /app/BUILD_REVISION)" = "$GITHUB_SHA"
+          docker run --rm --entrypoint sh profitpilot-api:ci -ec 'test "$(id -u)" != 0; node --version; ! command -v npm; ! command -v npx; ! command -v yarn; test ! -d /usr/local/lib/node_modules; test ! -d /root/.npm'
 
-      - name: Start container and verify database health endpoint
+      - name: Verify production image runs as non-root
+        run: |
+          set -eu
+          image_user="$(docker image inspect profitpilot-api:ci --format '{{.Config.User}}')"
+          if [ "$image_user" != "node" ]; then
+            echo "Production image must run as the non-root node user; got: $image_user" >&2
+            exit 1
+          fi
+          echo "Production image declares non-root node user"
+
+      - name: Start container and verify database health endpoint (CI test configuration)
         env:
           CORS_ORIGIN: https://ci.invalid
           AUTH_ISSUER: https://profitpilot-ci.invalid/
@@ -110,15 +228,109 @@ jobs:
         run: |
           set -eu
           DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@127.0.0.1:5432/profitpilot"
-          docker run -d --network host --name profitpilot-api-ci -e NODE_ENV=production -e PORT=8080 -e DATABASE_URL="$DATABASE_URL" -e DATABASE_SSL=false -e CORS_ORIGIN="$CORS_ORIGIN" -e AUTH_ISSUER="$AUTH_ISSUER" -e AUTH_AUDIENCE="$AUTH_AUDIENCE" -e AUTH_JWKS_URL="$AUTH_JWKS_URL" -e TENANT_CONTEXT_HMAC_SECRET="$TENANT_CONTEXT_HMAC_SECRET" profitpilot-api:ci
+          trap 'status=$?; if [ "$status" -ne 0 ]; then docker ps -a --filter name=profitpilot-api-ci; docker logs profitpilot-api-ci 2>&1 || true; fi; docker rm -f profitpilot-api-ci >/dev/null 2>&1 || true' EXIT
+          # NODE_ENV=test deliberately disables app.listen() for unit tests; use ci for the running-container smoke test.
+          docker run -d --read-only --cap-drop ALL --security-opt no-new-privileges --network host --name profitpilot-api-ci -e NODE_ENV=ci -e PORT=8080 -e DATABASE_URL="$DATABASE_URL" -e DATABASE_SSL=false -e CORS_ORIGIN="$CORS_ORIGIN" -e AUTH_ISSUER="$AUTH_ISSUER" -e AUTH_AUDIENCE="$AUTH_AUDIENCE" -e AUTH_JWKS_URL="$AUTH_JWKS_URL" -e TENANT_CONTEXT_HMAC_SECRET="$TENANT_CONTEXT_HMAC_SECRET" profitpilot-api:ci
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8080/health | grep -q '"database":"connected"'; then
               echo 'Production container health check passed'
-              docker rm -f profitpilot-api-ci
               exit 0
             fi
             sleep 2
           done
-          docker logs profitpilot-api-ci
-          docker rm -f profitpilot-api-ci
+          echo 'Container did not report a connected database after 60 seconds' >&2
           exit 1
+
+  security-secrets:
+    name: Repository credential exposure gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout for full-history secret audit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan history and working tree; report metadata only
+        env:
+          GOTOOLCHAIN: auto
+          GOSUMDB: sum.golang.org
+        run: |
+          set -eu
+          umask 077
+          export GOBIN="$RUNNER_TEMP/security-tools"
+          go install github.com/zricethezav/gitleaks/v8@v8.30.0
+          trap 'rm -f "$RUNNER_TEMP/gitleaks-history.json" "$RUNNER_TEMP/gitleaks-tree.json"' EXIT
+          status=0
+          "$GOBIN/gitleaks" git --redact=100 --no-banner --exit-code=1 --report-format=json --report-path="$RUNNER_TEMP/gitleaks-history.json" --log-opts="--all" . || status=1
+          "$GOBIN/gitleaks" dir --redact=100 --no-banner --exit-code=1 --report-format=json --report-path="$RUNNER_TEMP/gitleaks-tree.json" . || status=1
+          node --input-type=module -e 'import fs from "node:fs";for(const kind of ["history","tree"]){const p=process.env.RUNNER_TEMP+"/gitleaks-"+kind+".json";if(!fs.existsSync(p))throw Error("Missing scan evidence: "+kind);const issues=JSON.parse(fs.readFileSync(p));if(!Array.isArray(issues))throw Error("Invalid report");console.log(JSON.stringify({scan:kind,count:issues.length,findings:issues.map(x=>({rule:x.RuleID,file:x.File,commit:x.Commit,line:x.StartLine,fingerprint:x.Fingerprint}))}));if(issues.length)process.exitCode=1;}'
+          exit "$status"
+
+  security-static:
+    name: Static application security gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Initialise pinned CodeQL analysis
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          config: |
+            queries:
+              - uses: security-extended
+            paths:
+              - server
+              - src
+              - app
+              - scripts
+            paths-ignore:
+              - '**/*.test.js'
+      - name: Analyse application source without publishing raw SARIF
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066
+        with:
+          upload: never
+          upload-database: false
+          output: ${{ runner.temp }}/profitpilot-codeql
+      - name: Enforce static security severity gate
+        run: node scripts/check-security-sarif.js "$RUNNER_TEMP/profitpilot-codeql"
+
+  security-container:
+    name: Production image vulnerability gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build exact hardened runtime image
+        run: docker build --pull --build-arg PROFITPILOT_BUILD_REVISION="$GITHUB_SHA" -t profitpilot-security:ci .
+      - name: Scan OS and runtime dependencies with pinned Trivy
+        uses: aquasecurity/trivy-action@38b337fff0a2f984d5be173c99e3f633438167ec
+        with:
+          version: v0.76.2
+          image-ref: profitpilot-security:ci
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '1'
+          format: json
+          output: ${{ runner.temp }}/profitpilot-trivy.json
+          hide-progress: 'true'
+          cache: 'false'
+      - name: Summarise scan without credentials or file contents
+        if: always()
+        run: |
+          node --input-type=module -e 'import fs from "node:fs";const p=process.env.RUNNER_TEMP+"/profitpilot-trivy.json";if(!fs.existsSync(p))throw Error("Image scan evidence unavailable");const x=JSON.parse(fs.readFileSync(p));if(!Array.isArray(x.Results)||!x.Results.length)throw Error("Empty image scan evidence");const findings=x.Results.flatMap(r=>r.Vulnerabilities||[]).filter(v=>["HIGH","CRITICAL"].includes(v.Severity));console.log(JSON.stringify({targets:x.Results.length,blocking:findings.map(v=>({id:v.VulnerabilityID,package:v.PkgName,installed:v.InstalledVersion,fixed:v.FixedVersion,severity:v.Severity}))}));if(findings.length)process.exitCode=1;'

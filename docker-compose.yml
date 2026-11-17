@@ -20,6 +20,53 @@ services:
       - ./database/migrations/005_prevent_duplicate_confirmations.sql:/docker-entrypoint-initdb.d/007-confirmation-uniqueness.sql:ro
       - ./database/migrations/006_tenant_actor_membership_fks.sql:/docker-entrypoint-initdb.d/008-tenant-actor-fks.sql:ro
       - ./database/migrations/007_users_self_rls.sql:/docker-entrypoint-initdb.d/009-users-self-rls.sql:ro
+      - ./database/migrations/008_granular_permissions.sql:/docker-entrypoint-initdb.d/010-granular-permissions.sql:ro
+      - ./database/migrations/009_auth_session_registry.sql:/docker-entrypoint-initdb.d/011-auth-sessions.sql:ro
+      - ./database/migrations/010_audit_and_security_admin.sql:/docker-entrypoint-initdb.d/012-audit-admin.sql:ro
+      - ./database/migrations/011_privacy_request_workflow.sql:/docker-entrypoint-initdb.d/013-privacy-workflow.sql:ro
+      - ./database/migrations/012_privacy_subject_isolation.sql:/docker-entrypoint-initdb.d/014-privacy-isolation.sql:ro
+      - ./database/migrations/013_privacy_account_confirmation.sql:/docker-entrypoint-initdb.d/015-privacy-confirmation.sql:ro
+      - ./database/migrations/014_privacy_account_export.sql:/docker-entrypoint-initdb.d/016-privacy-export.sql:ro
+      - ./database/migrations/015_privacy_export_coverage.sql:/docker-entrypoint-initdb.d/017-export-coverage.sql:ro
+      - ./database/migrations/016_privacy_controlled_redaction.sql:/docker-entrypoint-initdb.d/018-controlled-redaction.sql:ro
+      - ./database/migrations/017_privacy_approval_invalidation.sql:/docker-entrypoint-initdb.d/019-approval-invalidation.sql:ro
+      - ./database/migrations/018_account_closure.sql:/docker-entrypoint-initdb.d/020-account-closure.sql:ro
+      - ./database/migrations/019_privacy_restore_safeguards.sql:/docker-entrypoint-initdb.d/021-privacy-restore.sql:ro
+      - ./database/migrations/020_multi_tenant_account_closure.sql:/docker-entrypoint-initdb.d/022-multi-tenant-closure.sql:ro
+      - ./database/migrations/021_closed_session_retention.sql:/docker-entrypoint-initdb.d/023-closed-session-retention.sql:ro
+      - ./database/migrations/022_provider_erasure_authorization.sql:/docker-entrypoint-initdb.d/024-provider-erasure.sql:ro
+      - ./database/migrations/023_identity_issuer_binding.sql:/docker-entrypoint-initdb.d/025-issuer-binding.sql:ro
+      - ./database/migrations/024_discarded_import_retention.sql:/docker-entrypoint-initdb.d/026-import-retention.sql:ro
+      - ./database/migrations/025_runtime_acl_and_catalog_guard.sql:/docker-entrypoint-initdb.d/027-runtime-acl-guard.sql:ro
+      - ./database/migrations/026_payroll_allocation_approval.sql:/docker-entrypoint-initdb.d/028-payroll-approval.sql:ro
+      - ./database/migrations/027_shared_overhead_immutability.sql:/docker-entrypoint-initdb.d/029-shared-overhead.sql:ro
+      - ./database/migrations/028_shared_overhead_proposals.sql:/docker-entrypoint-initdb.d/030-shared-proposals.sql:ro
+      - ./database/migrations/029_exact_access_session_binding.sql:/docker-entrypoint-initdb.d/031-exact-session-binding.sql:ro
+      - ./database/migrations/030_privacy_read_minimisation.sql:/docker-entrypoint-initdb.d/032-privacy-read-minimisation.sql:ro
+      - ./database/migrations/031_audit_read_isolation.sql:/docker-entrypoint-initdb.d/033-audit-read-isolation.sql:ro
+      - ./database/migrations/032_signed_audit_writes.sql:/docker-entrypoint-initdb.d/034-signed-audit-writes.sql:ro
+      - ./database/migrations/033_csv_ingestion_audit.sql:/docker-entrypoint-initdb.d/035-csv-ingestion-audit.sql:ro
+      - ./database/migrations/034_signing_key_lifecycle.sql:/docker-entrypoint-initdb.d/036-signing-key-lifecycle.sql:ro
+      - ./database/migrations/035_local_profile_correction.sql:/docker-entrypoint-initdb.d/037-local-profile-correction.sql:ro
+      - ./database/migrations/036_encrypted_attachment_quarantine.sql:/docker-entrypoint-initdb.d/038-encrypted-attachment-quarantine.sql:ro
+      - ./database/migrations/037_source_ingestion_restriction.sql:/docker-entrypoint-initdb.d/039-source-ingestion-restriction.sql:ro
+      - ./database/migrations/038_reviewed_permission_changes.sql:/docker-entrypoint-initdb.d/040-reviewed-permissions.sql:ro
+      - ./database/migrations/039_verified_session_operations.sql:/docker-entrypoint-initdb.d/041-verified-sessions.sql:ro
+      - ./database/migrations/040_permission_read_isolation.sql:/docker-entrypoint-initdb.d/042-permission-read-isolation.sql:ro
+      - ./database/migrations/041_account_session_revocation.sql:/docker-entrypoint-initdb.d/043-account-session-revocation.sql:ro
+      - ./database/migrations/042_session_revocation_restore_integrity.sql:/docker-entrypoint-initdb.d/044-session-revocation-restore-integrity.sql:ro
+      - ./database/migrations/043_individual_session_restore_integrity.sql:/docker-entrypoint-initdb.d/045-individual-session-restore-integrity.sql:ro
+      - ./database/migrations/044_account_compromise_containment.sql:/docker-entrypoint-initdb.d/046-account-compromise-containment.sql:ro
+      - ./database/migrations/045_transaction_bound_tenant_context.sql:/docker-entrypoint-initdb.d/047-transaction-bound-tenant-context.sql:ro
+      - ./database/migrations/046_restrict_runtime_database_creation.sql:/docker-entrypoint-initdb.d/048-restrict-runtime-database-creation.sql:ro
+      - ./database/migrations/047_audit_and_key_restore_anchors.sql:/docker-entrypoint-initdb.d/049-audit-and-key-restore-anchors.sql:ro
+      - ./database/migrations/048_runtime_financial_write_boundary.sql:/docker-entrypoint-initdb.d/050-runtime-financial-write-boundary.sql:ro
+      - ./database/migrations/049_financial_step_up_boundary.sql:/docker-entrypoint-initdb.d/051-financial-step-up-boundary.sql:ro
+      - ./database/migrations/050_source_payload_read_isolation.sql:/docker-entrypoint-initdb.d/052-source-payload-read-isolation.sql:ro
+      - ./database/migrations/051_verified_source_staging.sql:/docker-entrypoint-initdb.d/053-verified-source-staging.sql:ro
+      - ./database/migrations/052_transaction_session_continuity.sql:/docker-entrypoint-initdb.d/054-transaction-session-continuity.sql:ro
+      - ./database/migrations/053_dual_control_access_provisioning.sql:/docker-entrypoint-initdb.d/055-dual-control-access-provisioning.sql:ro
+      - ./database/migrations/054_role_scoped_financial_reads.sql:/docker-entrypoint-initdb.d/056-role-scoped-financial-reads.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
@@ -28,8 +75,14 @@ services:
     restart: unless-stopped
   api:
     build: .
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
-      NODE_ENV: production
+      # Local-only Compose; production TLS configuration is separate.
+      NODE_ENV: development
       PORT: 8080
       DATABASE_URL: postgres://profitpilot_app:${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD}@db:5432/profitpilot
       DATABASE_SSL: "false"
