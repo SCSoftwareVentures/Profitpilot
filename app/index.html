@@ -28,6 +28,18 @@ const initial=structuredClone(DEMO_CONTRACTS);
 let contracts=structuredClone(initial);
 let exceptions=[{title:"Invoice not matched",detail:"Riverside Offices · INV-204",value:"$1,850",status:"Review"},{title:"Labour allocation review",detail:"Northside Retail · November",value:"",status:"Pending"}];
 const readinessChecks={customer:{status:"satisfied",value:"Northside Retail",evidenceRef:"synthetic:customer-1"},site:{status:"satisfied",value:"Northside, Melbourne",evidenceRef:"synthetic:site-1"},scope:{status:"conflicting",reason:"The signed scope excludes windows but the new work request includes them."},service_date:{status:"satisfied",value:"2026-12-01",evidenceRef:"synthetic:schedule-1"},price:{status:"satisfied",value:"1250.00",evidenceRef:"synthetic:quote-1"},currency:{status:"satisfied",value:"AUD",evidenceRef:"synthetic:quote-1"},access:{status:"unverified",reason:"Site access instructions are awaiting confirmation."},materials:{status:"satisfied",value:true},skills:{status:"satisfied",value:true},permissions:{status:"not_applicable",reason:"No additional induction is required for this synthetic site."},completion_evidence:{status:"satisfied",value:"Supervisor checklist",evidenceRef:"synthetic:evidence-1"}};
+
+const promiseDemoRecords=(()=>{
+  const base={tenantId:"synthetic-tenant",promiseType:"customer_promise",counterparty:"Northside Retail",title:"Complete scheduled office cleaning",description:"Complete the agreed office cleaning service.",scope:["Vacuum offices","Clean common areas"],exclusions:["External windows"],dueAt:"2026-11-20T21:00:00+11:00",dueTimezone:"Australia/Melbourne",ownerId:"demo-owner",responsibleParty:"business",originRef:"contract:C-102",createdBy:"demo-owner",createdAt:"2026-11-17T09:00:00+11:00"};
+  const make=(id,eventId)=>createPromiseRecord({...base,id,eventId});
+  const sent=transitionPromise(make("promise-accepted","promise-accepted-created"),{id:"promise-accepted-sent",type:"communicated",actorId:"demo-owner",actorType:"business_user",occurredAt:"2026-11-17T09:05:00+11:00",messageRef:"synthetic:message-accepted"});
+  const accepted=transitionPromise(sent,{id:"promise-accepted-ack",type:"accepted",actorId:"demo-customer",actorType:"customer_contact",occurredAt:"2026-11-17T09:10:00+11:00",evidenceRef:"synthetic:customer-ack"});
+  const disputedSent=transitionPromise(make("promise-disputed","promise-disputed-created"),{id:"promise-disputed-sent",type:"communicated",actorId:"demo-owner",actorType:"business_user",occurredAt:"2026-11-17T09:06:00+11:00",messageRef:"synthetic:message-disputed"});
+  const disputed=transitionPromise(disputedSent,{id:"promise-disputed-event",type:"disputed",actorId:"demo-customer",actorType:"customer_contact",occurredAt:"2026-11-17T09:12:00+11:00",reason:"Customer disputes whether the reception area is included."});
+  const task=transitionPromise(createPromiseRecord({...base,id:"task-internal",eventId:"task-created",promiseType:"internal_task",counterparty:undefined,title:"Confirm consumables are stocked",description:"Check stock before the next service.",originRef:"job:J-204"}),{id:"task-accepted",type:"accepted",actorId:"demo-owner",actorType:"business_user",occurredAt:"2026-11-17T09:15:00+11:00",evidenceRef:"synthetic:assignment-ack"});
+  return [accepted,disputed,task];
+})();
+
 const fmt=formatDemoMoney;
 const escapeHtml=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
 const displayMargin=value=>typeof value==="string"&&/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value)?escapeHtml(value)+"%":"Unavailable";
