@@ -16,7 +16,7 @@ The browser dashboard is a **synthetic local demonstration**. It does not connec
 
 ## Initial validation approach
 
-Begin with evidence-led concierge validation using authorised data and an approved secure handling route. Validate data feasibility, customer pain, repeatability, willingness to pay and usability before authorising a software build. Preserve G0–G6 gates.
+Commercial validation remains evidence-led: use authorised data only through an approved secure handling route, and validate data feasibility, customer pain, repeatability, willingness to pay and usability before any customer-facing release. Owner-authorised synthetic prototype and hardening work may continue in parallel; it does not waive G0–G6 gates.
 
 ## Core controls
 
