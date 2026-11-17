@@ -56,4 +56,8 @@ export async function withTenant(tenantId,subject,fn,identity){
  }
  finally{if(!discarded)client.release();}
 }
-export async function health(){const r=await pool.query("SELECT 1 AS ok");return r.rows[0].ok===1;}
+export async function health(){
+ const r=await pool.query("SELECT current_user AS runtime_role, NOT (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication) AS restricted FROM pg_roles WHERE rolname=current_user");
+ if(r.rowCount!==1||!r.rows[0].restricted||(process.env.NODE_ENV==="production"&&r.rows[0].runtime_role!=="profitpilot_app"))throw new Error("Unsafe runtime database role");
+ return true;
+}
