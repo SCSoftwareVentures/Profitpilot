@@ -207,25 +207,38 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("UPDATE tenant_memberships SET role='owner' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA])),/permission denied/i,"ordinary API runtime sessions must not be able to self-promote or alter tenant memberships");
     await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("UPDATE tenants SET legal_name='tampered' WHERE id=$1",[tenantA])),/permission denied/i,"ordinary API runtime sessions must not alter tenant ownership records");
     await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("DELETE FROM import_batches WHERE tenant_id=$1",[tenantA])),/permission denied/i,"the runtime role must not delete source import records");
-    const primarySecret=process.env.TENANT_CONTEXT_HMAC_SECRET;
-    const primaryKeyId=process.env.TENANT_CONTEXT_HMAC_KEY_ID||"primary";
+    // The shared CI key must survive this test: use a disposable key pair.
+    const sharedSecret=process.env.TENANT_CONTEXT_HMAC_SECRET;
+    const sharedKeyId=process.env.TENANT_CONTEXT_HMAC_KEY_ID||"primary";
+    const primarySecret=randomBytes(32).toString("hex");
+    const primaryKeyId="ci-rotation-old-"+randomBytes(8).toString("hex");
     const secondarySecret=randomBytes(32).toString("hex");
-    await admin.query("INSERT INTO private.tenant_context_keys(key_id,secret,active) VALUES ('rotation-next',decode($1,'hex'),true)",[secondarySecret]);
-    const primaryDuringOverlap=await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT id FROM contracts"));
-    assert.equal(primaryDuringOverlap.rowCount,1,"the original key must remain valid during the overlap window");
-    process.env.TENANT_CONTEXT_HMAC_SECRET=secondarySecret;
-    process.env.TENANT_CONTEXT_HMAC_KEY_ID="rotation-next";
-    const secondaryDuringOverlap=await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT id FROM contracts"));
-    assert.equal(secondaryDuringOverlap.rowCount,1,"the replacement key must work before revoking the original");
-    await admin.query("UPDATE private.tenant_context_keys SET active=false WHERE key_id=$1",[primaryKeyId]);
-    process.env.TENANT_CONTEXT_HMAC_SECRET=primarySecret;
-    process.env.TENANT_CONTEXT_HMAC_KEY_ID=primaryKeyId;
-    const revokedPrimary=await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT id FROM contracts"));
-    assert.equal(revokedPrimary.rowCount,0,"a revoked signing key must no longer authorise tenant rows");
-    process.env.TENANT_CONTEXT_HMAC_SECRET=secondarySecret;
-    process.env.TENANT_CONTEXT_HMAC_KEY_ID="rotation-next";
-    const activeSecondary=await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT id FROM contracts"));
-    assert.equal(activeSecondary.rowCount,1,"the replacement key must remain valid after old-key revocation");
+    const secondaryKeyId="ci-rotation-new-"+randomBytes(8).toString("hex");
+    await admin.query("INSERT INTO private.tenant_context_keys(key_id,secret,active) VALUES ($1,decode($2,'hex'),true),($3,decode($4,'hex'),true)",[primaryKeyId,primarySecret,secondaryKeyId,secondarySecret]);
+    try{
+      process.env.TENANT_CONTEXT_HMAC_SECRET=primarySecret;
+      process.env.TENANT_CONTEXT_HMAC_KEY_ID=primaryKeyId;
+      const primaryDuringOverlap=await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT id FROM contracts"));
+      assert.equal(primaryDuringOverlap.rowCount,1,"the original key must remain valid during the overlap window");
+      process.env.TENANT_CONTEXT_HMAC_SECRET=secondarySecret;
+      process.env.TENANT_CONTEXT_HMAC_KEY_ID=secondaryKeyId;
+      const secondaryDuringOverlap=await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT id FROM contracts"));
+      assert.equal(secondaryDuringOverlap.rowCount,1,"the replacement key must work before revocation");
+      await admin.query("UPDATE private.tenant_context_keys SET active=false WHERE key_id=$1",[primaryKeyId]);
+      process.env.TENANT_CONTEXT_HMAC_SECRET=primarySecret;
+      process.env.TENANT_CONTEXT_HMAC_KEY_ID=primaryKeyId;
+      const revokedPrimary=await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT id FROM contracts"));
+      assert.equal(revokedPrimary.rowCount,0,"a revoked signing key must no longer authorise tenant rows");
+      process.env.TENANT_CONTEXT_HMAC_SECRET=secondarySecret;
+      process.env.TENANT_CONTEXT_HMAC_KEY_ID=secondaryKeyId;
+      assert.equal((await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT id FROM contracts"))).rowCount,1,"replacement must remain valid");
+    }finally{
+      process.env.TENANT_CONTEXT_HMAC_SECRET=sharedSecret;
+      process.env.TENANT_CONTEXT_HMAC_KEY_ID=sharedKeyId;
+      await admin.query("UPDATE private.tenant_context_keys SET active=false WHERE key_id=ANY($1::text[]) AND active",[ [primaryKeyId,secondaryKeyId] ]);
+    }
+    assert.equal((await admin.query("SELECT active FROM private.tenant_context_keys WHERE key_id=$1",[sharedKeyId])).rows[0]?.active,true,"destructive rotation test must preserve the shared CI key");
+    assert.equal((await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT id FROM contracts"))).rowCount,1,"subsequent tests must retain the original CI signing context");
     const afterCommit=await appPool.query("SELECT current_setting('app.tenant_id',true) AS tenant_id");
     assert.ok(afterCommit.rows[0].tenant_id===null||afterCommit.rows[0].tenant_id==="","tenant context must not leak after a transaction returns its pooled connection");
     await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'unauthorised write','active')",["99999999-9999-4999-8999-999999999999",tenantB,businessB])),/permission denied/i,"the runtime role must not write to unimplemented contract administration tables");
