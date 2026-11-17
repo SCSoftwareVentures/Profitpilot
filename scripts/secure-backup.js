@@ -29,7 +29,9 @@ export async function encryptBackup(input,destination,hex,producerDone=Promise.r
    const cipher=createCipheriv("aes-256-gcm",key,iv,{authTagLength:tagBytes});
    cipher.setAAD(header);
    await writeFile(temp,header,{flag:"wx",mode:0o600});
-   await Promise.all([pipeline(input,cipher,createWriteStream(temp,{flags:"a"})),producerDone]);
+   const outcomes=await Promise.allSettled([pipeline(input,cipher,createWriteStream(temp,{flags:"a"})),producerDone]);
+   const failure=outcomes.find(x=>x.status==="rejected");
+   if(failure)throw failure.reason;
    await appendFile(temp,cipher.getAuthTag());
   });
  }finally{key.fill(0);}
