@@ -37,8 +37,8 @@ test("negative allocation is rejected",()=>assert.equal(allocatePayroll({pool:"1
 test("negative payroll rows cannot be hidden by positive rows in the same site bucket",()=>{const result=allocatePayroll({pool:"100.00",direct:[{site:"A",amount:"101.00"},{site:"A",amount:"-1.00"}],approved:[],nonSite:"0.00",excluded:"0.00"});assert.equal(result.reconciles,false);});
 test("amount-only match remains low-confidence and unconfirmed",()=>{const r=matchInvoice({amount:"100.00"},{id:"c",periodStart:"2026-11-01",periodEnd:"2026-11-30"});assert.equal(r.confidence,"LOW");assert.equal(r.requiresHumanConfirmation,true);assert.equal(r.decision,"candidate");});
 test("match candidate always needs human confirmation",()=>assert.equal(matchInvoice({site:"A",date:"2026-11-05",amount:"100.00"},{id:"c",site:"A",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).requiresHumanConfirmation,true));
-test("metrics aggregate totals and margin only with explicit common reporting basis",()=>{const r=aggregateMetrics([{...BASIS,revenue:"1000.00",cost:"600.00"},{...BASIS,revenue:"500.00",cost:"250.00"}]);assert.deepEqual([r.revenue,r.cost,r.contribution,r.margin,r.complete],["1500.00","850.00","650.00","43.33",true]);});
-test("contract aggregation refuses missing basis and invalid money rather than emitting totals",()=>{const missingBasis=aggregateMetrics([{revenue:"100.00",cost:"50.00"},{revenue:"200.00",cost:"100.00"}]);assert.equal(missingBasis.complete,false);assert.equal(missingBasis.contribution,null);const invalidMoney=aggregateMetrics([{...BASIS,revenue:"100.00",cost:"50.00"},{...BASIS,revenue:"not-money",cost:"25.00"}]);assert.equal(invalidMoney.complete,false);assert.equal(invalidMoney.contribution,null);});
+test("metrics aggregate totals and margin only with explicit common reporting basis",()=>{const r=aggregateMetrics([{...BASIS,revenue:"1000.00",cost:"600.00"},{...BASIS,revenue:"500.00",cost:"250.00"}]);assert.deepEqual([r.revenue,r.cost,r.contribution,r.margin,r.aggregationValid],["1500.00","850.00","650.00","43.33",true]);});
+test("contract aggregation refuses missing basis and invalid money rather than emitting totals",()=>{const missingBasis=aggregateMetrics([{revenue:"100.00",cost:"50.00"},{revenue:"200.00",cost:"100.00"}]);assert.equal(missingBasis.aggregationValid,false);assert.equal(missingBasis.contribution,null);const invalidMoney=aggregateMetrics([{...BASIS,revenue:"100.00",cost:"50.00"},{...BASIS,revenue:"not-money",cost:"25.00"}]);assert.equal(invalidMoney.aggregationValid,false);assert.equal(invalidMoney.contribution,null);});
 
 test("money accepts exact cent values and preserves negative values",()=>{
   assert.equal(Number.isNaN(money("1.005")),true);
@@ -125,12 +125,12 @@ test("money preserves the full supported PostgreSQL numeric(14,2) range exactly"
 test("contract aggregation blocks mixed currencies, tax bases and reporting periods",()=>{
   const common={currency:"AUD",taxBasis:"gst_exclusive",periodStart:"2026-11-01",periodEnd:"2026-11-30"};
   const mixedCurrency=aggregateMetrics([{...common,revenue:"100.00",cost:"50.00"},{...common,currency:"NZD",revenue:"100.00",cost:"50.00"}]);
-  assert.equal(mixedCurrency.complete,false);
+  assert.equal(mixedCurrency.aggregationValid,false);
   assert.equal(mixedCurrency.contribution,null);
   const mixedTax=aggregateMetrics([{...common,revenue:"100.00",cost:"50.00"},{...common,taxBasis:"gst_inclusive",revenue:"100.00",cost:"50.00"}]);
-  assert.equal(mixedTax.complete,false);
+  assert.equal(mixedTax.aggregationValid,false);
   const mixedPeriod=aggregateMetrics([{...common,revenue:"100.00",cost:"50.00"},{...common,periodStart:"2026-10-01",periodEnd:"2026-10-31",revenue:"100.00",cost:"50.00"}]);
-  assert.equal(mixedPeriod.complete,false);
+  assert.equal(mixedPeriod.aggregationValid,false);
   assert.equal(aggregateMetrics([{...common,revenue:"100.00",cost:"50.00"},{...common,revenue:"100.00",cost:"50.00"}]).contribution,"100.00");
 });
 
