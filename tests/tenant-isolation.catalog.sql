@@ -134,6 +134,9 @@ BEGIN
      OR has_table_privilege('profitpilot_app','public.match_reviews','DELETE')
      OR has_table_privilege('profitpilot_app','public.calculation_runs','DELETE')
      OR has_table_privilege('profitpilot_app','public.audit_events','DELETE')
+     OR has_table_privilege('profitpilot_app','public.audit_events','INSERT')
+     OR has_table_privilege('profitpilot_app','public.audit_events','UPDATE')
+     OR has_table_privilege('profitpilot_app','public.audit_events','TRUNCATE')
   THEN RAISE EXCEPTION 'Runtime role has an unapproved destructive delete privilege'; END IF;
   RAISE NOTICE 'Tenant catalog audit passed: % tenant-scoped/root tables checked; tenant-to-tenant foreign keys inspected.',checked;
 END $$;
