@@ -27,7 +27,7 @@ function validateEvent(event,expectedValueId){
      (expectedValueId&&valueId!==expectedValueId)||!TYPES.includes(event.type)||
      amount===null||amount<=0n||!/^[A-Z]{3}$/.test(currency)||!TAX_BASES.has(taxBasis)||
      !isIsoDate(event.periodStart)||!isIsoDate(event.periodEnd)||event.periodEnd<event.periodStart||
-     typeof event.occurredAt!=="string"||!TIME.test(event.occurredAt)||!Number.isFinite(Date.parse(event.occurredAt))||
+     typeof event.occurredAt!=="string"||!TIME.test(event.occurredAt)||!isIsoDate(event.occurredAt.slice(0,10))||!Number.isFinite(Date.parse(event.occurredAt))||
      typeof event.reason!=="string"||event.reason.trim().length<3||
      !Array.isArray(event.evidenceRefs)||!event.evidenceRefs.some(x=>typeof x==="string"&&ID.test(x.trim()))){
     throw new TypeError("Value event identity, amount, dimensions, timestamp, reason or evidence is invalid.");
