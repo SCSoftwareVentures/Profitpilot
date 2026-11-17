@@ -284,7 +284,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(wrongAccount.status,404,"manager cannot confirm another member's account");
     const noMfaConfirm=await fetch(base+confirmPath,{method:"POST",headers:{authorization:"Bearer "+await customToken("ci-api-analyst",{authTime:Math.floor(Date.now()/1000),acr:"urn:profitpilot:step-up",amr:["pwd"]})}});
     assert.equal(noMfaConfirm.status,403,"account confirmation requires explicit MFA evidence");
-    const confirmed=await request(confirmPath,{subject:"ci-api-analyst",method:"POST"});
+    const confirmationToken=await token("ci-api-analyst");
+    const confirmed=await fetch(base+confirmPath,{method:"POST",headers:{authorization:"Bearer "+confirmationToken}});
     assert.equal(confirmed.status,200,"only the requester can confirm account control with MFA");
     assert.ok((await confirmed.json()).account_confirmed_at);
     const reviewed=await request("/v1/tenants/"+tenantA+"/privacy/requests/"+privacyItem.id+"/decision",{subject:"ci-api-owner",method:"POST",body:{action:"begin_review",reason:"Requester MFA confirmation reviewed"}});
@@ -295,6 +296,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const holdRelease=await request("/v1/tenants/"+tenantA+"/privacy/requests/"+privacyItem.id+"/decision",{subject:"ci-api-owner",method:"POST",body:{action:"release_legal_hold",reason:"Dispute concluded; repeat verification"}});
     assert.equal(holdRelease.status,200);
     assert.equal((await holdRelease.json()).status,"identity_verification","hold release must return to verification");
+    const replayAfterHold=await fetch(base+confirmPath,{method:"POST",headers:{authorization:"Bearer "+confirmationToken}});
+    assert.equal(replayAfterHold.status,409,"the earlier authentication event cannot be replayed after hold release");
     const reviewAfterHold=await request("/v1/tenants/"+tenantA+"/privacy/requests/"+privacyItem.id+"/decision",{subject:"ci-api-owner",method:"POST",body:{action:"begin_review",reason:"Attempt without fresh confirmation"}});
     assert.equal(reviewAfterHold.status,409,"hold release invalidates previous confirmation");
     const fulfilPrivacy=await request("/v1/tenants/"+tenantA+"/privacy/requests/"+privacyItem.id+"/decision",{subject:"ci-api-owner",method:"POST",body:{action:"fulfil",reason:"Attempt to close without execution",resolutionSummary:"Not proof of fulfilment"}});

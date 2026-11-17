@@ -4,8 +4,8 @@ ALTER TABLE public.privacy_requests
  ADD COLUMN account_confirmed_at timestamptz,
  ADD COLUMN account_auth_time timestamptz,
  ADD CONSTRAINT privacy_account_confirmation_pair CHECK (
-  (account_confirmed_at IS NULL AND account_auth_time IS NULL)
-  OR (account_confirmed_at IS NOT NULL AND account_auth_time IS NOT NULL AND account_auth_time <= account_confirmed_at)
+  account_confirmed_at IS NULL
+  OR (account_auth_time IS NOT NULL AND account_auth_time <= account_confirmed_at)
  );
 -- Only the narrowly scoped security-definer functions may change a request.
 REVOKE INSERT, UPDATE ON public.privacy_requests FROM profitpilot_app;
@@ -123,7 +123,7 @@ BEGIN
  assigned_to=actor,updated_at=clock_timestamp(),
  resolved_at=CASE WHEN next_status='rejected' THEN clock_timestamp() ELSE NULL END,
  account_confirmed_at=CASE WHEN p_action='release_legal_hold' THEN NULL ELSE account_confirmed_at END,
- account_auth_time=CASE WHEN p_action='release_legal_hold' THEN NULL ELSE account_auth_time END
+ account_auth_time=account_auth_time
  WHERE id=p_request AND tenant_id=p_tenant RETURNING * INTO item;
  INSERT INTO public.audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata)
  VALUES(p_tenant,actor,'privacy_request_status_changed','privacy_request',p_request,btrim(p_reason),
