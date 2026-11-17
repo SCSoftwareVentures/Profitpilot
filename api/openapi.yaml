@@ -46,6 +46,21 @@ paths:
       responses:
         "200": { description: Tenant privacy request queue }
         "403": { description: Privacy administration permission not granted }
+  /tenants/{tenantId}/privacy/requests/{requestId}/confirm-account:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Confirm control of the requesting account using fresh MFA
+      description: Only the requester can confirm their own account. This establishes account control, not government identity proofing.
+      responses:
+        "200": { description: Account confirmation recorded and audited }
+        "403": { description: Fresh MFA or permission required }
+        "404": { description: Request not found or not owned by caller }
+        "409": { description: Request state or authentication event is not suitable }
   /tenants/{tenantId}/privacy/requests/{requestId}/decision:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -55,7 +70,7 @@ paths:
         schema: { type: string, format: uuid }
     post:
       summary: Advance a privacy request through verified review and resolution
-      description: Requires privacy administration permission and fresh step-up authentication. A legal hold blocks progression until explicitly released. The API does not support marking a request fulfilled because export, correction, restriction and deletion executors are not implemented; attempted fulfilment returns 409.
+      description: Requires privacy administration permission and fresh step-up authentication. Review requires recent requester account confirmation and a separate manager. Legal hold release returns to identity verification and clears confirmation. The API does not support marking a request fulfilled because export, correction, restriction and deletion executors are not implemented; attempted fulfilment returns 409.
       requestBody:
         required: true
         content:

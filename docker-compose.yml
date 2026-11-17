@@ -20,6 +20,12 @@ services:
       - ./database/migrations/005_prevent_duplicate_confirmations.sql:/docker-entrypoint-initdb.d/007-confirmation-uniqueness.sql:ro
       - ./database/migrations/006_tenant_actor_membership_fks.sql:/docker-entrypoint-initdb.d/008-tenant-actor-fks.sql:ro
       - ./database/migrations/007_users_self_rls.sql:/docker-entrypoint-initdb.d/009-users-self-rls.sql:ro
+      - ./database/migrations/008_granular_permissions.sql:/docker-entrypoint-initdb.d/010-granular-permissions.sql:ro
+      - ./database/migrations/009_auth_session_registry.sql:/docker-entrypoint-initdb.d/011-auth-sessions.sql:ro
+      - ./database/migrations/010_audit_and_security_admin.sql:/docker-entrypoint-initdb.d/012-audit-admin.sql:ro
+      - ./database/migrations/011_privacy_request_workflow.sql:/docker-entrypoint-initdb.d/013-privacy-workflow.sql:ro
+      - ./database/migrations/012_privacy_subject_isolation.sql:/docker-entrypoint-initdb.d/014-privacy-isolation.sql:ro
+      - ./database/migrations/013_privacy_account_confirmation.sql:/docker-entrypoint-initdb.d/015-privacy-confirmation.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
@@ -29,7 +35,8 @@ services:
   api:
     build: .
     environment:
-      NODE_ENV: production
+      # Local-only Compose; production TLS configuration is separate.
+      NODE_ENV: development
       PORT: 8080
       DATABASE_URL: postgres://profitpilot_app:${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD}@db:5432/profitpilot
       DATABASE_SSL: "false"

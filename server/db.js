@@ -21,7 +21,7 @@ export async function withTenant(tenantId,subject,fn){
  try{
   await client.query("BEGIN");
   await client.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.tenant_subject',$2,true),set_config('app.tenant_expires',$3,true),set_config('app.tenant_nonce',$4,true),set_config('app.tenant_key_id',$5,true),set_config('app.tenant_signature',$6,true)",[tenantId,subject,expires,nonce,keyId,signature]);
-  const result=await fn(client);
+  const result=await fn(client,{nonce});
   await client.query("COMMIT");
   return result;
  }catch(error){await client.query("ROLLBACK");throw error;}
@@ -48,3 +48,15 @@ export async function revokeAuthSession(jti,subject,reason="self_service_revocat
  const result=await pool.query("SELECT private.revoke_auth_session($1,$2,$3) AS revoked",[jti,subject,reason]);
  return result.rows[0].revoked===true;
 }
+
+ // Call only after requireStepUp has validated the provider's signed claims.
+ // Domain separation and the transaction nonce prevent reusing a context signature as proof.
+ export async function withPrivacyStepUp(membership,identity,requestId,action,fn){
+  const {tenantId,userId}=membership;
+  if(!Number.isSafeInteger(identity.authTime))throw Object.assign(new Error("Step-up required"),{status:403});
+  return withTenant(tenantId,identity.subject,async(client,{nonce})=>{
+   const payload=["profitpilot-privacy-step-up-v1",tenantId.toLowerCase(),userId.toLowerCase(),requestId.toLowerCase(),action,String(identity.authTime),nonce].join("\n");
+   const proof=createHmac("sha256",Buffer.from(process.env.TENANT_CONTEXT_HMAC_SECRET,"hex")).update(payload).digest("hex");
+   return fn(client,proof);
+  });
+ }

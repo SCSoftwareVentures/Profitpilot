@@ -28,3 +28,5 @@ The Compose database initialization scripts run only when the named database vol
 - JSON row ingestion is implemented; raw file upload and secure object storage are not.
 - Invoice row validation is implemented; payroll import validation is not.
 - Do not use real personal, payroll or customer information in this prototype.
+
+The fresh local Compose volume applies migrations through 013. Compose is development-only; the local database connection uses no TLS and must never be exposed or used with real customer data. Existing volumes require an explicit migration; do not erase them. CI is the verification path, not a production deployment.

@@ -4,7 +4,7 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import {randomUUID,createHash} from "node:crypto";
-import {withTenant,health,listAuthSessions,revokeAuthSession} from "./db.js";
+import {withTenant,health,listAuthSessions,revokeAuthSession,withPrivacyStepUp} from "./db.js";
 import {authRequired,requirePermission,requireStepUp} from "./auth.js";
 import {parseCsv,validateInvoiceRows,isIsoDate} from "../src/engine.js";
 
@@ -110,43 +110,40 @@ app.post("/v1/tenants/:tenantId/privacy/requests",membership,requirePermission("
 }catch(e){next(e);}});
 app.get("/v1/tenants/:tenantId/privacy/requests",membership,requirePermission("privacy.requests.read"),async(req,res,next)=>{try{
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const rows=await client.query("SELECT id,request_type,status,details,created_at,updated_at,resolved_at,resolution_summary,legal_hold_reason FROM privacy_requests WHERE tenant_id=$1 AND subject_user_id=$2 ORDER BY created_at DESC LIMIT 100",[req.membership.tenantId,req.membership.userId]);
+  const rows=await client.query("SELECT id,request_type,status,details,created_at,updated_at,resolved_at,resolution_summary,legal_hold_reason,account_confirmed_at FROM privacy_requests WHERE tenant_id=$1 AND subject_user_id=$2 ORDER BY created_at DESC LIMIT 100",[req.membership.tenantId,req.membership.userId]);
   return {items:rows.rows};
  });
  res.json(result);
 }catch(e){next(e);}});
 app.get("/v1/tenants/:tenantId/privacy/requests/manage",membership,requirePermission("privacy.requests.manage"),async(req,res,next)=>{try{
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const rows=await client.query("SELECT id,subject_user_id,submitted_by,request_type,status,details,assigned_to,created_at,updated_at,resolved_at,resolution_summary,legal_hold_reason FROM privacy_requests WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 200",[req.membership.tenantId]);
+  const rows=await client.query("SELECT id,subject_user_id,submitted_by,request_type,status,details,assigned_to,created_at,updated_at,resolved_at,resolution_summary,legal_hold_reason,account_confirmed_at FROM privacy_requests WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 200",[req.membership.tenantId]);
   return {items:rows.rows};
  });
  res.json(result);
 }catch(e){next(e);}});
+const privacyRequestIdValid=id=>typeof id==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/confirm-account",membership,requirePermission("privacy.requests.submit"),requireStepUp(),async(req,res,next)=>{try{
+ const id=req.params.requestId;
+ if(!privacyRequestIdValid(id))return res.status(400).json({error:"Invalid request ID"});
+ const result=await withPrivacyStepUp(req.membership,req.identity,id,"confirm_account",async(client,proof)=>{
+  const r=await client.query("SELECT private.confirm_privacy_account($1,$2,$3,$4) AS result",[req.membership.tenantId,id,req.identity.authTime,proof]);
+  return r.rows[0].result;
+ });
+ if(result.error)return res.status(result.status).json({error:result.error});
+ res.status(result.status).json(result.item);
+}catch(e){next(e);}});
 app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/decision",membership,requirePermission("privacy.requests.manage"),requireStepUp(),async(req,res,next)=>{try{
  const {action,reason,resolutionSummary}=req.body||{};
+ if(!privacyRequestIdValid(req.params.requestId))return res.status(400).json({error:"Invalid request ID"});
  if(action==="fulfil")return res.status(409).json({error:"Privacy request fulfilment is not implemented. Complete and verify the requested action before recording fulfilment."});
- if(action==="begin_review")return res.status(409).json({error:"Identity verification has not been implemented. Review cannot begin until verification is completed and auditable."});
  if(!["verify_identity","begin_review","place_legal_hold","release_legal_hold","reject"].includes(action)||typeof reason!=="string"||reason.trim().length<3||reason.length>1000)
   return res.status(400).json({error:"A supported review action and reason are required"});
  if(action==="reject"&&(typeof resolutionSummary!=="string"||resolutionSummary.trim().length<3||resolutionSummary.length>2000))
   return res.status(400).json({error:"A resolution summary is required for a completed decision"});
- const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const current=await client.query("SELECT id,status FROM privacy_requests WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.requestId,req.membership.tenantId]);
-  if(!current.rowCount)return {status:404,error:"Privacy request not found"};
-  const transitions={
-   verify_identity:{requested:"identity_verification"},
-   begin_review:{identity_verification:"under_review"},
-   place_legal_hold:{under_review:"legal_hold"},
-   release_legal_hold:{legal_hold:"under_review"},
-   reject:{requested:"rejected",identity_verification:"rejected",under_review:"rejected"}
-  };
-  const nextStatus=transitions[action]?.[current.rows[0].status];
-  if(!nextStatus)return {status:409,error:"This action is not valid for the request's current status"};
-  const holdReason=action==="place_legal_hold"?reason.trim():null;
-  const summary=action==="reject"?resolutionSummary.trim():null;
-  const updated=await client.query("UPDATE privacy_requests SET status=$3,legal_hold_reason=$4,resolution_summary=COALESCE($5,resolution_summary),assigned_to=COALESCE(assigned_to,$6),updated_at=clock_timestamp(),resolved_at=CASE WHEN $3='rejected' THEN clock_timestamp() ELSE NULL END WHERE id=$1 AND tenant_id=$2 RETURNING id,request_type,status,updated_at,resolved_at,resolution_summary,legal_hold_reason",[req.params.requestId,req.membership.tenantId,nextStatus,holdReason,summary,req.membership.userId]);
-  await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'privacy_request_status_changed','privacy_request',$3,$4,$5)",[req.membership.tenantId,req.membership.userId,req.params.requestId,reason.trim(),JSON.stringify({action,fromStatus:current.rows[0].status,toStatus:nextStatus})]);
-  return {status:200,item:updated.rows[0]};
+ const result=await withPrivacyStepUp(req.membership,req.identity,req.params.requestId,"decision:"+action,async(client,proof)=>{
+  const r=await client.query("SELECT private.decide_privacy_request($1,$2,$3,$4,$5,$6,$7) AS result",[req.membership.tenantId,req.params.requestId,action,reason.trim(),action==="reject"?resolutionSummary.trim():null,req.identity.authTime,proof]);
+  return r.rows[0].result;
  });
  if(result.error)return res.status(result.status).json({error:result.error});
  res.status(result.status).json(result.item);
