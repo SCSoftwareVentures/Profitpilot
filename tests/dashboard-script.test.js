@@ -28,3 +28,11 @@ test("dashboard shell exposes keyboard focus, labelled import and explicit repor
   assert.match(html,/source_completeness,unverified/);
   assert.match(html,/indicative_contribution/);
 });
+
+test("dashboard rendering escapes dynamic text and never displays a null margin",async()=>{
+  const html=await readFile(htmlPath,"utf8");
+  assert.match(html,/const escapeHtml=value=>String\(value\?\?""\)\.replace/);
+  assert.match(html,/displayMargin\(c\.margin\)/);
+  assert.match(html,/Source completeness: unverified/);
+  assert.doesNotMatch(html,/\+c\.margin\+'%'/);
+});
