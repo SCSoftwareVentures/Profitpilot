@@ -66,6 +66,7 @@ test("template and answer structures are validated",()=>{
   assert.throws(()=>evaluateJobReadiness({template:{id:"bad id",version:"1",checks:[{id:"x"}]},answers:{}}),/versioned readiness template/);
   assert.throws(()=>evaluateJobReadiness({template:{id:"t",version:"1",checks:[{id:"x"},{id:"x"}]},answers:{}}),/unique valid identifiers/);
   assert.throws(()=>evaluateJobReadiness({template,answers:[]}),/answers must be an object/);
+  assert.throws(()=>evaluateJobReadiness({template:{id:"optional-only",version:"1",checks:[{id:"notes",required:false}]},answers:{}}),/At least one required readiness check/);
 });
 
 test("evidence references are bounded safe identifiers and user text is bounded",()=>{
