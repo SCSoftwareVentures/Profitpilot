@@ -21,8 +21,9 @@
 | AUD-01 | Tamper-evident audit chain | Per-tenant hash chain, append-only trigger, verification function | Audit integrity integration tests in CI #1046 | Implemented / CI tested | Independent design review, external anchoring/monitoring, retention and alerting |
 | SES-01 | Session registry/revocation | Private session registry and scoped functions | Authenticated session tests | Implemented in scaffold | Production identity provider integration, refresh/recovery controls, alerting |
 | API-01 | API hardening | Helmet, CORS allowlist config, body/rate limits, no-store, generic errors | API tests and CI | Partially implemented / CI tested | Production CSP, TLS, CSRF review if cookie auth, abuse monitoring and endpoint schema audit |
+| API-02 | Database transport encryption | Production startup rejects `DATABASE_SSL=false`; PostgreSQL client sets `rejectUnauthorized: true` when enabled | TLS configuration regression tests and CI run #1066 | Configuration guard implemented / CI verified | Perform a real TLS handshake against a TLS-enabled PostgreSQL deployment; verify provider certificate chain and connection-string options |
 | DATA-01 | Data inventory | Schema-derived inventory in `PRIVACY_DATA_INVENTORY.md` | Static schema review | Preliminary document only | Reconcile all migrations, APIs, deployed services, logs, backups and subprocessors |
-| DATA-02 | Encryption and key management | Requirements documented; runtime secret configuration externalised in CI | CI validates ephemeral runtime DB credential bootstrap | Partially implemented | Prove TLS/at-rest encryption and production KMS custody/rotation/recovery |
+| DATA-02 | Encryption and key management | Production database TLS is required by startup guard and certificate verification is enabled in the PostgreSQL client; runtime secrets are externalised in CI | TLS configuration regression tests in CI #1066; ephemeral runtime DB credential bootstrap | Partially implemented / configuration CI verified | Complete real TLS handshake verification; prove at-rest encryption and production KMS custody/rotation/recovery |
 | FILE-01 | Secure file handling | Current API persists JSON rows; no private binary storage or scanner established | Not implemented | Not implemented | Private object storage, upload validation, malware scanning, access logs and deletion lifecycle |
 | SUP-01 | Dependency/supply chain | Dependencies declared in package manifest | Build and tests run in CI | Partial | Commit lockfile, pin/review dependencies, SCA, secret scanning, SBOM and container scanning |
 | OPS-01 | Backups and recovery | Requirements documented | No restore evidence | Not implemented | Define RPO/RTO, encrypted backups, restore drills, deletion interaction and evidence |
@@ -34,6 +35,7 @@
 
 - CI run #1046 (privacy subject-isolation milestone): https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44002838128
 - CI run #1058 (fail-closed privacy fulfilment and current buyer-pack commit): https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44004207499
+- CI run #1066 (production database TLS fail-closed configuration and regression tests): https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44005751530
 - Threat model: [THREAT_MODEL.md](THREAT_MODEL.md)
 - Trust/security/privacy standard: [TRUST_SECURITY_PRIVACY_STANDARD.md](TRUST_SECURITY_PRIVACY_STANDARD.md)
 - Privacy engineering baseline: [PRIVACY_ENGINEERING_BASELINE.md](PRIVACY_ENGINEERING_BASELINE.md)
