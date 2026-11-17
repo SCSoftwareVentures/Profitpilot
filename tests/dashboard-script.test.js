@@ -36,3 +36,12 @@ test("dashboard rendering escapes dynamic text and never displays a null margin"
   assert.match(html,/Source completeness: unverified/);
   assert.doesNotMatch(html,/\+c\.margin\+'%'/);
 });
+
+test("dashboard exposes the synthetic Job Readiness Engine workflow",async()=>{
+  const html=await readFile(htmlPath,"utf8");
+  assert.match(html,/data-view="readiness"/);
+  assert.match(html,/id="readiness"/);
+  assert.match(html,/evaluateJobReadiness\(\{template:readinessTemplate,answers:readinessAnswers\}\)/);
+  assert.match(html,/Ready for human decision/);
+  assert.match(html,/never approves the job automatically/);
+});
