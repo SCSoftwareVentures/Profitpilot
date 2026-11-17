@@ -56,9 +56,10 @@ export function authRequired(){
     audience:c.audience,
     algorithms:["RS256","ES256"],
     requiredClaims:["exp","iat","sub"],
-    maxTokenAge:"15m",
     clockTolerance:5
    });
+   const now=Date.now()/1000;
+   if(typeof payload.iat!=="number"||!Number.isFinite(payload.iat)||payload.iat>now+5||now-payload.iat>900)return res.status(401).json({error:"Invalid or expired access token"});
    if(typeof payload.sub!=="string"||!payload.sub.trim())return res.status(401).json({error:"Invalid access token"});
    req.identity={subject:payload.sub,email:typeof payload.email==="string"?payload.email:null};
    return next();
