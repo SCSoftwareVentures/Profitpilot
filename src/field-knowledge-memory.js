@@ -18,7 +18,7 @@ export function createKnowledgeEntry(input={}){
   if(visibility==="customer_visible"&&!ID.test(customerId))throw new TypeError("Customer-visible knowledge requires a customer scope.");
   if(visibility!=="customer_visible"&&customerId)throw new TypeError("Customer scope is only valid for customer-visible knowledge.");
   const state=input.expiresAt<input.asOf?"expired":input.reviewAt<=input.asOf?"review_due":"current";
-  return {id,tenantId,scopeRef,ownerId,sourceRef,type,visibility,confidence,content,evidenceRefs,customerId:customerId||null,reviewAt:input.reviewAt,expiresAt:input.expiresAt,state,requiresReview:state!=="current",asOf:input.asOf};
+  return {id,tenantId,scopeRef,ownerId,sourceRef,type,visibility,confidence,content,evidenceRefs,customerId:customerId||null,reviewAt:input.reviewAt,expiresAt:input.expiresAt,state,requiresReview:state!=="current",verificationStatus:"caller_asserted_not_independently_verified",asOf:input.asOf};
 }
 
 /** Tenant and visibility gate for an already-authenticated actor. */
