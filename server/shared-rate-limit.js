@@ -1,28 +1,61 @@
 import {createHmac} from "node:crypto";
+import {isIP} from "node:net";
 import {pool} from "./db.js";
-// Atomic shared fixed-window counters across API replicas. Fail closed on DB errors.
-export function sharedLimiter({limit,windowMs=60000,scope}){
- if(!Number.isSafeInteger(limit)||limit<1||!Number.isSafeInteger(windowMs)||windowMs<1000||!scope)throw new Error("Invalid rate limit configuration");
+
+// Production replicas must share the same independent rate-limit key.
+// Never reuse or fall back to the tenant-signing secret.
+export function sharedLimiter({limit,windowMs=60000,scope},db=pool,env=process.env){
+ if(windowMs!==60000||!Object.hasOwn({global:100,write:60},scope)||limit!==({global:100,write:60})[scope])throw new Error("Invalid rate limit configuration");
+ let pending=0;
  return async(req,res,next)=>{
+  // Bound per-instance pressure on the DB connection pool.
+  const unavailable=()=>{res.set("Retry-After","5");return res.status(503).json({error:"Request protection temporarily unavailable"});};
+  if(pending>=20)return unavailable();
+  pending++;
   try{
-   const secret=process.env.RATE_LIMIT_HASH_SECRET||process.env.TENANT_CONTEXT_HMAC_SECRET;
-   if(!secret||!/^[a-f0-9]{64,}$/i.test(secret))throw new Error("Rate limit hashing secret unavailable");
-   const ip=req.ip||req.socket.remoteAddress||"unknown";
-   const digest=createHmac("sha256",Buffer.from(secret,"hex")).update(scope+"\n"+ip).digest("hex");
-   const bucket=scope+":"+digest;
-   const start=Math.floor(Date.now()/windowMs);
-   const result=await pool.query(`INSERT INTO api_rate_limits(bucket_key,window_start,request_count) VALUES($1,$2,1)
-    ON CONFLICT(bucket_key,window_start) DO UPDATE SET request_count=api_rate_limits.request_count+1
-    RETURNING request_count`,[bucket,start]);
-   const count=result.rows[0].request_count;
-   const retryAfter=Math.max(1,Math.ceil(((start+1)*windowMs-Date.now())/1000));
+   const secret=env.RATE_LIMIT_HASH_SECRET;
+   if(!secret||!/^[a-f0-9]{64}$/i.test(secret))throw new Error("Rate limit hashing secret unavailable");
+   const ip=req.ip||req.socket.remoteAddress;
+   if(typeof ip!=="string"||!isIP(ip))throw new Error("Client address unavailable");
+   // Canonicalize IPv4-mapped IPv6 and use a /64 for IPv6 to curb address rotation.
+   let address=ip.toLowerCase();
+   if(address.startsWith("::ffff:")&&isIP(address.slice(7))===4)address=address.slice(7);
+   if(isIP(address)===6){
+    const canonical=new URL("http://["+address+"]/").hostname.slice(1,-1);
+    const [head,tail]=canonical.split("::");
+    const a=head?head.split(":"):[],z=tail?tail.split(":"):[];
+    const parts=tail===undefined?a:[...a,...Array(8-a.length-z.length).fill("0"),...z];
+    address=parts.slice(0,4).map(x=>x.padStart(4,"0")).join(":")+"::/64";
+   }
+   const digest=createHmac("sha256",Buffer.from(secret,"hex")).update(scope+"\n"+address).digest("hex");
+   const result=await db.query("SELECT total_hits,retry_after FROM public.consume_api_rate_limit($1)",[scope+":"+digest]);
+   const {total_hits:count,retry_after:retry}=result.rows[0]||{};
+   if(!Number.isInteger(count)||count<1||count>limit+1||!Number.isInteger(retry)||retry<1||retry>60)throw new Error("Invalid limiter response");
+   // Write limit may be tighter than global; do not advertise a larger remainder.
+   const prior=Number(res.get("RateLimit-Remaining")??limit);
    res.set("RateLimit-Limit",String(limit));
-   res.set("RateLimit-Remaining",String(Math.max(0,limit-count)));
-   if(count>limit){res.set("Retry-After",String(retryAfter));return res.status(429).json({error:"Too many requests; retry later"});}
-   next();
+   res.set("RateLimit-Remaining",String(Math.min(prior,Math.max(0,limit-count))));
+   if(count>limit){res.set("Retry-After",String(retry));return res.status(429).json({error:"Too many requests; retry later"});}
   }catch{
-   res.set("Retry-After","5");
-   return res.status(503).json({error:"Request protection temporarily unavailable"});
-  }
+   return unavailable();
+  }finally{pending--;}
+  next();
  };
+}
+
+// One indexed bounded batch per minute per running replica. Expired rows are
+// also cleaned on startup. No unhandled rejection, no sensitive log contents.
+export function startRateLimitRetention(db=pool){
+ let running=false;
+ const sweep=async()=>{
+  if(running)return;
+  running=true;
+  try{await db.query("SELECT public.purge_api_rate_limits()");}
+  catch{process.stderr.write(JSON.stringify({event:"rate_limit_retention_failed"})+"\n");}
+  finally{running=false;}
+ };
+ void sweep();
+ const timer=setInterval(sweep,60000);
+ timer.unref();
+ return ()=>clearInterval(timer);
 }
