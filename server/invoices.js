@@ -1,4 +1,4 @@
-import {withTenant,appendAudit} from "./db.js";
+import {withTenant,withFinancialStepUp,appendAudit} from "./db.js";
 import {requirePermission,requireStepUp} from "./auth.js";
 import {UUID,reconcileInvoiceRows} from "../src/canonical-invoices.js";
 const METHOD="canonical-invoice-0.1.0";
@@ -31,7 +31,7 @@ export function registerInvoiceRoutes(app,membership){
   const {manifest,expectedRowCount,reason,sourceReviewed}=req.body||{},batchId=req.params.batchId.toLowerCase();
   if(!UUID.test(batchId)||!Number.isInteger(expectedRowCount)||expectedRowCount<1||expectedRowCount>200||sourceReviewed!==true||typeof reason!=="string"||reason.trim().length<3||reason.length>1000)return res.status(400).json({error:"Explicit source review, declared invoice manifest, row count and reason required"});
   const m=req.membership;
-  const result=await withTenant(m.tenantId,req.identity.subject,async c=>{
+  const result=await withFinancialStepUp(m,req.identity,batchId,"invoice_batch_prepare",async c=>{
    const b=(await c.query("SELECT id,source_type,status,created_by,source_period_start::text AS start,source_period_end::text AS end FROM import_batches WHERE tenant_id=$1 AND id=$2 FOR UPDATE",[m.tenantId,batchId])).rows[0];
    if(!b)return fail(404,"Invoice batch not found");
    if(!["customer_invoice","supplier_invoice"].includes(b.source_type))return fail(422,"Invoice batch required");

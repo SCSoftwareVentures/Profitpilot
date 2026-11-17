@@ -61,3 +61,5 @@ Runtime boundary update (migration 046): database/schema object creation and tem
 Migration 047 adds operator-only audit prefix capture, restore validation of audit history and signed evidence of retired signing-key tombstones. No independently administered offsite custody service or live restore orchestration is configured.
 
 Migration 048 further narrows application SQL rights and adds restrictive financial/subject-writing RLS authority. This is defence in depth, not proof that every financial route or direct read is exhaustively minimised. High-risk financial write action proofs remain to be reviewed at the database boundary.
+
+Migration 049 closes the API-only MFA gap for the selected high-risk financial mutation paths via transaction-bound action/resource proofs checked by database triggers. CI must include both legitimate routes and missing/cross-resource proof rejection.

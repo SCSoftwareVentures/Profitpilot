@@ -1,7 +1,7 @@
 // Human-controlled payroll source reconciliation and allocation workflow.
 // Only synthetic evidence until production identity, privacy and legal gates are met.
 import {randomUUID} from "node:crypto";
-import {withTenant,appendAudit} from "./db.js";
+import {withTenant,withFinancialStepUp,appendAudit} from "./db.js";
 import {requirePermission,requireStepUp} from "./auth.js";
 import {validatePayrollRows} from "../src/engine.js";
 
@@ -41,7 +41,7 @@ export function registerPayrollRoutes(app,membership){
    if(!/^[1-9][0-9]{0,6}$/.test(req.params.rowNumber))return res.status(400).json({error:"Invalid row number"});
    const {decision,reason}=req.body||{};
    if(!["accepted","rejected"].includes(decision)||!validReason(reason))return res.status(400).json({error:"Decision and reason are required"});
-   const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
+   const result=await withFinancialStepUp(req.membership,req.identity,req.params.batchId,"payroll_row_decision:"+req.params.rowNumber,async client=>{
     const batch=await client.query(
      "SELECT id,status,source_type,created_by FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
      [req.params.batchId,req.membership.tenantId]);
@@ -81,7 +81,7 @@ export function registerPayrollRoutes(app,membership){
    const totalCents=cents(declaredTotal);
    if(totalCents===null||totalCents<=0n||!textRef(sourceReference)||!validReason(reason))
     return res.status(400).json({error:"Positive declaredTotal, sourceReference and reason required"});
-   const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
+   const result=await withFinancialStepUp(req.membership,req.identity,req.params.batchId,"payroll_pool_reconcile",async client=>{
     const found=await client.query(
      "SELECT id,status,source_type,created_by,source_period_start::text AS start_date,source_period_end::text AS end_date "+
      "FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.batchId,req.membership.tenantId]);
@@ -234,7 +234,7 @@ export function registerPayrollRoutes(app,membership){
    if(!checkId(req,res,"poolId")||!checkId(req,res,"allocationId"))return;
    const {reason}=req.body||{};
    if(!validReason(reason))return res.status(400).json({error:"Approval reason required"});
-   const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
+   const result=await withFinancialStepUp(req.membership,req.identity,req.params.allocationId,"payroll_allocation_confirm",async client=>{
     const found=await client.query(
      "SELECT ar.id,ar.status,ar.created_by,ar.direct_amount,ar.allocated_amount,ar.non_site_amount,"+
      "ar.excluded_amount,ar.residual_amount,p.total_amount,p.currency FROM allocation_runs ar "+

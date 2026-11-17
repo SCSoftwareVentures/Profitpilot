@@ -61,6 +61,7 @@ services:
       - ./database/migrations/046_restrict_runtime_database_creation.sql:/docker-entrypoint-initdb.d/048-restrict-runtime-database-creation.sql:ro
       - ./database/migrations/047_audit_and_key_restore_anchors.sql:/docker-entrypoint-initdb.d/049-audit-and-key-restore-anchors.sql:ro
       - ./database/migrations/048_runtime_financial_write_boundary.sql:/docker-entrypoint-initdb.d/050-runtime-financial-write-boundary.sql:ro
+      - ./database/migrations/049_financial_step_up_boundary.sql:/docker-entrypoint-initdb.d/051-financial-step-up-boundary.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s

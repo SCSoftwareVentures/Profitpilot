@@ -129,6 +129,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/046_restrict_runtime_database_creation.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/047_audit_and_key_restore_anchors.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/048_runtime_financial_write_boundary.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/049_financial_step_up_boundary.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:

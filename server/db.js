@@ -114,6 +114,17 @@ export async function revokeAuthSession(jti,identity){
   });
  }
 
+ // The signed proof is bound to the resource, action, actor and transaction nonce.
+ export async function withFinancialStepUp(membership,identity,target,action,fn){
+  const now=Math.floor(Date.now()/1000),maxAge=Number(process.env.AUTH_STEP_UP_MAX_AGE_SECONDS??300);
+  if(!Number.isInteger(maxAge)||maxAge<30||maxAge>900||!Number.isSafeInteger(identity?.authTime)||identity.authTime>now||now-identity.authTime>maxAge||!process.env.AUTH_STEP_UP_ACR||identity.acr!==process.env.AUTH_STEP_UP_ACR||!identity.amr?.includes("mfa"))
+   throw Object.assign(new Error("Recent financial MFA required"),{status:403});
+  return withPrivacyStepUp(membership,identity,target,"financial:"+action,async(client,proof)=>{
+   await client.query("SELECT set_config('app.financial_auth_time',$1,true),set_config('app.financial_proof',$2,true)",[String(identity.authTime),proof]);
+   return fn(client);
+  });
+ }
+
  // Only trusted server code can attest an exact audit event in its signed transaction.
  export async function appendAudit(client,member,action,objectType,objectId,reason,metadata={}){
   const {rows:[context]}=await client.query("SELECT current_setting('app.tenant_nonce',true) AS nonce");

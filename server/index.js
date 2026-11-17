@@ -5,7 +5,7 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import {randomUUID,createHash} from "node:crypto";
-import {withTenant,health,assertRuntimeDatabaseRole,listAuthSessions,revokeAuthSession,revokeAllAuthSessions,withPrivacyStepUp,appendAudit} from "./db.js";
+import {withTenant,health,assertRuntimeDatabaseRole,listAuthSessions,revokeAuthSession,revokeAllAuthSessions,withPrivacyStepUp,withFinancialStepUp,appendAudit} from "./db.js";
 import {assertProductionConfig} from "./production-config.js";
 import {authRequired,requirePermission,requireStepUp} from "./auth.js";
 import {parseCsv,validateInvoiceRows,validatePayrollRows,isIsoDate} from "../src/engine.js";
@@ -406,7 +406,8 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requirePer
 app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requirePermission("matching.decide"),requireStepUp(),async(req,res,next)=>{try{
  const {decision,reason,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,expectedDirection,siteOverheadReviewed,sharedOverheadShares,sharedOverheadBasis,sharedOverheadReviewed,sharedOverheadProposalId}=req.body||{};
  if(!["confirmed","rejected","held","propose_shared_overhead"].includes(decision)||typeof reason!=="string"||reason.trim().length<3||reason.length>2000)return res.status(400).json({error:"Decision and reason are required"});
- const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
+ if(!privacyRequestIdValid(req.params.matchId))return res.status(400).json({error:"Invalid match ID"});
+ const result=await withFinancialStepUp(req.membership,req.identity,req.params.matchId,"invoice_match_decide",async client=>{
   const member=req.membership;
   const candidate=await client.query("SELECT mr.id,mr.contract_id,mr.site_id,mr.service_period_start::text AS service_start,mr.service_period_end::text AS service_end,mr.confidence,mr.evidence,il.amount::text AS source_amount,i.direction,i.currency,i.tax_basis FROM match_reviews mr JOIN invoice_lines il ON il.id=mr.invoice_line_id AND il.tenant_id=mr.tenant_id JOIN invoices i ON i.id=il.invoice_id AND i.tenant_id=il.tenant_id WHERE mr.id=$1 AND mr.tenant_id=$2 AND mr.decision IN ('candidate','held') FOR UPDATE OF mr,il,i",[req.params.matchId,member.tenantId]);
   if(!candidate.rowCount)return null;

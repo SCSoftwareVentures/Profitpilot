@@ -35,7 +35,7 @@ test("independent payroll decisions, exact source reconciliation and maker-check
  process.env.AUTH_JWKS_URL="http://127.0.0.1:"+jwks.address().port+"/.well-known/jwks.json";
  const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL});
  const {default:app}=await import("../server/index.js");
- const {pool:appPool}=await import("../server/db.js");
+ const {pool:appPool,withTenant,withFinancialStepUp}=await import("../server/db.js");
  const api=createServer(app);
  await new Promise(resolve=>api.listen(0,"127.0.0.1",resolve));
  const base="http://127.0.0.1:"+api.address().port;
@@ -107,6 +107,12 @@ test("independent payroll decisions, exact source reconciliation and maker-check
   const page=await browserClient("ci-payroll-importer").review(tenantA,batchId);
   assert.equal(page.summary.total,3);
   assert.equal(page.summary.held,1);
+  const unapprovedRow=(await admin.query("SELECT d.id FROM mapping_decisions d JOIN raw_import_rows r ON r.id=d.raw_row_id WHERE r.batch_id=$1 AND r.row_number=1",[batchId])).rows[0].id;
+  const directDecision=c=>c.query("UPDATE mapping_decisions SET decision='accepted',reviewer_id=$1,reviewed_at=now() WHERE id=$2",[reviewer,unapprovedRow]);
+  await assert.rejects(()=>withTenant(tenantA,"ci-payroll-reviewer",directDecision),/step-up proof/i);
+  await assert.rejects(()=>withFinancialStepUp({tenantId:tenantA,userId:reviewer},{subject:"ci-payroll-reviewer",authTime:Math.floor(Date.now()/1000),acr:"urn:profitpilot:step-up",amr:["pwd"]},batchId,"payroll_row_decision:1",directDecision),/MFA required/i);
+  const verifiedIdentity={subject:"ci-payroll-reviewer",authTime:Math.floor(Date.now()/1000),acr:"urn:profitpilot:step-up",amr:["pwd","mfa"]};
+  await assert.rejects(()=>withFinancialStepUp({tenantId:tenantA,userId:reviewer},verifiedIdentity,batchId,"payroll_row_decision:2",directDecision),/step-up proof/i,"proof for a different row must fail");
   const rowPath=n=>path(tenantA)+"/imports/"+batchId+"/payroll/rows/"+n+"/decision";
   const approve={decision:"accepted",reason:"Independent validation of synthetic source row"};
   assert.equal((await send("POST",rowPath(1),"ci-payroll-importer",approve)).status,403,
