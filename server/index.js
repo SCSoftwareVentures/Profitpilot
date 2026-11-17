@@ -50,7 +50,7 @@ app.get("/v1/me/security",async(req,res)=>{res.set("Cache-Control","no-store");r
  authentication:{issuerConfigured:Boolean(process.env.AUTH_ISSUER),audienceConfigured:Boolean(process.env.AUTH_AUDIENCE),stepUpConfigured:Boolean(process.env.AUTH_STEP_UP_ACR),stepUpMaxAgeSeconds:Number(process.env.AUTH_STEP_UP_MAX_AGE_SECONDS||300)},
  currentSession:{sessionId:req.identity.jti,authenticatedAt:req.identity.authTime,assuranceClass:req.identity.acr}
 });});
-app.get("/v1/tenants/:tenantId/security/permissions",membership,requirePermission("security.permissions.read"),async(req,res,next)=>{try{
+app.get("/v1/tenants/:tenantId/security/permissions",membership,requirePermission("security.permissions.read"),requireStepUp(),async(req,res,next)=>{try{
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const catalogue=await client.query("SELECT pc.permission_key,pc.description,pc.sensitive,rp.role,(rp.permission_key IS NOT NULL) AS granted_by_role FROM permission_catalog pc LEFT JOIN role_permissions rp ON rp.permission_key=pc.permission_key ORDER BY pc.permission_key,rp.role");
   const overrides=await client.query("SELECT user_id,permission_key,effect,reason,granted_by,created_at FROM tenant_membership_permission_overrides WHERE tenant_id=$1 ORDER BY user_id,permission_key",[req.membership.tenantId]);
@@ -92,13 +92,13 @@ app.delete("/v1/tenants/:tenantId/security/permissions/overrides/:userId/:permis
  if(result.error)return res.status(result.status).json({error:result.error});
  res.status(result.status).json({removed:true,userId,permissionKey});
 }catch(e){next(e);}});
-app.get("/v1/tenants/:tenantId/security/audit",membership,requirePermission("security.audit.read"),async(req,res,next)=>{try{
+app.get("/v1/tenants/:tenantId/security/audit",membership,requirePermission("security.audit.read"),requireStepUp(),async(req,res,next)=>{try{
  const limitRaw=Number(req.query.limit||50);
  if(!Number.isInteger(limitRaw)||limitRaw<1||limitRaw>100)return res.status(400).json({error:"Audit page limit must be an integer from 1 to 100"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const integrity=await client.query("SELECT is_valid,event_count,first_invalid_event FROM private.verify_audit_chain($1)",[req.membership.tenantId]);
-  const events=await client.query("SELECT id,actor_user_id,action,object_type,object_id,reason,correlation_id,metadata,created_at,chain_position,encode(previous_hash,'hex') AS previous_hash,encode(event_hash,'hex') AS event_hash FROM audit_events WHERE tenant_id=$1 ORDER BY chain_position DESC LIMIT $2",[req.membership.tenantId,limitRaw]);
-  return {integrity:integrity.rows[0],items:events.rows};
+  const events=await client.query("SELECT id,actor_user_id,action,object_type,object_id,correlation_id,created_at,chain_position,encode(previous_hash,'hex') AS previous_hash,encode(event_hash,'hex') AS event_hash FROM audit_events WHERE tenant_id=$1 ORDER BY chain_position DESC LIMIT $2",[req.membership.tenantId,limitRaw]);
+  return {integrity:integrity.rows[0],items:events.rows,scope:"audit_metadata_only"};
  });
  res.json(result);
 }catch(e){next(e);}});
@@ -133,12 +133,26 @@ app.get("/v1/tenants/:tenantId/privacy/requests",membership,requirePermission("p
  });
  res.json(result);
 }catch(e){next(e);}});
-app.get("/v1/tenants/:tenantId/privacy/requests/manage",membership,requirePermission("privacy.requests.manage"),async(req,res,next)=>{try{
- const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const rows=await client.query("SELECT id,subject_user_id,submitted_by,request_type,status,details,assigned_to,created_at,updated_at,resolved_at,resolution_summary,legal_hold_reason,account_confirmed_at,details_redacted_at FROM privacy_requests WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 200",[req.membership.tenantId]);
-  return {items:rows.rows};
+app.get("/v1/tenants/:tenantId/privacy/requests/manage",membership,requirePermission("privacy.requests.manage"),requireStepUp(),async(req,res,next)=>{try{
+ const tenant=req.membership.tenantId;
+ const result=await withPrivacyStepUp(req.membership,req.identity,tenant,"read_privacy_queue",async(client,proof)=>{
+  const r=await client.query("SELECT private.read_privacy_queue($1,$2,$3) AS result",[tenant,req.identity.authTime,proof]);
+  return r.rows[0].result;
  });
  res.json(result);
+}catch(e){next(e);}});
+app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/read-details",membership,requirePermission("privacy.requests.manage"),requireStepUp(),async(req,res,next)=>{try{
+ const id=req.params.requestId,reason=req.body?.reason;
+ if(!privacyRequestIdValid(id)||typeof reason!=="string"||reason.trim().length<3||reason.length>500||/[\x00-\x1f\x7f]/.test(reason))return res.status(400).json({error:"Valid request ID and access purpose required"});
+ const purpose=reason.trim();
+ // Bind to the exact purpose without exposing it in the proof domain.
+ const action="read_privacy_details:"+createHash("sha256").update(purpose).digest("hex");
+ const result=await withPrivacyStepUp(req.membership,req.identity,id,action,async(client,proof)=>{
+  const r=await client.query("SELECT private.read_privacy_details($1,$2,$3,$4,$5) AS result",[req.membership.tenantId,id,purpose,req.identity.authTime,proof]);
+  return r.rows[0].result;
+ });
+ if(result.error)return res.status(result.status).json({error:result.error});
+ res.json(result.item);
 }catch(e){next(e);}});
 const privacyRequestIdValid=id=>typeof id==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/confirm-account",membership,requirePermission("privacy.requests.submit"),requireStepUp(),async(req,res,next)=>{try{
@@ -222,6 +236,7 @@ for(const [route,permission,fn] of [
 }
 app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/withdraw",membership,requirePermission("privacy.requests.submit"),async(req,res,next)=>{try{
  const {reason}=req.body||{};
+ if(!privacyRequestIdValid(req.params.requestId))return res.status(400).json({error:"Invalid request ID"});
  if(typeof reason!=="string"||reason.trim().length<3||reason.length>1000)return res.status(400).json({error:"A withdrawal reason is required"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const updated=await client.query("SELECT request_id AS id,request_status AS status,request_updated_at AS updated_at FROM private.withdraw_privacy_request($1,$2,$3)",[req.membership.tenantId,req.params.requestId,reason.trim()]);

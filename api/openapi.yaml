@@ -42,10 +42,33 @@ paths:
     parameters:
       - $ref: '#/components/parameters/TenantId'
     get:
-      summary: List tenant privacy requests for authorised privacy administrators
+      summary: List tenant privacy request metadata for authorised administrators with fresh MFA
       responses:
         "200": { description: Tenant privacy request queue }
         "403": { description: Privacy administration permission not granted }
+  /tenants/{tenantId}/privacy/requests/{requestId}/read-details:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Access one privacy request narrative with fresh MFA and an audited purpose
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        "200": { description: Specific request details, access recorded in audit chain }
+        "400": { description: Invalid ID or access purpose }
+        "403": { description: Missing manager permission or fresh MFA }
+        "404": { description: Request not found in tenant }
   /tenants/{tenantId}/privacy/requests/{requestId}/confirm-account:
     parameters:
       - $ref: '#/components/parameters/TenantId'

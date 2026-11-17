@@ -105,6 +105,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/027_shared_overhead_immutability.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/028_shared_overhead_proposals.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/029_exact_access_session_binding.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/030_privacy_read_minimisation.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:
