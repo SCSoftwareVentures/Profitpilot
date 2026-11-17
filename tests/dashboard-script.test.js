@@ -45,6 +45,10 @@ test("dashboard exposes the synthetic job readiness workflow and its human-autho
   assert.match(html,/data-view="promises"/);
   assert.match(html,/id="promises"/);
   assert.match(html,/renderPromiseLedger/);
+  assert.match(html,/data-view="value"/);
+  assert.match(html,/id="value"/);
+  assert.match(html,/renderValueLedger/);
+  assert.match(html,/Lifecycle stage totals are not additive realised value/);
   assert.match(html,/No notifications or external messages are sent/);
   assert.match(html,/data-view="leaks"/);
   assert.match(html,/id="leaks"/);
