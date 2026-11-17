@@ -84,6 +84,9 @@ form("invoiceDecide",async()=>{const item=selectedInvoice();if(!item||!$("invoic
 for(const key of ["tenant","reconcileSourceBatch"])$(key).addEventListener("input",()=>{$("reconcileSourceResult").textContent="";if(key==="tenant")$("reconcileSourceBatch").value="";});
 $("clear").addEventListener("click",()=>{$("reconcileSourceResult").textContent="";});
 $("reconcileSourceRead").addEventListener("click",()=>execute(async()=>{$("reconcileSourceResult").textContent="";const r=await client.reconcileStoredSource(value("tenant"),value("reconcileSourceBatch"));$("reconcileSourceResult").textContent=JSON.stringify(r,null,2);status("Source reconciliation checked; external completeness is not established.");}));
+for(const key of ["tenant","periodSourceStart","periodSourceEnd","periodSourceBatches","periodSourceEmpty","periodSourceReviewed"])$(key).addEventListener("input",()=>{$("periodSourceResult").textContent="";if(key==="tenant")$("periodReconcile").reset();});
+$("clear").addEventListener("click",()=>{$("periodSourceResult").textContent="";});
+form("periodReconcile",async()=>{$("periodSourceResult").textContent="";const r=await client.reconcileFinancialPeriod(value("tenant"),{periodStart:value("periodSourceStart"),periodEnd:value("periodSourceEnd"),expectedBatches:jsonArray("periodSourceBatches"),declaredEmptyTypes:jsonArray("periodSourceEmpty"),inventoryReviewed:$("periodSourceReviewed").checked});$("periodSourceResult").textContent=JSON.stringify(r,null,2);status("Recorded period inventory checked. External source completeness is not established.");});
 function clearReport(){$("reportResult").textContent="";}
 for(const key of ["tenant","reportContract","reportSite","reportStart","reportEnd"]){$(key).addEventListener("input",()=>{$("reportId").value="";clearReport();});}
 $("reportId").addEventListener("input",clearReport);

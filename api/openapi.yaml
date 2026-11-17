@@ -314,6 +314,40 @@ paths:
         "422": { description: Unsupported source type or missing persisted rows }
         "403": { description: Not authorised }
         "404": { description: Batch not found in this tenant }
+  /tenants/{tenantId}/financial-periods/reconcile:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      summary: Check a reviewed period inventory against recorded source batches and exceptions
+      description: Read-only repeatable-read diagnostic; fresh MFA and both financial review and payroll read permissions required. Does not establish external financial completeness.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [periodStart, periodEnd, expectedBatches, declaredEmptyTypes, inventoryReviewed]
+              properties:
+                periodStart: { type: string, format: date }
+                periodEnd: { type: string, format: date }
+                inventoryReviewed: { type: boolean, const: true }
+                expectedBatches:
+                  type: array
+                  maxItems: 30
+                  items:
+                    type: object
+                    required: [batchId, sourceType]
+                    properties:
+                      batchId: { type: string, format: uuid }
+                      sourceType: { type: string, enum: [customer_invoice, supplier_invoice, payroll] }
+                declaredEmptyTypes:
+                  type: array
+                  maxItems: 3
+                  items: { type: string, enum: [customer_invoice, supplier_invoice, payroll] }
+      responses:
+        "200": { description: Recorded inventory comparison and unresolved exceptions }
+        "400": { description: Invalid or incomplete source declaration }
+        "403": { description: Permission or MFA required }
   /tenants/{tenantId}/imports/{batchId}/reconciliation:
     parameters:
       - $ref: '#/components/parameters/TenantId'

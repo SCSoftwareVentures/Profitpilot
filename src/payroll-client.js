@@ -103,6 +103,12 @@ export function createPayrollClient({getAccessToken,fetchImpl=globalThis.fetch}=
    if(result?.batchId!==batchId.toLowerCase()||result.externallyVerified!==false||result.completeSourceCoverage!==false)throw new PayrollRequestError(422);
    return result;
   },
+  async reconcileFinancialPeriod(tenant,{periodStart,periodEnd,expectedBatches,declaredEmptyTypes,inventoryReviewed,signal}={}){
+   if(inventoryReviewed!==true||!Array.isArray(expectedBatches)||expectedBatches.length>30||!Array.isArray(declaredEmptyTypes))throw new TypeError("Explicit reviewed period inventory required");
+   const result=await request(root(tenant)+"/financial-periods/reconcile",{body:{periodStart,periodEnd,expectedBatches,declaredEmptyTypes,inventoryReviewed:true},fresh:true,signal});
+   if(result?.periodStart!==periodStart||result?.periodEnd!==periodEnd||result.externallyVerified!==false||result.completeSourceCoverage!==false)throw new PayrollRequestError(422);
+   return result;
+  },
   confirmDeliveryExpense(tenant,matchId,{reason,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,signal}={}){
    if(!["supplier","subcontractor","other_delivery"].includes(costCategory)||payrollOverlapReviewed!==true||duplicateExpenseReviewed!==true)throw new TypeError("Explicit cost category and overlap checks required");
    return request(root(tenant)+"/matches/"+id(matchId)+"/decision",{body:{decision:"confirmed",reason:text(reason,3,2000),costCategory,payrollOverlapReviewed:true,duplicateExpenseReviewed:true},fresh:true,signal});
