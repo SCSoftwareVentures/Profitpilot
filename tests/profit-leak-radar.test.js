@@ -67,6 +67,13 @@ test("unmatched and duplicate invoice rows remain separate candidates, not a com
   assert.equal(rows.every(x=>x.status==="candidate"),true);
 });
 
+test("unsupported invoice row states are surfaced as unknown",()=>{
+  const result=detectProfitLeaks({...complete,invoices:{...complete.invoices,amount:"1100.00",rows:[{status:"awaiting_review",amount:"25.00",evidenceRef:"synthetic:row-unknown"}]}});
+  const alert=result.alerts.find(x=>x.type==="invoice_row_status_unknown");
+  assert.equal(alert.status,"unknown");
+  assert.equal(alert.amount,null);
+});
+
 test("invalid money or missing source evidence never produces a quantified alert",()=>{
   const result=detectProfitLeaks({...complete,contract:{...complete.contract,amount:1000},payroll:{...complete.payroll,evidenceRef:""}});
   assert.equal(result.alerts.find(x=>x.type==="contract_invoice_variance").status,"unknown");
