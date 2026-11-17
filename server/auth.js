@@ -17,7 +17,7 @@ function config(){
   throw error;
  }
  const localHttp=url.protocol==="http:"&&["localhost","127.0.0.1","::1"].includes(url.hostname);
- if(url.protocol!=="https:"&&!(process.env.NODE_ENV==="test"&&localHttp)){
+ if(url.protocol!=="https:"&&!(process.env.NODE_ENV!=="production"&&localHttp)){
   const error=new Error("Authentication JWKS endpoint must use HTTPS");
   error.code="AUTH_CONFIG_INVALID";
   throw error;
