@@ -103,6 +103,8 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/014_match_decision_audit.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/015_shared_rate_limits.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/016_tenant_key_lifecycle.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/017_invoice_import_privacy.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
 
       - name: Audit every tenant-scoped table and tenant-to-tenant foreign key
         env:
@@ -253,6 +255,6 @@ jobs:
             echo "## ProfitPilot security CI gate"
             echo "- Commit: \`$TESTED_SHA\`"
             echo "- Node.js application checks: $VERIFY_RESULT"
-            echo "- PostgreSQL, tenant RLS, authenticated API, distributed limits, key lifecycle, encrypted synthetic recovery, TLS and container checks: $DATABASE_RESULT"
+            echo "- PostgreSQL, tenant RLS, authenticated API, distributed limits, key lifecycle, invoice privacy boundary, encrypted synthetic recovery, TLS and container checks: $DATABASE_RESULT"
             echo "- Scope: automated repository CI only; not penetration testing or production certification"
           } >> "$GITHUB_STEP_SUMMARY"
