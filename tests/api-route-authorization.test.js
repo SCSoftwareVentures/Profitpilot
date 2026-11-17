@@ -22,6 +22,7 @@ const expected=new Map([
 test("every registered API endpoint has an explicit reviewed authorization classification",()=>{
   assert.ok(source.includes('app.use("/v1",authRequired())'),
     "all /v1 routes must remain behind the authentication middleware");
+  assert.ok(source.includes('app.use("/v1",sessionRequired(checkIdentitySession))'),"all authenticated routes must check active session state");
   assert.equal(routes.length,expected.size,"route inventory changed: review and classify every new endpoint");
   for(const route of routes){
     const key=`${route.method} ${route.path}`;
