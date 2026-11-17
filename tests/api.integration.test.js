@@ -156,6 +156,31 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal((await useToken(await token(incidentSubject))).status,200);
     assert.equal((await useToken(await customToken(incidentSubject,{authTime:cutoff}))).status,401,"refresh-derived tokens with old authentication must remain rejected");
     await assert.rejects(()=>appPool.query("SELECT * FROM private.account_session_revocations"),/permission denied/i);
+    await assert.rejects(()=>appPool.query("SELECT * FROM private.account_session_revocation_receipts"),/permission denied/i);
+    const incidentId="deadbeef-1111-4111-8111-111111111111";
+    const firstRevocationState=(await admin.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;
+    const firstReceipt=firstRevocationState.markers.find(m=>m.kind==="account_session_revocation"&&m.userId===incidentId);
+    assert.ok(firstReceipt);
+    const secondToken=await token(incidentSubject);
+    const secondResponse=await fetch(base+"/v1/me/sessions/revoke-all",{method:"POST",headers:{authorization:"Bearer "+secondToken,"content-type":"application/json"},body:JSON.stringify({confirm:true})});
+    assert.equal(secondResponse.status,200);
+    const secondResult=await secondResponse.json();
+    assert.ok(secondResult.revokedThroughEpoch>cutoff);
+    const secondRevocationState=(await admin.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;
+    const receipts=secondRevocationState.markers.filter(m=>m.kind==="account_session_revocation"&&m.userId===incidentId);
+    assert.equal(receipts.length,2);
+    assert.ok(receipts.some(m=>m.id===firstReceipt.id));
+    assert.deepEqual(secondRevocationState.violations,[]);
+    await assert.rejects(()=>admin.query("UPDATE private.account_session_revocations SET revoked_through_epoch=$2 WHERE user_id=$1",[incidentId,cutoff]),/cannot regress/i);
+    await assert.rejects(()=>admin.query("DELETE FROM private.account_session_revocations WHERE user_id=$1",[incidentId]),/must be retained/i);
+    await assert.rejects(()=>admin.query("DELETE FROM private.account_session_revocation_receipts WHERE user_id=$1",[incidentId]),/immutable/i);
+    const probe=await admin.connect();
+    try{
+     await probe.query("BEGIN");
+     await probe.query("UPDATE private.auth_sessions SET revoked_at=NULL,revocation_reason=NULL WHERE subject=$1 AND issued_at<=to_timestamp($2)",[incidentSubject,cutoff]);
+     const inconsistent=(await probe.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;
+     assert.ok(inconsistent.violations.some(v=>v.kind==="revoked_session_reinstated"&&v.id===incidentId));
+    }finally{await probe.query("ROLLBACK");probe.release();}
 
     const noToken=await request("/v1/me");
     assert.equal(noToken.status,401,"requests without a bearer token must be rejected");

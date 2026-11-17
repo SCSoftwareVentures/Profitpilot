@@ -17,7 +17,15 @@ async function state(name){
 const live=await state(names[0]),old=await state(names[1]),fresh=await state(names[2]);
 assert.ok(live.markers.some(m=>m.kind==="closure"));
 assert.ok(live.markers.some(m=>m.kind==="redaction"));
+const revocations=live.markers.filter(m=>m.kind==="account_session_revocation");
+assert.ok(revocations.length>=2,"physical recovery drill must cover repeated account revocations");
+assert.equal(old.markers.some(m=>m.kind==="account_session_revocation"),false);
+
 const options={key:process.env.PRIVACY_DRILL_KEY,deploymentId:"isolated-ci",now:Date.now()};
+const revocationCheckpoint=signCheckpoint({markers:revocations,violations:[]},options);
+const revocationVerify={...options,expectedDigest:checkpointDigest(revocationCheckpoint)};
+assert.throws(()=>verifyCheckpoint(revocationCheckpoint,old,revocationVerify),/missing or has changed/);
+assert.equal(verifyCheckpoint(revocationCheckpoint,fresh,revocationVerify).verified,true);
 const checkpoint=signCheckpoint(live,options);
 const verify={...options,expectedDigest:checkpointDigest(checkpoint)};
 assert.throws(()=>verifyCheckpoint(checkpoint,old,verify),/missing or has changed/);

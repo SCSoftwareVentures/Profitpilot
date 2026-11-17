@@ -47,3 +47,20 @@ test("restore checkpoint retains correction receipts without personal email addr
  assert.throws(()=>verifyCheckpoint(signed,state,options),/missing or has changed/);
  assert.equal(JSON.stringify(signed).includes("@"),false);
 });
+
+test("account-wide revocation evidence survives repeated incidents without disclosing tokens",()=>{
+ const first={kind:"account_session_revocation",id:uuid(7),userId:uuid(8),at:"1794873600"};
+ const second={...first,id:uuid(9),at:"1794873610"};
+ const original={markers:[first],violations:[]};
+ const latest={markers:[first,second],violations:[]};
+ const oldDoc=signCheckpoint(original,{key,deploymentId,now});
+ const latestDoc=signCheckpoint(latest,{key,deploymentId,now});
+ const latestOpt={...opt,expectedDigest:checkpointDigest(latestDoc)};
+ assert.equal(verifyCheckpoint(oldDoc,latest,{...opt,expectedDigest:checkpointDigest(oldDoc)}).verified,true);
+ assert.equal(verifyCheckpoint(latestDoc,latest,latestOpt).requiredMarkers,2);
+ assert.throws(()=>verifyCheckpoint(latestDoc,original,latestOpt),/missing or has changed/);
+ assert.throws(()=>verifyCheckpoint(latestDoc,{markers:[first,{...second,at:"1794873601"}],violations:[]},latestOpt),/missing or has changed/);
+ assert.throws(()=>verifyCheckpoint(latestDoc,{...latest,violations:[{kind:"revoked_session_reinstated"}]},latestOpt),/inconsistent/);
+ for(const at of ["-1","1.5","Infinity","12345678901234567"])assert.throws(()=>signCheckpoint({markers:[{...first,at}],violations:[]},{key,deploymentId,now}),/Invalid session revocation marker/);
+ assert.equal(JSON.stringify(latestDoc).includes("tenantId"),false);
+});
