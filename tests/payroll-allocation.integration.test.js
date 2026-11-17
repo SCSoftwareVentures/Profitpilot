@@ -258,6 +258,7 @@ test("independent payroll decisions, exact source reconciliation and maker-check
   const canonicalBatch=(await invoiceBatch.json()).batch.id;
   const source={invoice_id:"CANON-"+randomUUID().toUpperCase(),date:"2026-03-02",currency:"AUD",tax_basis:"gst_exclusive",description:"Synthetic canonical expense",contract_id:contract,site_id:siteA,service_start:"2026-02-01",service_end:"2026-02-14"};
   const canonicalRows=[{...source,line_number:1,amount:"12.10"},{...source,line_number:2,amount:"-2.10"}];
+  assert.equal((await send("POST",path(tenantA)+"/imports/"+canonicalBatch+"/rows","ci-payroll-owner",{rows:canonicalRows})).status,403);
   assert.equal((await send("POST",path(tenantA)+"/imports/"+canonicalBatch+"/rows","ci-payroll-importer",{rows:canonicalRows})).status,201);
   const canonicalRowPath=path(tenantA)+"/imports/"+canonicalBatch+"/rows";
   const replay=await send("POST",canonicalRowPath,"ci-payroll-importer",{rows:canonicalRows});
@@ -277,6 +278,18 @@ test("independent payroll decisions, exact source reconciliation and maker-check
   const canonicalReview=await send("GET",path(tenantA)+"/imports/"+canonicalBatch+"/review","ci-payroll-reviewer");
   assert.equal(canonicalReview.status,200);
   assert.equal((await canonicalReview.json()).summary.accepted,2);
+  const listPath=path(tenantA)+"/imports/"+canonicalBatch+"/invoices/candidates";
+  assert.equal((await send("GET",listPath,"ci-payroll-importer")).status,403);
+  assert.equal((await send("GET",listPath,"ci-payroll-reviewer",undefined,{mfa:false})).status,403);
+  assert.equal((await send("GET",path(tenantB)+"/imports/"+canonicalBatch+"/invoices/candidates","ci-payroll-outside")).status,404);
+  const listed=await send("GET",listPath,"ci-payroll-reviewer");
+  assert.equal(listed.status,200,await listed.clone().text());
+  const restored=(await listed.json()).items;
+  assert.deepEqual(restored.map(x=>x.matchId),canonical.candidates.map(x=>x.matchId));
+  assert.deepEqual(restored.map(x=>x.amount),["12.10","-2.10"]);
+  assert.ok(restored.every(x=>x.decision==="candidate"));
+  assert.equal(JSON.stringify(restored).includes("Synthetic canonical expense"),false);
+
   assert.equal((await send("POST",preparePath,"ci-payroll-owner",prep)).status,409);
   assert.equal((await send("POST",path(tenantB)+"/imports/"+canonicalBatch+"/invoices/prepare","ci-payroll-outside",prep)).status,404);
   const pendingReport=await browserClient("ci-payroll-importer").createContributionReport(tenantA,reportBody);

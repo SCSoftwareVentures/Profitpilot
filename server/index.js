@@ -241,11 +241,12 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requirePermiss
  const rows=req.body?.rows;
  if(!Array.isArray(rows)||rows.length<1||rows.length>200||rows.some(x=>!x||typeof x!=="object"||Array.isArray(x)))return res.status(400).json({error:"Provide 1–200 row objects"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const batch=await client.query("SELECT id,status,source_type FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.batchId,req.membership.tenantId]);
+  const batch=await client.query("SELECT id,status,source_type,created_by FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.batchId,req.membership.tenantId]);
   if(!batch.rowCount)return {status:404,error:"Import batch not found"};
   if(!["uploaded","review","validating"].includes(batch.rows[0].status))return {status:409,error:"Import batch is not open for row ingestion"};
   // Invoice ingest is a single complete batch; only exact JSONB replays are idempotent.
   if(["customer_invoice","supplier_invoice"].includes(batch.rows[0].source_type)){
+   if(batch.rows[0].created_by!==req.membership.userId)return {status:403,error:"Only the invoice batch importer may submit its source rows"};
    const prior=(await client.query("SELECT count(*)::int AS n, COALESCE(jsonb_agg(payload ORDER BY row_number)=$3::jsonb,false) AS identical FROM raw_import_rows WHERE batch_id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId,JSON.stringify(rows)])).rows[0];
    if(prior.n>0){
     if(!prior.identical)return {status:409,error:"Invoice batch already contains different rows; create a new batch and reconcile independently"};
