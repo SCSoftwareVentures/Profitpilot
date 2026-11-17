@@ -76,10 +76,12 @@ test("scanner database role enforces lease ownership, holds, expiry and permanen
   await assert.rejects(()=>scanner.query("SELECT * FROM public.users"),/permission denied/i);
   await assert.rejects(()=>app.query("SELECT private.claim_quarantine_scan()"),/permission denied/i);
   const claim=(await scanner.query("SELECT * FROM private.claim_quarantine_scan()")).rows[0];
+  await assert.rejects(()=>scanner.query("SELECT private.finish_quarantine_scan($1,$2,$3,'clean')",[tenant,batch,claim.lease_id]),/permission denied/i);
+  await assert.rejects(()=>scanner.query("SELECT private.finish_quarantine_scan_with_content($1,$2,$3,'infected','validated')",[tenant,batch,claim.lease_id]),/Invalid malware and content verdict/);
   assert.equal(claim.batch_id,batch);
-  assert.equal((await scanner.query("SELECT private.finish_quarantine_scan($1,$2,$3,'clean') AS ok",[tenant,batch,randomUUID()])).rows[0].ok,false);
-  assert.equal((await scanner.query("SELECT private.finish_quarantine_scan($1,$2,$3,'infected') AS ok",[tenant,batch,claim.lease_id])).rows[0].ok,true);
-  assert.equal((await scanner.query("SELECT private.finish_quarantine_scan($1,$2,$3,'clean') AS ok",[tenant,batch,claim.lease_id])).rows[0].ok,false);
+  assert.equal((await scanner.query("SELECT private.finish_quarantine_scan_with_content($1,$2,$3,'clean','validated') AS ok",[tenant,batch,randomUUID()])).rows[0].ok,false);
+  assert.equal((await scanner.query("SELECT private.finish_quarantine_scan_with_content($1,$2,$3,'infected','not_checked') AS ok",[tenant,batch,claim.lease_id])).rows[0].ok,true);
+  assert.equal((await scanner.query("SELECT private.finish_quarantine_scan_with_content($1,$2,$3,'clean','validated') AS ok",[tenant,batch,claim.lease_id])).rows[0].ok,false);
   await admin.query("UPDATE private.quarantined_files SET created_at=clock_timestamp()-interval '25 hours' WHERE batch_id=$1",[batch]);
   await admin.query("SELECT private.set_import_disposal_hold($1,$2,true,'CI_SCAN_HOLD')",[tenant,batch]);
   await scanner.query("SELECT private.expire_quarantine_bytes()");
