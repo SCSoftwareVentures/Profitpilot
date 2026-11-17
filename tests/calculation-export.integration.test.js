@@ -32,7 +32,7 @@ test("single calculation export requires fresh issuer MFA, owner/admin role, ten
  const claims=()=>({amr:["pwd","mfa"],auth_time:Math.floor(Date.now()/1000)-10});
  async function request(runId,{who=subject,tenantId=tenant,extra=claims(),body={purpose:"internal_review"},authenticated=true}={}){
   const headers={"content-type":"application/json"};
-  if(authenticated)headers.authorization="Bearer "+await new SignJWT(extra).setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(issuer).setAudience(audience).setSubject(who).setIssuedAt().setExpirationTime("5m").sign(privateKey);
+  if(authenticated)headers.authorization="Bearer "+await new SignJWT({auth_time:Math.floor(Date.now()/1000)-10,sid:"ci-export-session-"+who,...extra}).setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(issuer).setAudience(audience).setSubject(who).setIssuedAt().setExpirationTime("5m").sign(privateKey);
   return fetch(base+"/v1/tenants/"+tenantId+"/calculations/"+runId+"/export",{method:"POST",headers,body:JSON.stringify(body)});
  }
  try{
