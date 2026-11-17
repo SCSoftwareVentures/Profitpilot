@@ -207,6 +207,22 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/file",membership,requireRole("o
  }
 });
 
+// Human approval never returns the file contents or marks rows financially accepted.
+app.post("/v1/tenants/:tenantId/imports/:batchId/file/approve",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ if(!quarantine)return res.status(503).json({error:"File processing is not enabled"});
+ const batch=req.params.batchId.toLowerCase(),tenant=req.membership.tenantId;
+ if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(batch)||Object.keys(req.body||{}).length!==0)return res.status(400).json({error:"Invalid approval request"});
+ try{
+  const approved=await requestTenant(req,tenant,async c=>(await c.query("SELECT private.approve_quarantine_promotion($1,$2) AS approved",[tenant,batch])).rows[0].approved);
+  if(!approved)return res.status(404).json({error:"Import batch not found"});
+  res.status(202).json({batchId:batch,status:"approved_for_processing"});
+ }catch(e){
+  if(e.code==="42501")return res.status(403).json({error:"Promotion authority denied"});
+  if(e.code==="23514")return res.status(422).json({error:"File is not eligible for approved processing"});
+  next(e);
+ }
+});
+
 // A single, ephemeral, JSON summary; never an unrestricted database download.
 app.post("/v1/tenants/:tenantId/calculations/:runId/export",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
  try{
