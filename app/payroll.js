@@ -51,6 +51,7 @@ form("confirm",async()=>{if(loaded!==scope()||!$("ack").checked)throw new TypeEr
 $("clear").addEventListener("click",()=>{for(const el of document.querySelectorAll("input,textarea")){if(el.type==="checkbox")el.checked=false;else el.value="";}for(const f of document.querySelectorAll("form"))f.reset();$("lines").replaceChildren();addLine();clearQueue();invalidate();$("poolResult").textContent="";status("Workspace cleared. Provider session revocation is separate.");sync();});
 
 form("expenseConfirm",async()=>{await client.confirmDeliveryExpense(value("tenant"),value("expenseMatch"),{reason:value("expenseReason"),costCategory:value("expenseCategory"),payrollOverlapReviewed:$("expensePayroll").checked,duplicateExpenseReviewed:$("expenseDuplicate").checked});$("expenseConfirm").reset();status("Expense match confirmed by server. Create a new report to include it.");});
+$("tenant").addEventListener("input",()=>{$("expenseConfirm").reset();});
 function clearReport(){$("reportResult").textContent="";}
 for(const key of ["tenant","reportContract","reportSite","reportStart","reportEnd"]){$(key).addEventListener("input",()=>{$("reportId").value="";clearReport();});}
 $("reportId").addEventListener("input",clearReport);

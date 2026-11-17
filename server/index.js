@@ -324,6 +324,7 @@ app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requirePer
   if(!candidate.rowCount)return null;
   const m=candidate.rows[0];
   let expenseReview=null;
+  if(m.direction!=="supplier"&&[costCategory,payrollOverlapReviewed,duplicateExpenseReviewed].some(v=>v!==undefined))return {error:"Expense review requires a supplier invoice match",status:422};
   if(m.direction==="supplier"&&decision==="confirmed"){
    if(!["supplier","subcontractor","other_delivery"].includes(costCategory)||payrollOverlapReviewed!==true||duplicateExpenseReviewed!==true)
     return {error:"Confirm expense category, payroll-overlap review and duplicate-expense review",status:422};

@@ -227,6 +227,11 @@ test("independent payroll decisions, exact source reconciliation and maker-check
   assert.equal((await send("GET",path(tenantB)+"/calculations/"+report.id,"ci-payroll-outside")).status,404);
   assert.equal((await send("POST",reportPath,"ci-payroll-importer",{...reportBody,periodEnd:"2026-02-10"})).status,422);
   // Reviewer classifies and explicitly attests overlap / duplicate checks for expenses.
+  const customerCandidate=randomUUID();
+  await admin.query("INSERT INTO match_reviews(id,tenant_id,invoice_line_id,contract_id,site_id,service_period_start,service_period_end,confidence,decision) VALUES($1,$2,$3,$4,$5,'2026-02-01','2026-02-14','HIGH','candidate')",[customerCandidate,tenantA,invoiceLine,contract,siteA]);
+  const wrongDirection={decision:"confirmed",reason:"Synthetic wrong direction check",costCategory:"supplier",payrollOverlapReviewed:true,duplicateExpenseReviewed:true};
+  assert.equal((await send("POST",path(tenantA)+"/matches/"+customerCandidate+"/decision","ci-payroll-reviewer",wrongDirection)).status,422);
+  assert.equal((await admin.query("SELECT decision FROM match_reviews WHERE id=$1",[customerCandidate])).rows[0].decision,"candidate");
   const expenseMatches=[];
   for(const [category,amount] of [["supplier","5.01"],["subcontractor","7.00"],["other_delivery","3.00"],["supplier","-0.01"]]){
    const inv=randomUUID(),line=randomUUID(),candidate=randomUUID();
