@@ -41,10 +41,10 @@ export async function health(){const r=await pool.query("SELECT 1 AS ok");return
 
 // Only call from verified identity middleware or authenticated account routes.
 // A proof is valid for the exact database transaction and backend, not another connection.
-async function verifiedSessionOperation(action,{jti,subject,issuer,issuedAt,expiresAt},target=null){
+async function verifiedSessionOperation(action,{jti,subject,issuer,issuedAt,expiresAt,authTime},target=null,stepUpVerified=false){
  const keyId=process.env.TENANT_CONTEXT_HMAC_KEY_ID||"primary",secret=process.env.TENANT_CONTEXT_HMAC_SECRET||"";
  if(!/^[A-Za-z0-9._-]{1,128}$/.test(keyId)||secret.length%2!==0||!/^[a-f0-9]{64,256}$/i.test(secret))throw Error("Session signing configuration is invalid");
- const body=JSON.stringify({action,jti,subject,issuer,issuedAt,expiresAt,target});
+ const body=JSON.stringify({action,jti,subject,issuer,issuedAt,expiresAt,authTime:authTime??null,target,stepUpVerified});
  const client=await pool.connect();
  try{
   await client.query("BEGIN");
@@ -62,6 +62,12 @@ export async function registerAndCheckAuthSession(identity){
 }
 export async function listAuthSessions(identity){
  const result=await verifiedSessionOperation("list",identity);
+ if(result?.accepted!==true)throw Object.assign(new Error("Session unavailable"),{status:401});
+ return result;
+}
+// Call only after requireStepUp has verified the signed MFA claims.
+export async function revokeAllAuthSessions(identity){
+ const result=await verifiedSessionOperation("revoke_all",identity,null,true);
  if(result?.accepted!==true)throw Object.assign(new Error("Session unavailable"),{status:401});
  return result;
 }

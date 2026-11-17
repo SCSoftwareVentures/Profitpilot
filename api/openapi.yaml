@@ -630,6 +630,24 @@ paths:
       summary: List active and recently revoked sessions for the authenticated identity
       responses:
         "200": { description: Session identifiers, issue/expiry/last-seen and revocation timestamps }
+  /me/sessions/revoke-all:
+    post:
+      summary: Revoke every local access session, including the caller
+      description: Fresh verified MFA and explicit confirmation required. Old authentication events cannot admit new tokens after revocation. External identity-provider sessions are not revoked by this operation.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm: { type: boolean, enum: [true] }
+      responses:
+        "200": { description: Local sessions revoked; reauthentication required; provider revocation unconfirmed }
+        "400": { description: Explicit confirmation required }
+        "401": { description: Session unavailable }
+        "403": { description: Recent MFA required }
   /me/sessions/{jti}:
     parameters:
       - name: jti

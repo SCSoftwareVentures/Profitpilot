@@ -5,7 +5,7 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import {randomUUID,createHash} from "node:crypto";
-import {withTenant,health,listAuthSessions,revokeAuthSession,withPrivacyStepUp,appendAudit} from "./db.js";
+import {withTenant,health,listAuthSessions,revokeAuthSession,revokeAllAuthSessions,withPrivacyStepUp,appendAudit} from "./db.js";
 import {authRequired,requirePermission,requireStepUp} from "./auth.js";
 import {parseCsv,validateInvoiceRows,validatePayrollRows,isIsoDate} from "../src/engine.js";
 import {registerPayrollRoutes} from "./payroll.js";
@@ -108,6 +108,11 @@ app.get("/v1/tenants/:tenantId/security/audit",membership,requirePermission("sec
 app.get("/v1/me/sessions",async(req,res,next)=>{try{
  const sessions=await listAuthSessions(req.identity);
  res.json({items:sessions.items.map(s=>({sessionId:s.jti,issuedAt:s.issued_at,expiresAt:s.expires_at,lastSeenAt:s.last_seen_at,revokedAt:s.revoked_at})),truncated:sessions.truncated});
+}catch(e){next(e);}});
+app.post("/v1/me/sessions/revoke-all",requireStepUp(),async(req,res,next)=>{try{
+ if(req.body?.confirm!==true)return res.status(400).json({error:"Explicit account-wide revocation confirmation required"});
+ const result=await revokeAllAuthSessions(req.identity);
+ res.status(200).json({revokedCount:result.revokedCount,revokedThroughEpoch:result.revokedThroughEpoch,providerRevocationConfirmed:false,reauthenticationRequired:true});
 }catch(e){next(e);}});
 app.delete("/v1/me/sessions/:jti",async(req,res,next)=>{try{
  const jti=req.params.jti;

@@ -132,6 +132,31 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const revokedSessionUse=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+revocableSessionToken}});
     assert.equal(revokedSessionUse.status,401,"a revoked access session must be rejected on its next request");
 
+    // Isolated identity: exercise a security incident without breaking the other fixtures.
+    const incidentSubject="ci-api-incident";
+    await admin.query("INSERT INTO users(id,auth_subject,email,status,auth_issuer) VALUES ($1,$2,'incident@example.invalid','active',$3)",["deadbeef-1111-4111-8111-111111111111",incidentSubject,issuer]);
+    const incidentToken=await token(incidentSubject), oldEventToken=await token(incidentSubject);
+    const incidentHeaders={authorization:"Bearer "+incidentToken,"content-type":"application/json"};
+    const revokeAll=body=>fetch(base+"/v1/me/sessions/revoke-all",{method:"POST",headers:incidentHeaders,body:JSON.stringify(body)});
+    assert.equal((await useToken(oldEventToken)).status,200);
+    assert.equal((await revokeAll({confirm:false})).status,400);
+    const noMfa=await customToken(incidentSubject);
+    assert.equal((await fetch(base+"/v1/me/sessions/revoke-all",{method:"POST",headers:{authorization:"Bearer "+noMfa,"content-type":"application/json"},body:JSON.stringify({confirm:true})})).status,403);
+    const allResponse=await revokeAll({confirm:true});
+    assert.equal(allResponse.status,200);
+    const allResult=await allResponse.json();
+    assert.ok(allResult.revokedCount>=2);
+    assert.equal(allResult.providerRevocationConfirmed,false);
+    assert.equal((await useToken(incidentToken)).status,401);
+    assert.equal((await useToken(oldEventToken)).status,401);
+    const cutoff=allResult.revokedThroughEpoch;
+    assert.equal((await useToken(await customToken(incidentSubject,{authTime:cutoff}))).status,401);
+    assert.equal((await useToken(await customToken(incidentSubject))).status,401);
+    await new Promise(resolve=>setTimeout(resolve,1100));
+    assert.equal((await useToken(await token(incidentSubject))).status,200);
+    assert.equal((await useToken(await customToken(incidentSubject,{authTime:cutoff}))).status,401,"refresh-derived tokens with old authentication must remain rejected");
+    await assert.rejects(()=>appPool.query("SELECT * FROM private.account_session_revocations"),/permission denied/i);
+
     const noToken=await request("/v1/me");
     assert.equal(noToken.status,401,"requests without a bearer token must be rejected");
     const noExpiry=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+await customToken("ci-api-analyst",{includeExpiry:false})}});
