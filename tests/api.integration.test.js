@@ -208,6 +208,37 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(crossTenantMatch.status,404,"a reviewer must not decide another tenant's match object by ID");
     const analystDecision=await request("/v1/tenants/33333333-3333-4333-8333-333333333333/matches/24242424-2424-4424-8424-242424242424/decision",{subject:"isolation-tenant-c",method:"POST",body:{decision:"confirmed",reason:"analyst role escalation test"}});
     assert.equal(analystDecision.status,403,"an analyst must not exercise reviewer-only invoice decision authority");
+    const analystDirectDecision=await withTenant("33333333-3333-4333-8333-333333333333","isolation-tenant-c",client=>client.query("UPDATE match_reviews SET decision='confirmed',reviewer_id='55555555-5555-4555-8555-555555555555' WHERE id='24242424-2424-4424-8424-242424242424' RETURNING id"));
+    assert.equal(analystDirectDecision.rowCount,0,"database RLS must block analyst direct-SQL invoice decision even if the application route is bypassed");
+    const reviewerDirectDecision=await withTenant("33333333-3333-4333-8333-333333333333","isolation-reviewer-c",async client=>{
+      await client.query("SELECT set_config('app.audit_reason',$1,true)",["Synthetic direct SQL reviewer acceptance test"]);
+      return client.query("UPDATE match_reviews SET decision='confirmed',reviewer_id='77777777-7777-4777-8777-777777777777',reviewed_at=now() WHERE id='24242424-2424-4424-8424-242424242424' RETURNING id");
+    });
+    assert.equal(reviewerDirectDecision.rowCount,1,"database RLS must permit an authenticated tenant reviewer to decide an invoice match");
+    const decisionAudit=await withTenant("33333333-3333-4333-8333-333333333333","isolation-reviewer-c",client=>client.query("SELECT action,reason,metadata FROM audit_events WHERE tenant_id=$1 AND object_id=$2 AND action='invoice_match_decision' ORDER BY created_at DESC LIMIT 1",["33333333-3333-4333-8333-333333333333","24242424-2424-4424-8424-242424242424"]));
+    assert.equal(decisionAudit.rows[0]?.reason,"Synthetic direct SQL reviewer acceptance test","database trigger must create an audit event atomically");
+    assert.equal(decisionAudit.rows[0]?.metadata?.decision,"confirmed");
+    await assert.rejects(()=>withTenant("33333333-3333-4333-8333-333333333333","isolation-reviewer-c",client=>client.query("UPDATE match_reviews SET decision='rejected',reviewer_id='77777777-7777-4777-8777-777777777777',reviewed_at=now() WHERE id='24242424-2424-4424-8424-242424242424'")),/Finalised invoice match decisions are immutable/);
+    await assert.rejects(()=>withTenant("33333333-3333-4333-8333-333333333333","isolation-reviewer-c",client=>client.query("UPDATE match_reviews SET evidence='{\"tampered\":true}'::jsonb WHERE id='24242424-2424-4424-8424-242424242424'")),/Finalised invoice match decisions are immutable/);
+    await admin.query("INSERT INTO invoice_lines(id,tenant_id,invoice_id,line_number,description,amount,source_row_id) VALUES ('37373737-3737-4737-8737-373737373737','33333333-3333-4333-8333-333333333333','20202020-2020-4020-8020-202020202020',2,'Synthetic second match line',100,'14141414-1414-4414-8414-141414141414')");
+    await admin.query("INSERT INTO match_reviews(id,tenant_id,invoice_line_id,contract_id,site_id,confidence,decision,evidence) VALUES ('36363636-3636-4636-8636-363636363636','33333333-3333-4333-8333-333333333333','37373737-3737-4737-8737-373737373737','cccccccc-cccc-4ccc-8ccc-cccccccccccc','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','MEDIUM','candidate','{}'::jsonb)");
+    await assert.rejects(()=>withTenant("33333333-3333-4333-8333-333333333333","isolation-reviewer-c",client=>client.query("UPDATE match_reviews SET decision='confirmed',reviewer_id='55555555-5555-4555-8555-555555555555',reviewed_at=now() WHERE id='36363636-3636-4636-8636-363636363636'")),/authenticated signed tenant actor/,"a reviewer cannot attribute a decision to another tenant member");
+    await assert.rejects(()=>withTenant("33333333-3333-4333-8333-333333333333","isolation-reviewer-c",client=>client.query("UPDATE match_reviews SET evidence='{\"tampered\":true}'::jsonb WHERE id='36363636-3636-4636-8636-363636363636'")),/evidence and identity fields are immutable/,"a reviewer cannot rewrite candidate evidence");
+    await assert.rejects(()=>withTenant("33333333-3333-4333-8333-333333333333","isolation-reviewer-c",client=>client.query("UPDATE match_reviews SET decision='confirmed',reviewer_id='77777777-7777-4777-8777-777777777777',reviewed_at=now() WHERE id='36363636-3636-4636-8636-363636363636'")),/audit reason of 3 to 2000 characters/);
+    const reviewerApiDecision=await request("/v1/tenants/33333333-3333-4333-8333-333333333333/matches/36363636-3636-4636-8636-363636363636/decision",{subject:"isolation-reviewer-c",method:"POST",body:{decision:"confirmed",reason:"Synthetic reviewer API audit test"}});
+    assert.equal(reviewerApiDecision.status,201,"reviewer API decision should succeed with signed actor and explicit reason");
+    const apiDecisionAudit=await withTenant("33333333-3333-4333-8333-333333333333","isolation-reviewer-c",client=>client.query("SELECT reason,metadata FROM audit_events WHERE tenant_id=$1 AND object_id=$2 AND action='invoice_match_decision' ORDER BY created_at DESC LIMIT 1",["33333333-3333-4333-8333-333333333333","36363636-3636-4636-8636-363636363636"]));
+    assert.equal(apiDecisionAudit.rows[0]?.reason,"Synthetic reviewer API audit test","API decision and audit event must commit together");
+
+    const actorGuardRun="35353535-3535-4535-8535-353535353535";
+    await admin.query("INSERT INTO allocation_runs(id,tenant_id,payroll_pool_id,method_version,status,direct_amount,residual_amount,reviewer_id) VALUES ($1,'33333333-3333-4333-8333-333333333333','16161616-1616-4616-8616-161616161616','actor-binding-test','draft',0,100,'55555555-5555-4555-8555-555555555555')",[actorGuardRun]);
+    await admin.query("GRANT UPDATE ON allocation_runs TO profitpilot_app");
+    try {
+      await assert.rejects(()=>withTenant("33333333-3333-4333-8333-333333333333","isolation-tenant-c",client=>client.query("UPDATE allocation_runs SET status='confirmed',reviewer_id='55555555-5555-4555-8555-555555555555' WHERE id=$1",[actorGuardRun])),/authenticated signed tenant actor/i,"an analyst cannot confirm payroll even when the runtime SQL privilege is temporarily granted");
+      await assert.rejects(()=>withTenant("33333333-3333-4333-8333-333333333333","isolation-reviewer-c",client=>client.query("UPDATE allocation_runs SET status='confirmed',reviewer_id='55555555-5555-4555-8555-555555555555' WHERE id=$1",[actorGuardRun])),/authenticated signed tenant actor/i,"a reviewer cannot submit another member's reviewer identity to the payroll confirmation trigger");
+    } finally {
+      await admin.query("REVOKE UPDATE ON allocation_runs FROM profitpilot_app");
+    }
 
     const invalidTenant=await request("/v1/tenants/not-a-uuid/contracts",{subject:"ci-api-analyst"});
     assert.equal(invalidTenant.status,400);

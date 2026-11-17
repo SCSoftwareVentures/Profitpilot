@@ -2,28 +2,21 @@ import {createHash} from "node:crypto";
 // ProfitPilot prototype calculation and import engine.
 // Deterministic demo logic only. Do not use with real payroll/customer data.
 function decimalCents(value){
-  const text=typeof value==="number"?(Number.isFinite(value)?String(value):""):typeof value==="string"?value.trim():"";
-  if(text.length>128)return null;
-  const match=text.match(/^([+-]?)(\d+)(?:\.(\d*))?(?:e([+-]?\d+))?$/i);
-  if(!match)return null;
-  const exponent=Number(match[4]||0);
-  if(!Number.isInteger(exponent)||Math.abs(exponent)>100)return null;
-  const fraction=match[3]||"";
-  const digits=BigInt((match[2]+fraction).replace(/^0+(?=\d)/,""));
-  const scale=fraction.length-exponent;
-  if(Math.abs(scale)>100)return null;
-  let cents;
-  if(scale<=2)cents=digits*10n**BigInt(2-scale);
-  else{
-    const divisor=10n**BigInt(scale-2);
-    const quotient=digits/divisor;
-    const remainder=digits%divisor;
-    cents=quotient+(remainder*2n>=divisor?1n:0n);
-  }
-  if(cents>BigInt(Number.MAX_SAFE_INTEGER))return null;
-  return match[1]==="-"?-cents:cents;
+  if(typeof value!=="string"||value.length>16)return null;
+  const text=value;
+  if(!/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(text))return null;
+  const negative=text.startsWith("-");
+  const unsigned=negative?text.slice(1):text;
+  const [whole,fraction=""]=unsigned.split(".");
+  const cents=BigInt(whole)*100n+BigInt((fraction+"00").slice(0,2));
+  // Match PostgreSQL numeric(14,2): twelve integer digits and two cents digits.
+  if(cents>99999999999999n)return null;
+  return negative?-cents:cents;
 }
-const fromCents=cents=>Number(cents)/100;
+const fromCents=cents=>{
+  const negative=cents<0n,absolute=negative?-cents:cents;
+  return (negative?"-":"")+String(absolute/100n)+"."+String(absolute%100n).padStart(2,"0");
+};
 function sumCents(values){
   let total=0n;
   for(const value of values){const cents=decimalCents(value);if(cents===null)return null;total+=cents;}
@@ -38,7 +31,7 @@ function ratioCents(numerator,denominator){
   const rounded=quotient+(remainder*2n>=d?1n:0n);
   return negative?-rounded:rounded;
 }
-export const money=value=>{const cents=decimalCents(value);return cents===null?NaN:fromCents(cents);};
+export const money=value=>{const cents=decimalCents(value);return cents===null?null:fromCents(cents);};
 export function isIsoDate(value){
   if(typeof value!=="string"||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value))return false;
   const date=new Date(value+"T00:00:00.000Z");
@@ -93,30 +86,35 @@ export function parseCsv(text) {
 }
 export function validateInvoiceRows(rows){
   return rows.map((r,i)=>{
-    const amountText=String(r.amount??"").trim();
+    const amountText=typeof r.amount==="string"?r.amount:"";
     const errors=[];
     if(typeof r.invoice_id!=="string"||!r.invoice_id.trim())errors.push("Missing invoice_id");
     if(typeof r.site!=="string"||!r.site.trim())errors.push("Missing site");
     if(!isIsoDate(r.date))errors.push("Invalid date (expected a real YYYY-MM-DD date)");
-    if(!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(amountText)||/^0(?:\.0{1,2})?$/.test(amountText))errors.push("Amount must be a positive canonical decimal with at most two fractional digits");
+    const invoiceCents=decimalCents(amountText);
+    if(invoiceCents===null||invoiceCents<=0n)errors.push("Amount must be a positive canonical decimal within numeric(14,2) range");
     return {rowNumber:r.__rowNumber||i+2,record:r,errors,status:errors.length?"held":"pending_review"};
   });
 }
-export function allocatePayroll({pool,direct=[],approved=[],nonSite=0,excluded=0}){
-  const p=decimalCents(pool),d=sumCents(direct.map(x=>x.amount??0)),a=sumCents(approved.map(x=>x.amount??0)),n=decimalCents(nonSite),e=decimalCents(excluded);
+export function allocatePayroll({pool,direct,approved,nonSite,excluded}={}){
+  const directRows=Array.isArray(direct)?direct:null;
+  const approvedRows=Array.isArray(approved)?approved:null;
+  const rowAmounts=rows=>rows===null?null:sumCents(rows.map(x=>x&&typeof x==="object"&&!Array.isArray(x)?x.amount:null));
+  const p=decimalCents(pool),d=rowAmounts(directRows),a=rowAmounts(approvedRows),n=decimalCents(nonSite),e=decimalCents(excluded);
   const validInputs=[p,d,a,n,e].every(x=>x!==null);
   const residual=validInputs?p-d-a-n-e:null;
   const siteCents=Object.create(null);
-  let sitesValid=true;
-  for(const x of [...direct,...approved]){
-    const amount=decimalCents(x.amount??0);
-    if(amount===null){sitesValid=false;continue;}
-    const key=String(x.site??"");
+  let sitesValid=directRows!==null&&approvedRows!==null;
+  for(const x of [...(directRows||[]),...(approvedRows||[])]){
+    if(!x||typeof x!=="object"||Array.isArray(x)){sitesValid=false;continue;}
+    const amount=decimalCents(x.amount);
+    const key=typeof x.site==="string"?x.site.trim():"";
+    if(amount===null||amount<0n||!key){sitesValid=false;continue;}
     siteCents[key]=(siteCents[key]||0n)+amount;
   }
   const valid=validInputs&&p>=0n&&d>=0n&&a>=0n&&n>=0n&&e>=0n&&residual>=0n&&sitesValid&&Object.values(siteCents).every(v=>v>=0n);
-  const safe=v=>v===null?NaN:fromCents(v);
-  return {pool:safe(p),direct:safe(d),approvedAllocated:safe(a),nonSite:safe(n),excluded:safe(e),unallocated:safe(residual),siteTotals:Object.fromEntries(Object.entries(siteCents).map(([k,v])=>[k,fromCents(v)])),reconciles:valid&&d+a+n+e+residual===p,errors:valid?[]:["Invalid monetary input, negative bucket or allocation exceeds eligible payroll pool"]};
+  const safe=v=>v===null?null:fromCents(v);
+  return {pool:safe(p),direct:safe(d),approvedAllocated:safe(a),nonSite:safe(n),excluded:safe(e),unallocated:safe(residual),siteTotals:Object.fromEntries(Object.entries(siteCents).map(([k,v])=>[k,fromCents(v)])),reconciles:valid&&d+a+n+e+residual===p,errors:valid?[]:["Invalid monetary input, missing site identity, negative bucket or allocation exceeds eligible payroll pool"]};
 }
 export function matchInvoice(row,contract){
   const customer=typeof row.customer_id==="string"&&row.customer_id.length>0&&row.customer_id===contract.customerId;
@@ -136,28 +134,29 @@ export function matchInvoice(row,contract){
 export function summariseContracts(contracts){
   return contracts.map(c=>{
     const revenue=decimalCents(c.revenue),cost=decimalCents(c.cost);
-    if(revenue===null||cost===null)return {...c,revenue:NaN,cost:NaN,contribution:NaN,margin:null};
+    if(revenue===null||cost===null)return {...c,revenue:null,cost:null,contribution:null,margin:null};
     const contribution=revenue-cost;
     const margin=revenue?ratioCents(contribution*10000n,revenue):null;
     return {...c,revenue:fromCents(revenue),cost:fromCents(cost),contribution:fromCents(contribution),margin:margin===null?null:fromCents(margin)};
   });
 }
 export function aggregateMetrics(contracts){
+  if(!Array.isArray(contracts)||contracts.length===0||contracts.some(c=>!c||typeof c!=="object"||Array.isArray(c)))
+    return {revenue:null,cost:null,contribution:null,margin:null,contracts:[],aggregationValid:false,completeness:"unverified",errors:["At least one valid contract row is required for aggregation"]};
   const rows=summariseContracts(contracts);
-  const hasBasis=contracts.some(c=>c.currency!==undefined||c.taxBasis!==undefined||c.periodStart!==undefined||c.periodEnd!==undefined);
-  if(hasBasis){
-    const dimensions=["currency","taxBasis","periodStart","periodEnd"];
-    const inconsistent=dimensions.some(key=>{
-      const values=contracts.map(c=>c[key]);
-      return values.some(v=>v===undefined||v===null||v==="")||new Set(values).size!==1;
-    });
-    if(inconsistent)return {revenue:null,cost:null,contribution:null,margin:null,contracts:rows,complete:false,errors:["Cannot aggregate contracts across missing or mixed currency, tax basis or reporting periods"]};
-  }
+  // Reporting dimensions are mandatory even when every row omits them. Never
+  // infer that missing currency, tax basis or period values are comparable.
+  const dimensions=["currency","taxBasis","periodStart","periodEnd"];
+  const inconsistent=dimensions.some(key=>{
+    const values=contracts.map(c=>c[key]);
+    return values.some(v=>v===undefined||v===null||v==="")||new Set(values).size!==1;
+  });
+  if(inconsistent)return {revenue:null,cost:null,contribution:null,margin:null,contracts:rows,aggregationValid:false,completeness:"unverified",errors:["Cannot aggregate contracts across missing or mixed currency, tax basis or reporting periods"]};
   const revenue=sumCents(rows.map(r=>r.revenue)),cost=sumCents(rows.map(r=>r.cost));
-  if(revenue===null||cost===null)return {revenue:NaN,cost:NaN,contribution:NaN,margin:null,contracts:rows};
+  if(revenue===null||cost===null)return {revenue:null,cost:null,contribution:null,margin:null,contracts:rows,aggregationValid:false,completeness:"unverified",errors:["Cannot aggregate missing or invalid canonical monetary inputs"]};
   const contribution=revenue-cost;
   const margin=revenue?ratioCents(contribution*10000n,revenue):null;
-  return {revenue:fromCents(revenue),cost:fromCents(cost),contribution:fromCents(contribution),margin:margin===null?null:fromCents(margin),contracts:rows};
+  return {revenue:fromCents(revenue),cost:fromCents(cost),contribution:fromCents(contribution),margin:margin===null?null:fromCents(margin),contracts:rows,aggregationValid:true,completeness:"unverified",errors:[]};
 }
 
 
@@ -175,10 +174,11 @@ export function normalizePayrollRows(rows){
     const errors=[];
     if(!row||typeof row!=="object"||Array.isArray(row))return {rowNumber:index+1,status:"held",record:null,errors:["Row must be an object"]};
     const key=typeof row.source_row_key==="string"?row.source_row_key.trim():"";
-    const amountText=typeof row.amount==="string"?row.amount.trim():typeof row.amount==="number"&&Number.isFinite(row.amount)?String(row.amount):"";
+    const amountText=typeof row.amount==="string"?row.amount:"";
     const currency=typeof row.currency==="string"?row.currency.trim().toUpperCase():"";
     if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(key))errors.push("source_row_key must be an opaque stable key (1–128 safe characters)");
-    if(!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(amountText))errors.push("amount must be a non-negative decimal with at most two fractional digits");
+    const payrollCents=decimalCents(amountText);
+    if(payrollCents===null||payrollCents<0n)errors.push("amount must be a non-negative canonical decimal within numeric(14,2) range");
     if(!/^[A-Z]{3}$/.test(currency))errors.push("currency must be a three-letter ISO-style code");
     if(key&&seen.has(key))errors.push("Duplicate source_row_key within this batch");
     if(key)seen.add(key);

@@ -103,7 +103,8 @@ The sequence is dependency-led. Work packages may be parallelised only where pre
 
 | Dependency | Must precede | Why |
 |---|---|---|
-| G5 signed GO and named owners | All implementation | No authorisation otherwise |
+| Owner engineering authorisation | Repository-level implementation and synthetic/test workflows | Owner has explicitly authorised continued asset development |
+| G5 signed GO and named owners | Production deployment and real sensitive-data processing | Formal release scope, accountable owners and specialist safeguards remain required |
 | Identity/tenant baseline | Any real-data operation | Data boundary and access authority |
 | Private storage lifecycle | Original source file intake | Current metadata registration is not secure upload |
 | Decimal/source contract | Payroll, invoice and contribution arithmetic | Avoid rework and hidden conversion |
@@ -141,4 +142,4 @@ Do not promise a launch date from the current repository. Once G5 is approved:
 
 No epic is complete because code merges or CI turns green. Each requires acceptance, security/privacy controls, audit, mobile UX, failure handling, documentation and operational ownership.
 
-The full project remains gated by G0–G5 before implementation and G6 after software pilot. No production code, migration, customer data or deployment is authorised by this planning document.
+The owner has explicitly authorised continued repository-level implementation, approved product-concept development and synthetic/test-environment workflows for the purpose of preparing the entire project for sale. G5 remains a separate mandatory gate before production deployment or real sensitive-data processing; it is not a blocker to the authorised synthetic/test-only engineering work. No production deployment, real customer/employee/payroll data intake, customer pilot, payment activity or external buyer outreach is authorised by this planning document.

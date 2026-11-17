@@ -1,6 +1,6 @@
 # ProfitPilot — Six Differentiators Product Blueprint
 
-**Status:** approved for product-design exploration; not build authorisation.
+**Status:** owner-approved for staged repository implementation and synthetic/test-environment demonstration. No production, real-data or launch authorisation is implied.
 **Date:** 16 November 2026
 **Scope:** translate the six differentiators previously approved by the founder into bounded product concepts, dependencies, safety rules and validation tests. This document does not claim that any capability is implemented or customer-validated.
 
@@ -8,9 +8,9 @@
 
 ProfitPilot's first commercial hypothesis remains an evidence-led contract-economics workflow for Australian independent commercial cleaning contractors with recurring, multi-site B2B contracts. The initial analysis unit is contract × site × service period.
 
-The six differentiators strengthen the longer-term product thesis. They do not override the concierge-first strategy or G0–G5 build gate. Do not implement production SaaS features until G0–G4 and competitive preconditions pass and G5 records an explicit signed GO with named technical ownership, legal/privacy plan, delivery capacity and approved budget.
+The owner has authorised continued implementation of these six differentiators as part of preparing the complete project for sale. Build them in a staged, coherent sequence with synthetic fixtures, deterministic tests, explicit evidence states and human approval boundaries. G0–G5 remain mandatory before production deployment or real sensitive-data processing, but do not block repository-level feature engineering or synthetic demonstrations.
 
-The first release must remain narrow. Do not add a marketplace, workforce scheduling suite, payroll/award engine, accounting replacement, autonomous approval agent or payment processing to the initial wedge.
+The first demonstrable product should remain coherent around contract economics, evidence, exceptions and business commitments. Do not dilute the initial buyer story with a marketplace, full workforce scheduling suite, payroll/award engine, accounting replacement, autonomous approval agent or payment processing. Longer-term expansion should be clearly separated from the initial product scope.
 
 ## 2. Six approved differentiators
 
@@ -149,7 +149,38 @@ The first release must remain narrow. Do not add a marketplace, workforce schedu
 
 **Validation:** test retrieval accuracy, freshness, user correction, time saved during repeat work and the rate of stale or unsafe instructions surfaced. A knowledge item is not authoritative merely because it was used previously.
 
-## 3. Shared platform foundations
+## 3. Current implementation status — 17 November 2026
+
+The first repository implementation slice is the **Job Readiness Engine**:
+- Versioned commercial-cleaning template v1.0.0.
+- Deterministic evaluation of explicit satisfied, missing, conflicting, unverified and not-applicable states.
+- Typed value validation and required evidence-reference checks.
+- Required missing/conflicting/unverified checks block readiness.
+- Not-applicable requires template permission and a reason.
+- Template identity/version and a completeness-only percentage are returned.
+- Synthetic dashboard demonstration exposes no override or approval action.
+
+This is an initial deterministic engine and synthetic UI demonstration, not a persisted job workflow, production authorisation system, safety assessment, compliance certification or customer-validated feature.
+
+The **Promise Ledger** now also has an initial in-memory domain state machine and synthetic dashboard demonstration:
+- Customer promises and internal tasks are distinct record types.
+- Proposed, communicated, accepted, changed, fulfilled, missed, disputed and cancelled lifecycle states are explicit.
+- Communication records a sent-message reference only; receipt and acceptance are not inferred.
+- Customer acceptance requires a customer-contact actor type and acknowledgement evidence reference.
+- Changes append version snapshots and require re-communication/re-acceptance.
+- Fulfilment requires evidence; missed status cannot be recorded before the due timestamp.
+- Disputes/cancellations require reasons; terminal states cannot be rewritten.
+
+The Promise Ledger is not yet persisted, searchable, connected to authenticated customer identities, or integrated with notification channels. Evidence references and actor types are recorded assertions, not independent verification. The **Profit Leak Radar** now has an initial deterministic candidate engine and synthetic dashboard demonstration:
+- Compares contract amounts with explicitly approved variations and invoice totals only when all sources have complete matching currency, tax-basis and period evidence.
+- Compares payroll pool and allocation totals using exact-cent arithmetic.
+- Surfaces unmatched invoice rows and duplicate candidates separately.
+- Incomplete, malformed or mismatched source coverage remains unknown, never zero.
+- Every monetary alert is a candidate for human review; no confirmed loss, saving, fraud or recovery status is emitted.
+
+This radar is an in-memory evidence-gated candidate engine, not a persisted monitoring service, accounting adjustment workflow or verified loss detector. The remaining three differentiators are not represented as implemented merely because they are specified below.
+
+## 4. Shared platform foundations
 
 The six capabilities should share common primitives rather than become six disconnected products:
 
@@ -162,7 +193,7 @@ The six capabilities should share common primitives rather than become six disco
 7. **Privacy by design:** data minimisation, explicit access scopes, purpose limitation, retention, export and deletion are part of each workflow.
 8. **Accessible UX:** target WCAG 2.2 AA; status must not rely on colour alone.
 
-## 4. Sequencing and dependencies
+## 5. Sequencing and dependencies
 
 This is a proposed sequence for validation and later authorised design, not a commitment to build all six at once.
 
@@ -177,7 +208,7 @@ This is a proposed sequence for validation and later authorised design, not a co
 
 Do not force these capabilities into the initial contract-economics release. Their order may change only when customer evidence demonstrates a stronger priority and the change is recorded.
 
-## 5. Product acceptance framework
+## 6. Product acceptance framework
 
 Before any feature advances beyond concept:
 - named user and material problem are evidenced;
@@ -192,7 +223,7 @@ Before any feature advances beyond concept:
 
 For implementation, definition of done includes code, tests, migrations/rollback, security/privacy controls, audit events, accessible mobile UX, error states, documentation and operational support. A specification is not implementation evidence.
 
-## 6. Decisions preserved
+## 7. Decisions preserved
 
 - The six differentiators are approved for inclusion in the long-term ProfitPilot product blueprint.
 - Permanent, searchable job and commitment records are a core requirement.

@@ -1,7 +1,8 @@
 import pg from "pg";
 import {createHmac,randomBytes} from "node:crypto";
+import {databaseSslConfig} from "./db-config.js";
 const {Pool}=pg;
-const ssl=process.env.DATABASE_SSL==="true"?{rejectUnauthorized:true}:false;
+const ssl=databaseSslConfig();
 export const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl,max:10,idleTimeoutMillis:30000,connectionTimeoutMillis:5000});
 export async function withTenant(tenantId,subject,fn){
  if(typeof subject!=="string"||!subject)throw new Error("Verified identity subject is required for tenant context");

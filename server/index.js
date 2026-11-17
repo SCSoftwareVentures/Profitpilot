@@ -98,9 +98,10 @@ app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requireRol
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const user=await client.query("SELECT id FROM users WHERE auth_subject=$1",[req.identity.subject]);
   if(!user.rowCount)throw Object.assign(new Error("User identity is not provisioned in this tenant database"),{status:403});
+  await client.query("SELECT set_config('app.audit_reason',$1,true)",[reason.trim()]);
   const updated=await client.query("UPDATE match_reviews SET decision=$1,reviewer_id=$2,reviewed_at=now() WHERE id=$3 AND tenant_id=$4 AND decision IN ('candidate','held') RETURNING id,decision,reviewed_at",[decision,user.rows[0].id,req.params.matchId,req.membership.tenantId]);
   if(!updated.rowCount)return null;
-  await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'invoice_match_decision','match_review',$3,$4,$5)",[req.membership.tenantId,user.rows[0].id,req.params.matchId,reason.trim(),JSON.stringify({decision})]);
+  // Migration 014 writes the audit event in the same transaction as the decision.
   return updated.rows[0];
  });
  if(!result)return res.status(404).json({error:"Review candidate not found or already finalised"});

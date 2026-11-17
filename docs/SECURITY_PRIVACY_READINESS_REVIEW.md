@@ -192,3 +192,66 @@ A static review of the current combined candidate identified two production secu
 2. **Reviewer authority is enforced at the HTTP layer for invoice-match decisions.** The `profitpilot_app` role has `UPDATE` on `match_reviews`, while the current database RLS policy is tenant-scoped and does not independently prove that the signed actor is a reviewer/admin/owner. The Express route checks the membership role, but a compromised application process or SQL injection could use the shared database role to bypass that route-level check. Before production, enforce actor-role authority in a database policy or narrowly scoped stored procedure tied to the verified signed tenant/subject context, and add direct-SQL analyst-denial tests. The payroll confirmation trigger similarly validates the submitted `reviewer_id`'s membership role but does not independently bind that reviewer to the signed actor; this must be addressed before any runtime write grant or payroll confirmation API is enabled.
 
 These are static findings, not evidence of an observed exploit. The repository remains a prototype and must not receive real customer, employee, payroll or invoice data.
+
+ 
+## Remediation verification follow-up — hardening branch, 17 November 2026
+
+The specific code findings in the preceding section have been remediated on the draft hardening branch:
+
+1. `server/db-config.js` now fails closed when `NODE_ENV=production` and `DATABASE_SSL` is not exactly `true`. TLS configuration always sets `rejectUnauthorized: true` and supports a supplied `DATABASE_SSL_CA`. Unit tests cover production rejection, verified TLS configuration and explicit local-development plaintext.
+2. Migration 013 adds a PostgreSQL restrictive UPDATE policy on `match_reviews`, requiring the role resolved from the verified signed tenant context to be owner/admin/reviewer. Direct-SQL integration tests prove analyst update returns no row while a reviewer can update.
+3. Migration 013 adds a payroll confirmation trigger that requires the runtime session's signed subject to be the same user as `NEW.reviewer_id`, with reviewer/admin/owner authority. Integration tests prove analyst confirmation and reviewer-ID substitution are rejected even when the runtime update privilege is temporarily granted for the test. The test revokes that temporary privilege in a `finally` block.
+4. The CI health smoke test now runs the restricted container in development mode against the local plaintext PostgreSQL service. It is explicitly not evidence of a production TLS connection; production TLS fail-closed behaviour is covered by configuration unit tests. A real managed PostgreSQL TLS handshake with the approved CA remains a deployment acceptance test.
+
+These changes reduce the identified application/database privilege gap but do not constitute independent penetration testing. Distributed rate limiting, production identity/MFA, private file storage/quarantine/malware scanning, retention/deletion verification, managed secret/KMS custody, DB TLS handshake against the chosen provider, backup/restore and incident response remain open release blockers. Payroll ingestion remains disabled.
+
+ 
+## Exact-head production TLS and actor-authority verification — 17 November 2026
+
+The earlier development-mode/plaintext smoke-test note above is superseded by the latest hardening workflow:
+
+- CI generated an ephemeral PostgreSQL server certificate with a SAN for `127.0.0.1`, configured the PostgreSQL 16 service for TLS, and restarted it with SSL enabled.
+- A Node/PostgreSQL integration test successfully connected using the configured trusted CA and confirmed `pg_stat_ssl.ssl=true`.
+- A second integration test rejected an untrusted CA.
+- The API container then ran with `NODE_ENV=production`, `DATABASE_SSL=true`, `rejectUnauthorized=true` and the explicit test CA; its database-backed health endpoint passed.
+- The same CI run also applied migration 013, passed the tenant/FK audit, and passed direct-SQL role and signed payroll-actor tests.
+
+Verified CI run **#43982827602** passed both Node.js 22 and PostgreSQL 16 jobs on exact implementation head `ead10a236e33684c25c5c7613d1c5a2fbeb883fd`. This proves the prototype can enforce and establish a verified TLS connection in the ephemeral CI environment. It does not verify the selected managed production database, production certificate rotation, private networking or production secret custody.
+
+
+## Database-enforced invoice decision integrity — 17 November 2026
+
+Migration 014 adds a database-side decision guard and same-transaction audit trigger for invoice-match reviews. It requires a valid signed tenant context, binds the reviewer ID to the signed active user with reviewer/admin/owner membership, rejects mutation of candidate evidence and identity fields, permits only candidate/held to confirmed/rejected/held transitions, prevents changes after a final decision, and requires a bounded audit reason. The AFTER UPDATE trigger records the old/new decision and reason in `audit_events` in the same transaction.
+
+The API sets the reason transaction-locally and no longer inserts a duplicate audit event. PostgreSQL integration tests cover successful API decision/audit creation, direct-SQL reviewer impersonation denial, evidence mutation denial, final-decision immutability and missing-reason denial. CI applies migration 014 after migration 013. **Exact-head CI for migration 014 is pending until the latest branch-push workflow completes; the earlier CI pass does not verify this migration.**
+
+This is a database-enforced prototype control, not independent security assurance. Payroll ingestion remains disabled, and the outstanding production controls and release gates above remain mandatory.
+
+ 
+## Migration 014 exact-head CI result — 17 November 2026
+
+GitHub Actions run **#667** passed on exact PR head `6b98299006d9aa620f494ec4fe52d095e82947c4`. The PostgreSQL 16 job applied migration 014, passed authenticated API integration tests covering direct-SQL analyst denial, reviewer authorization, reviewer identity binding, evidence immutability, final-decision immutability and atomic audit creation, and completed the verified TLS trust/rejection and production-mode API health checks. Node.js 22 passed 56 tests with 0 failures (3 database-dependent tests skipped in the Node-only job and covered in the PostgreSQL job).
+
+This verifies the migration and integration behaviour in ephemeral CI only. It does not replace independent penetration testing or validate production identity, hosting, secrets, storage, backups, operational response or legal/privacy controls.
+
+ 
+### Migration 014 exact-head verification — 17 November 2026
+
+The earlier pending statement is superseded. CI run **#43983962328** passed on exact hardening head `6b98299006d9aa620f494ec4fe52d095e82947c4`. Both Node.js 22 and PostgreSQL 16 jobs passed. PostgreSQL applied migrations through 014 and the authenticated API integration suite passed:
+- direct SQL analyst denial and reviewer permission;
+- reviewer identity must match the signed active user;
+- reviewer cannot attribute a decision to another tenant member;
+- candidate evidence/identity cannot be rewritten;
+- final decisions cannot be changed;
+- audit reason is mandatory;
+- direct SQL and API decisions generate an audit event in the same transaction;
+- payroll confirmation reviewer must match the signed actor.
+
+The same run passed the 20-table tenant/FK catalogue audit, restricted-role RLS, trusted-CA TLS connection, untrusted-CA rejection and production-mode API health check. This is automated prototype evidence, not independent penetration testing or production assurance.
+
+
+## Latest hardening PR-head verification — 17 November 2026
+
+GitHub Actions run **#43984181421 (run #684)** passed on exact current PR head `5988ba408eae176cf5c69def1a9b5f4106e954c1`. Both Node.js 22 and PostgreSQL 16 jobs succeeded. PostgreSQL applied migrations through 014, passed the 20-table tenant/FK audit, restricted-role RLS and authenticated API integration (including signed reviewer identity, evidence/final-decision immutability and same-transaction audit tests), built the production image, accepted the trusted CA, rejected an untrusted CA and passed production-mode database health. Node.js passed 56 tests with 0 failures and 3 DB-dependent skips, which are exercised in the PostgreSQL job.
+
+This is automated CI evidence only. It does not satisfy full financial acceptance, independent security/accounting/legal review or the customer and production release gates.

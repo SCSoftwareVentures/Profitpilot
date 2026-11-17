@@ -204,3 +204,22 @@ A further static review of `src/engine.js` and the import-validation route ident
 - The prototype helper `fromCents` converts BigInt cents to JavaScript Number, and `money` returns that Number. Its safe-integer-cent bound does not guarantee that every cent increment remains representable in dollar units at large magnitudes. Keep this helper explicitly demo-only; authoritative API, export and persistence paths must retain canonical decimal strings end to end.
 
 These findings do not invalidate the separate API calculation route's current BigInt-cent subtraction and decimal-string output. They do mean the broader import/engine boundary is not yet proven exact. The complete deterministic/property acceptance suite remains NOT RUN.
+
+ 
+## 11. Remediation status — hardening branch, 17 November 2026
+
+The follow-up implementation branch `hardening/financial-security-followup` has addressed the specific source-boundary and database-authority findings above:
+
+- The pure financial engine now accepts only decimal strings in canonical non-exponent syntax and enforces the PostgreSQL `numeric(14,2)` magnitude/scale boundary. JSON numeric amounts are held rather than stringified after JavaScript has potentially rounded them.
+- The payroll normalizer accepts only string amounts; employee names, bank details and arbitrary source columns remain excluded from its canonical output.
+- BigInt cents are formatted directly into exact decimal strings. The demo engine no longer converts monetary outputs back to JavaScript Number.
+- Invoice and payroll import validators use the same bounded exact parser, including upper-range checks.
+- Production DB configuration now fails closed unless `DATABASE_SSL=true`; TLS uses certificate verification and can accept an explicit PEM CA through `DATABASE_SSL_CA`.
+- Migration 013 adds a restrictive RLS update policy for match-review decisions based on the signed tenant actor's current database role. It also binds any future payroll confirmation by the runtime role to the same signed actor's user ID and reviewer/admin/owner role.
+- PostgreSQL integration tests directly exercise analyst denial, reviewer permission, payroll actor mismatch denial and migration application. Runtime write grants to payroll evidence/allocation tables remain withheld.
+
+A deterministic property suite now runs 500 seeded payroll reconciliation cases (seed `0x5eed1234`) plus aggregation-order, null-preservation, sign-preservation and currency/tax-basis invariants. The property suite is useful regression evidence, not a substitute for the full DEC/TAX/PAY/PAYLED/INV/CON/VAR/IMP suite.
+
+### Still open
+
+The remaining complete acceptance plan still requires explicit locale parsing policy, GST/FX conversion policy and approved rate provenance, source-row allocation/restatement and control-total workflow coverage, invoice denominator/credit/duplicate policy, variation lifecycle, complete source manifests, and full import/export formula-injection/timezone controls. The current API still has no full payroll import/review workflow and payroll ingestion remains disabled. Independent expected-value review and qualified finance/accounting approval remain outstanding.
