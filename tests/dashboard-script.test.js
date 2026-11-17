@@ -46,6 +46,11 @@ test("dashboard exposes the synthetic job readiness workflow and its human-autho
   assert.match(html,/id="promises"/);
   assert.match(html,/renderPromiseLedger/);
   assert.match(html,/No notifications or external messages are sent/);
+  assert.match(html,/data-view="leaks"/);
+  assert.match(html,/id="leaks"/);
+  assert.match(html,/detectProfitLeaks/);
+  assert.match(html,/No accounting entries, refunds, collections or automated decisions are made/);
+  assert.match(html,/renderProfitLeaks/);
   assert.match(html,/No override or approval action is available in this demonstration/);
   assert.match(html,/escapeHtml\(x\.label\)/);
   assert.match(html,/escapeHtml\(x\.reason\|\|x\.issue\|\|x\.evidenceRef/);
