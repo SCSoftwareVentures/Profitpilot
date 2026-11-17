@@ -81,3 +81,12 @@ test("dashboard exposes SwitchProof source profiling and migration safeguards",a
   assert.match(html,/does not copy, transform, upload or migrate data/);
   assert.match(html,/control total reconciles/i);
 });
+
+test("dashboard exposes permission-scoped Field Knowledge with review and expiry states",async()=>{
+  const html=await readFile(htmlPath,"utf8");
+  assert.match(html,/data-view="knowledge"/);
+  assert.match(html,/id="knowledge"/);
+  assert.match(html,/createKnowledgeEntry/);
+  assert.match(html,/canReadKnowledgeEntry/);
+  assert.match(html,/production access control, retention, consent, audit and secure storage must be enforced server-side/);
+});
