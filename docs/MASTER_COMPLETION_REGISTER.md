@@ -364,3 +364,10 @@ Migration 014 extends the previous reviewer-role controls:
 - the API now supplies the transaction-local audit reason rather than independently writing a second audit event.
 
 PostgreSQL integration coverage checks direct-SQL audit creation, final-decision immutability, evidence-tampering denial and missing-reason denial. Migration 014 is included in CI after migrations 012 and 013. Exact-head CI for this newest migration and the test additions must pass before this control is considered verified. The earlier passing CI run predates migration 014 and must not be cited as evidence for it.
+
+ 
+### 23. Migration 014 exact-head verification — 17 November 2026
+
+GitHub Actions run **#667** passed on exact PR head `6b98299006d9aa620f494ec4fe52d095e82947c4`. The Node.js 22 job passed (59 tests, 56 passed, 0 failed, 3 skipped; database-dependent API/TLS tests are exercised in the PostgreSQL job). PostgreSQL 16 passed migration application through 014, tenant/FK catalogue audit, restricted-role RLS, authenticated API integration including the distinct invoice-line fixture and database-enforced reviewer/audit tests, production image build, trusted-CA TLS connection, untrusted-CA rejection and production-mode API health against verified TLS. This supersedes the earlier "exact-head CI pending" note for migration 014.
+
+The PR remains draft and unmerged. This CI pass is software verification only; it does not close the independent security, financial, privacy/legal, operational, customer-validation or signed release gates.
