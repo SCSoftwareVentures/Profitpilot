@@ -6,6 +6,16 @@ const databaseSslEnabled=process.env.DATABASE_SSL==="true";
 if(production&&!databaseSslEnabled){
  throw new Error("DATABASE_SSL=true is required in production; refusing an unencrypted PostgreSQL connection");
 }
+// node-postgres may replace explicit SSL options with connection-string SSL parameters.
+if(databaseSslEnabled){
+ const raw=process.env.DATABASE_URL;
+ let url;
+ try{url=new URL(raw);}catch{throw new Error("A valid PostgreSQL connection URL is required for TLS");}
+ if(!["postgres:","postgresql:"].includes(url.protocol)||!url.hostname||url.hash)throw new Error("A valid PostgreSQL connection URL is required for TLS");
+ // Allow no query parameters: URL options can override host, SSL and connection settings.
+ if(url.search)throw new Error("Database TLS connection URL must not contain query parameters");
+ if(process.env.NODE_TLS_REJECT_UNAUTHORIZED==="0")throw new Error("Global TLS certificate verification must not be disabled");
+}
 const ssl=databaseSslEnabled?{rejectUnauthorized:true}:false;
 export const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl,max:10,idleTimeoutMillis:30000,connectionTimeoutMillis:5000});
 export async function withTenant(tenantId,subject,fn,{repeatableRead=false}={}){

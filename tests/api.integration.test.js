@@ -211,6 +211,13 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const duplicate=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-analyst",method:"POST",body:importBody});
     assert.equal(duplicate.status,200);
     assert.equal((await duplicate.json()).idempotent,true);
+    for(const patch of [{sourceType:"supplier_invoice"},{periodEnd:"2026-02-27"},{permissionReference:"Different permission"},{fileName:"different.csv"}]){
+     const changed=await request("/v1/tenants/"+tenantA+"/imports",{subject:"ci-api-analyst",method:"POST",body:{...importBody,...patch}});
+     assert.equal(changed.status,409);
+    }
+    const otherCreator=await request("/v1/tenants/"+tenantA+"/imports",{subject:"ci-api-owner",method:"POST",body:importBody});
+    assert.equal(otherCreator.status,409);
+    assert.equal(JSON.stringify(await otherCreator.json()).includes(createdBody.batch.id),false);
 
     // Payroll validation: candidate and held decisions are persisted without financial acceptance.
     const testPayroll=[
@@ -219,9 +226,15 @@ test("authenticated API enforces tenant membership, role permissions and import 
       {source_ref:"CI-PAY-3",cost_component:"gross_wages",amount:"50.00",currency:"AUD",period_start:"2026-02-15",period_end:"2026-03-01"}
     ];
     const payrollId=createdBody.batch.id;
+    const unauthorisedUpload=await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/rows",{subject:"ci-api-owner",method:"POST",body:{rows:testPayroll}});
+    assert.equal(unauthorisedUpload.status,403,"even an owner must not impersonate the source importer");
     const upload=await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/rows",{subject:"ci-api-analyst",method:"POST",body:{rows:testPayroll}});
     assert.equal(upload.status,201);
     assert.equal((await upload.json()).inserted,3);
+    const replay=await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/rows",{subject:"ci-api-analyst",method:"POST",body:{rows:testPayroll}});
+    assert.equal(replay.status,201);assert.equal((await replay.json()).duplicates,3);
+    const altered=await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/rows",{subject:"ci-api-analyst",method:"POST",body:{rows:[{...testPayroll[0],amount:"999.00"},...testPayroll.slice(1)]}});
+    assert.equal(altered.status,409);
     const validatePay=await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/validate",{subject:"ci-api-analyst",method:"POST",body:{}});
     assert.equal(validatePay.status,200);
     const outcome=await validatePay.json();

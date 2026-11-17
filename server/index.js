@@ -232,26 +232,32 @@ app.get("/v1/tenants/:tenantId/contracts",membership,requirePermission("contract
 app.post("/v1/tenants/:tenantId/imports",membership,requirePermission("imports.create"),async(req,res,next)=>{
  try{
   const {sourceType,fileName,sha256,permissionReference,periodStart,periodEnd}=req.body||{};
-  if(!["payroll","customer_invoice","supplier_invoice"].includes(sourceType)||typeof fileName!=="string"||fileName.length>255||!/^[a-f0-9]{64}$/i.test(sha256||"")||typeof permissionReference!=="string"||!permissionReference.trim()||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodEnd<periodStart)return res.status(400).json({error:"Invalid import metadata"});
+  if(!["payroll","customer_invoice","supplier_invoice"].includes(sourceType)||typeof fileName!=="string"||!fileName.trim()||fileName.length>255||/[\x00-\x1f\x7f]/.test(fileName)||typeof sha256!=="string"||!/^[a-f0-9]{64}$/i.test(sha256)||typeof permissionReference!=="string"||!permissionReference.trim()||permissionReference.length>1000||/[\x00-\x1f\x7f]/.test(permissionReference)||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodEnd<periodStart)return res.status(400).json({error:"Invalid import metadata"});
   const id=randomUUID();
   const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>c.query("INSERT INTO import_batches(id,tenant_id,source_type,source_period_start,source_period_end,permission_ref,status,file_sha256,file_name,created_by) SELECT $1,$2,$3,$4,$5,$6,'uploaded',$7,$8,u.id FROM users u WHERE u.auth_subject=$9 ON CONFLICT(tenant_id,file_sha256) DO NOTHING RETURNING id,status",[id,req.membership.tenantId,sourceType,periodStart,periodEnd,permissionReference.trim(),sha256.toLowerCase(),fileName,req.identity.subject]));
-  if(!result.rowCount){const old=await withTenant(req.membership.tenantId,req.identity.subject,async c=>c.query("SELECT id,status FROM import_batches WHERE tenant_id=$1 AND file_sha256=$2",[req.membership.tenantId,sha256.toLowerCase()]));return res.status(200).json({batch:old.rows[0],idempotent:true});}
+  if(!result.rowCount){
+   const old=await withTenant(req.membership.tenantId,req.identity.subject,async c=>c.query("SELECT id,status,created_by,source_type,file_name,permission_ref,source_period_start::text AS start,source_period_end::text AS end FROM import_batches WHERE tenant_id=$1 AND file_sha256=$2",[req.membership.tenantId,sha256.toLowerCase()]));
+   const b=old.rows[0];
+   if(!b||b.created_by!==req.membership.userId||b.source_type!==sourceType||b.file_name!==fileName||b.permission_ref!==permissionReference.trim()||b.start!==periodStart||b.end!==periodEnd)return res.status(409).json({error:"Source checksum already registered with different ownership or metadata"});
+   return res.status(200).json({batch:{id:b.id,status:b.status},idempotent:true});
+  }
   res.status(201).json({batch:result.rows[0]});
  }catch(e){next(e);}
 });
 app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requirePermission("imports.rows.write"),async(req,res,next)=>{try{
  const rows=req.body?.rows;
+ if(!privacyRequestIdValid(req.params.batchId))return res.status(400).json({error:"Invalid batch ID"});
  if(!Array.isArray(rows)||rows.length<1||rows.length>200||rows.some(x=>!x||typeof x!=="object"||Array.isArray(x)))return res.status(400).json({error:"Provide 1–200 row objects"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const batch=await client.query("SELECT id,status,source_type,created_by FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.batchId,req.membership.tenantId]);
   if(!batch.rowCount)return {status:404,error:"Import batch not found"};
   if(!["uploaded","review","validating"].includes(batch.rows[0].status))return {status:409,error:"Import batch is not open for row ingestion"};
-  // Invoice ingest is a single complete batch; only exact JSONB replays are idempotent.
-  if(["customer_invoice","supplier_invoice"].includes(batch.rows[0].source_type)){
-   if(batch.rows[0].created_by!==req.membership.userId)return {status:403,error:"Only the invoice batch importer may submit its source rows"};
+  // All financial batches are complete single submissions; the declared importer must upload them.
+  {
+   if(batch.rows[0].created_by!==req.membership.userId)return {status:403,error:"Only the original batch importer may submit its source rows"};
    const prior=(await client.query("SELECT count(*)::int AS n, COALESCE(jsonb_agg(payload ORDER BY row_number)=$3::jsonb,false) AS identical FROM raw_import_rows WHERE batch_id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId,JSON.stringify(rows)])).rows[0];
    if(prior.n>0){
-    if(!prior.identical)return {status:409,error:"Invoice batch already contains different rows; create a new batch and reconcile independently"};
+    if(!prior.identical)return {status:409,error:"Source batch already contains different rows; create a new batch and reconcile independently"};
     return {status:201,inserted:0,received:rows.length,duplicates:rows.length};
    }
   }
@@ -303,6 +309,7 @@ app.get("/v1/tenants/:tenantId/imports/:batchId/review",membership,requirePermis
 });
 
 app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requirePermission("imports.validate"),async(req,res,next)=>{try{
+ if(!privacyRequestIdValid(req.params.batchId))return res.status(400).json({error:"Invalid batch ID"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const batch=await client.query("SELECT id,status,source_type,source_period_start::text AS source_period_start,source_period_end::text AS source_period_end FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.batchId,req.membership.tenantId]);
   if(!batch.rowCount)return {status:404,error:"Import batch not found"};

@@ -97,10 +97,14 @@ export function requirePermission(permission){
       ) THEN true
       ELSE EXISTS (
        SELECT 1 FROM role_permissions rp
-       WHERE rp.role=$4 AND rp.permission_key=$3
+       WHERE rp.role=tm.role AND rp.permission_key=$3
       )
-     END AS allowed`,
-    [req.membership.tenantId,req.membership.userId,permission,req.membership.role]
+     END AS allowed
+     FROM tenant_memberships tm JOIN users u ON u.id=tm.user_id
+      JOIN tenants t ON t.id=tm.tenant_id
+     WHERE tm.tenant_id=$1 AND tm.user_id=$2 AND tm.status='active'
+       AND u.status='active' AND u.auth_subject=$4 AND t.status='active'`,
+    [req.membership.tenantId,req.membership.userId,permission,req.identity.subject]
    ));
    if(!result.rows[0]?.allowed)return res.status(403).json({error:"Insufficient tenant permission"});
    return next();
