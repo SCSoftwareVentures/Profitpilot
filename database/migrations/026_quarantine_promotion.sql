@@ -127,16 +127,17 @@ CREATE FUNCTION private.finish_quarantine_promotion(p_tenant uuid,p_batch uuid,p
 RETURNS integer LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $fn$
 DECLARE p private.quarantine_promotions%ROWTYPE; q private.quarantined_files%ROWTYPE; b public.import_batches%ROWTYPE; manifest private.quarantine_manifests%ROWTYPE;
 BEGIN
- -- Match lease first, then lock the batch before the file row, consistent with
- -- legal holds and disposal. Scanner has no general write privilege.
+ -- Global lock order: batch, file, promotion. Expiry follows the same order.
+ -- Scanner has no general write privilege.
+ SELECT * INTO b FROM public.import_batches WHERE tenant_id=p_tenant AND id=p_batch FOR UPDATE;
+ IF NOT FOUND THEN RETURN -1; END IF;
+ SELECT * INTO q FROM private.quarantined_files WHERE tenant_id=p_tenant AND batch_id=p_batch FOR UPDATE;
  SELECT * INTO p FROM private.quarantine_promotions WHERE tenant_id=p_tenant AND batch_id=p_batch AND state='processing'
  AND lease_id=p_lease AND lease_until>=clock_timestamp() FOR UPDATE;
  IF NOT FOUND THEN RETURN -1; END IF;
- SELECT * INTO b FROM public.import_batches WHERE tenant_id=p_tenant AND id=p_batch FOR UPDATE;
- SELECT * INTO q FROM private.quarantined_files WHERE tenant_id=p_tenant AND batch_id=p_batch FOR UPDATE;
  SELECT * INTO manifest FROM private.quarantine_manifests WHERE tenant_id=p_tenant AND batch_id=p_batch;
  IF p_rows IS NULL OR NOT private.quarantine_rows_valid(p_rows)
- OR private.quarantine_rows_digest(p_rows) IS DISTINCT FROM manifest.rows_hash OR jsonb_array_length(p_rows) IS DISTINCT FROM manifest.row_count
+ OR private.quarantine_rows_digest(p_rows) IS DISTINCT FROM manifest.rows_hash
  OR q.scan_state IS DISTINCT FROM 'clean' OR q.content_state IS DISTINCT FROM 'validated' OR q.ciphertext IS NULL
  OR q.created_at<=clock_timestamp()-interval '24 hours' OR b.status IS DISTINCT FROM 'registered'
  OR b.source_type NOT IN ('customer_invoice','supplier_invoice')
