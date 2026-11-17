@@ -13,16 +13,19 @@ import {registerContributionRoutes} from "./contribution.js";
 import {reconcileSharedOverhead} from "../src/shared-overhead.js";
 import {registerInvoiceRoutes} from "./invoices.js";
 import {registerSourceReconciliationRoutes} from "./source-reconciliation.js";
+import {importPayloadAllowed} from "../src/import-privacy.js";
 
 const app=express();
 app.disable("x-powered-by");
 app.use(helmet());
+// Apply even to parser errors, authentication failures and preflight responses.
+app.use((req,res,next)=>{res.set("Cache-Control","no-store");next();});
 app.use(cors({origin:(process.env.CORS_ORIGIN||"").split(",").map(x=>x.trim()).filter(Boolean),credentials:false,methods:["GET","POST","DELETE"]}));
-app.use(express.json({limit:"100kb"}));
 // Only the dedicated synthetic PostgreSQL integration harness gets an expanded test window.
 // Production, CI container smoke tests, and non-integration environments retain 100/min.
 const globalRpmLimit=(process.env.NODE_ENV==="test"&&Boolean(process.env.TEST_ADMIN_DATABASE_URL))?500:100;
 app.use(rateLimit({windowMs:60_000,limit:globalRpmLimit,standardHeaders:true,legacyHeaders:false}));
+app.use(express.json({limit:"100kb",inflate:false}));
 app.get("/health",async(req,res)=>{try{await health();res.json({status:"ok",database:"connected"});}catch{res.status(503).json({status:"unavailable"});}});
 // Opt-in synthetic workspace only; never served in production.
 if(process.env.NODE_ENV!=="production"&&process.env.ENABLE_SYNTHETIC_PAYROLL_UI==="true"){
@@ -255,6 +258,7 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requirePermiss
   // All financial batches are complete single submissions; the declared importer must upload them.
   {
    if(batch.rows[0].created_by!==req.membership.userId)return {status:403,error:"Only the original batch importer may submit its source rows"};
+   if(!importPayloadAllowed(batch.rows[0].source_type,rows))return {status:422,error:"Source rows contain unsupported fields, nested values or excessive lengths; remove unnecessary personal data before submitting"};
    const prior=(await client.query("SELECT count(*)::int AS n, COALESCE(jsonb_agg(payload ORDER BY row_number)=$3::jsonb,false) AS identical FROM raw_import_rows WHERE batch_id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId,JSON.stringify(rows)])).rows[0];
    if(prior.n>0){
     if(!prior.identical)return {status:409,error:"Source batch already contains different rows; create a new batch and reconcile independently"};

@@ -252,7 +252,7 @@ paths:
       - $ref: '#/components/parameters/TenantId'
     post:
       summary: Create an import batch from an authorised source file
-      description: Server must verify membership, permission basis, file checksum, limits and idempotency.
+      description: Source metadata and checksum are declared, not independently verified. Only the original importer with identical metadata can recover the existing batch.
       requestBody:
         required: true
         content:
@@ -278,12 +278,14 @@ paths:
       - $ref: '#/components/parameters/BatchId'
     post:
       summary: Persist parsed invoice or payroll row objects for a source batch
-      description: Accepts 1–200 JSON row objects per request. Client-side parsing only; raw file upload/storage is not implemented.
+      description: One complete submission of 1–200 minimised financial row objects by the original importer. Only exact JSONB replay is idempotent. Unknown fields, nested values and excessive lengths are rejected. No raw binary file upload.
       responses:
-        "201": { description: Rows persisted; duplicates are idempotently ignored }
+        "201": { description: Rows persisted; exact identical replay is idempotent }
         "400": { description: Invalid row payload }
         "403": { description: Not authorised }
         "404": { description: Batch not found }
+        "409": { description: Conflicting replay or closed batch }
+        "422": { description: Unsupported or excessive source fields }
   /tenants/{tenantId}/imports/{batchId}/review:
     parameters:
       - $ref: '#/components/parameters/TenantId'

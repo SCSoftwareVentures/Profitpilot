@@ -228,6 +228,15 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const payrollId=createdBody.batch.id;
     const unauthorisedUpload=await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/rows",{subject:"ci-api-owner",method:"POST",body:{rows:testPayroll}});
     assert.equal(unauthorisedUpload.status,403,"even an owner must not impersonate the source importer");
+    for(const fields of [{employee_name:"SYNTHETIC-PRIVATE-NAME"},{bank_account:"SYNTHETIC-PRIVATE-BANK"},{source_ref:{private:"SYNTHETIC-NESTED"}},{source_ref:"x".repeat(121)}]){
+     const invalid=await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/rows",{subject:"ci-api-analyst",method:"POST",body:{rows:[{...testPayroll[0],...fields}]}});
+     assert.equal(invalid.status,422);
+     assert.equal(invalid.headers.get("cache-control"),"no-store");
+     assert.equal(JSON.stringify(await invalid.json()).includes("SYNTHETIC-PRIVATE"),false);
+    }
+    assert.equal((await admin.query("SELECT count(*)::int AS n FROM raw_import_rows WHERE batch_id=$1",[payrollId])).rows[0].n,0);
+    const malformed=await fetch(base+"/v1/tenants/"+tenantA+"/imports/"+payrollId+"/rows",{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+await token("ci-api-analyst")},body:"{"});
+    assert.equal(malformed.status,400);assert.equal(malformed.headers.get("cache-control"),"no-store");
     const upload=await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/rows",{subject:"ci-api-analyst",method:"POST",body:{rows:testPayroll}});
     assert.equal(upload.status,201);
     assert.equal((await upload.json()).inserted,3);

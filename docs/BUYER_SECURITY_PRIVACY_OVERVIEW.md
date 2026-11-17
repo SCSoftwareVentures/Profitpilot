@@ -41,7 +41,7 @@ The most important recent improvement is database-enforced privacy-request subje
 - Authorised privacy administrators can review requests, verify identity, place/release legal holds, reject requests with a reason, and withdraw eligible requests through a constrained function.
 - Database policies enforce subject-level read/insert/update boundaries.
 - The API refuses a false “fulfilled” status while actual fulfilment operations do not exist; the HTTP 409 behaviour is covered by CI run #1058.
-- There is no implemented automated export, correction, restriction or deletion executor, and no verified backup-expiry/deletion propagation process.
+- Restricted account/activity export, controlled redaction, local account closure and narrow retention executors are implemented; full correction, restriction and subject-level deletion remain outstanding. Privacy-aware backup restoration is tested in synthetic PostgreSQL.
 
 ## 2. Architecture overview
 
@@ -75,7 +75,7 @@ No approved retention schedule or complete lifecycle implementation currently ex
 
 ## 4. Verification evidence
 
-The latest confirmed passing CI run for the current buyer-pack commit is [run #1058](https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44004207499). It completed successfully and included:
+The historical buyer-pack milestone is [run #1058](https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44004207499). It completed successfully and included:
 - Node.js 22 syntax checks and unit tests;
 - PostgreSQL schema and migration execution;
 - tenant RLS verification under the restricted runtime role;
@@ -96,12 +96,12 @@ CI is not a penetration test. It does not establish production security, exhaust
 3. Step-up middleware checks token claims; genuine MFA/passkey enforcement and recovery depend on an unconfigured identity provider.
 4. Production signing-key custody, rotation, recovery and operational access controls are not established.
 5. No secure binary upload, private object storage, malware scanning or file retention/deletion pipeline is implemented.
-6. Privacy requests are tracked but access exports, correction, restriction and deletion are not executed automatically.
+6. Restricted export and narrow deletion/closure workflows exist. General correction, processing restriction and comprehensive subject-level deletion remain outstanding.
 7. No complete data inventory, approved retention schedule, privacy impact assessment, customer privacy notice or processor/cross-border register is established.
-8. No backup restore test, incident-response exercise, production monitoring or service-level objective evidence is established.
+8. Synthetic encrypted database backup/restore and privacy checkpoint checks are CI-tested; no production backup service, incident exercise, monitoring or service-level objective is established.
 9. Dependencies are declared with semver ranges; a committed lockfile and complete dependency/supply-chain assurance are still required.
 10. No independent penetration test, remediation retest or security certification has been performed.
-11. The browser demo uses synthetic data and is not connected to the API.
+11. A separate static demo and an explicitly opt-in same-origin synthetic financial workspace exist. Neither is a production customer interface.
 12. The product remains a partial API/database scaffold and validation specification, not a production application.
 13. Production database TLS has a fail-closed configuration guard, but an end-to-end TLS handshake with a deployed PostgreSQL service and its actual certificate chain has not been performed.
 
@@ -128,3 +128,6 @@ A buyer should independently review the code, repeat the test suite, commission 
 **Privacy fulfilment:** incomplete.
 
 The commercial strength of this work is the documented engineering discipline and testable foundation—not a claim that ProfitPilot is already certified, compliant or production-secure.
+
+## Updated evidence checkpoint
+[CI run #1138](https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44055916897) passed both verification jobs. It includes TLS override rejection, importer-bound source replay, live role resolution, synthetic privacy-aware backup recovery and authenticated API tests. These are development-stage controls, not production assurance. Later changes require their own CI evidence.
