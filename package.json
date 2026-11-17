@@ -11,7 +11,7 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "test": "node --test",
-    "check": "node --check server/index.js && node --check server/auth.js && node --check server/db.js && node --check server/db-config.js && node --check src/engine.js && node --check tests/auth.test.js && node --check tests/db-config.test.js && node --check tests/financial-properties.test.js"
+    "check": "node --check server/index.js && node --check server/auth.js && node --check server/db.js && node --check server/db-config.js && node --check src/engine.js && node --check src/switchproof.js && node --check src/field-knowledge.js && node --check tests/field-knowledge.test.js && node --check tests/auth.test.js && node --check tests/db-config.test.js && node --check tests/financial-properties.test.js"
   },
   "dependencies": {
     "cors": "2.8.6",

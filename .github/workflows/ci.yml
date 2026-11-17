@@ -10,6 +10,7 @@ on:
       - integration/pr25-pr26-validation
       - feature/job-readiness-engine
       - feature/promise-ledger
+      - feature/verified-value-ledger
   workflow_dispatch:
 
 permissions:
