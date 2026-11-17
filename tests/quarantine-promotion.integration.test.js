@@ -1,0 +1,92 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {createServer} from "node:http";
+import {createHash,randomBytes,randomUUID} from "node:crypto";
+import {generateKeyPair,exportJWK,SignJWT} from "jose";
+import pg from "pg";
+import {runQuarantineCycle} from "../scripts/quarantine-worker.js";
+import {parseQuarantinedInvoiceCsv} from "../server/secure-invoice-csv.js";
+
+test("HTTP quarantine requires fresh MFA and separate scan/approval, promotes exact manifest only",{skip:!process.env.TEST_APP_DATABASE_URL,timeout:45000},async()=>{
+ const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL});
+ const scanner=await admin.connect();
+ const tenant="33333333-3333-4333-8333-333333333333",foreign="44444444-4444-4444-8444-444444444444";
+ const user=randomUUID(),subject="ci-promotion-"+user,keyId="ci-promotion-key",secret=randomBytes(32).toString("hex");
+ const issuer="https://profitpilot-promotion-ci.invalid/",audience="profitpilot-api";
+ const {publicKey,privateKey}=await generateKeyPair("RS256");
+ const jwk={...await exportJWK(publicKey),kid:"ci-promotion-jwk",use:"sig",alg:"RS256"};
+ const jwks=createServer((req,res)=>{res.writeHead(200,{"content-type":"application/json"});res.end(JSON.stringify({keys:[jwk]}));});
+ await new Promise(resolve=>jwks.listen(0,"127.0.0.1",resolve));
+ Object.assign(process.env,{NODE_ENV:"test",DATABASE_URL:process.env.TEST_APP_DATABASE_URL,AUTH_ISSUER:issuer,AUTH_AUDIENCE:audience,AUTH_JWKS_URL:"http://127.0.0.1:"+jwks.address().port+"/jwks",QUARANTINE_UPLOADS_ENABLED:"true",QUARANTINE_KEY_ID:keyId,QUARANTINE_ENCRYPTION_KEY:secret});
+ const {default:app}=await import("../server/index.js");
+ const {pool,withTenant}=await import("../server/db.js");
+ const api=createServer(app);
+ await new Promise(resolve=>api.listen(0,"127.0.0.1",resolve));
+ const base="http://127.0.0.1:"+api.address().port;
+ async function request(batch,suffix,{method="POST",who=subject,t=tenant,mfa=true,body,type}={}){
+  const now=Math.floor(Date.now()/1000);
+  const token=await new SignJWT({sid:"ci-promotion-"+who,auth_time:now-10,amr:mfa?["pwd","mfa"]:["pwd"]}).setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(issuer).setAudience(audience).setSubject(who).setIssuedAt().setExpirationTime("5m").sign(privateKey);
+  const headers={authorization:"Bearer "+token};if(type)headers["content-type"]=type;
+  return fetch(base+"/v1/tenants/"+t+"/imports/"+batch+suffix,{method,headers,body});
+ }
+ async function seed(ref){
+  const batch=randomUUID(),bytes=Buffer.from("invoice_id,site,date,amount\n"+ref+",Site A,2026-02-28,15.00\n");
+  const sha=createHash("sha256").update(bytes).digest("hex");
+  await admin.query("INSERT INTO public.import_batches(id,tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by) VALUES($1,$2,'customer_invoice','CI synthetic authority','registered',$3,'fixture.csv',$4)",[batch,tenant,sha,user]);
+  return {batch,bytes,rows:parseQuarantinedInvoiceCsv(bytes)};
+ }
+ const upload=f=>request(f.batch,"/file",{body:f.bytes,type:"text/csv"});
+ const approve=f=>request(f.batch,"/file/approve");
+ const count=async f=>(await admin.query("SELECT count(*)::int AS n FROM public.raw_import_rows WHERE batch_id=$1",[f.batch])).rows[0].n;
+ try{
+  await admin.query("INSERT INTO public.users(id,auth_subject,email,status) VALUES($1,$2,'promotion@example.invalid','active')",[user,subject]);
+  await admin.query("INSERT INTO public.tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'owner','active')",[tenant,user]);
+  await scanner.query("SET ROLE profitpilot_scanner");
+  const first=await seed("INV-PROMO-A");
+  assert.equal((await request(first.batch,"/file",{body:first.bytes,type:"text/csv",mfa:false})).status,403);
+  assert.equal((await request(first.batch,"/file",{body:first.bytes,type:"text/csv",who:"isolation-tenant-c"})).status,403);
+  assert.equal((await request(first.batch,"/file",{body:first.bytes,type:"text/csv",t:foreign})).status,403);
+  const uploaded=await upload(first);assert.equal(uploaded.status,201,await uploaded.clone().text());
+  assert.equal((await uploaded.json()).scanStatus,"pending");
+  assert.equal((await approve(first)).status,422);
+  assert.equal((await request(first.batch,"/rows",{body:JSON.stringify({rows:first.rows}),type:"application/json"})).status,409);
+  const scan=async()=> "clean";
+  const scanned=await runQuarantineCycle(scanner,{keyId,secret,scan,limit:1});
+  assert.equal(scanned.contentValidated,1);assert.equal(scanned.promoted,0);assert.equal(await count(first),0);
+  assert.equal((await request(first.batch,"/file/approve",{mfa:false})).status,403);
+  assert.equal((await approve(first)).status,202);
+  let rescans=0;
+  const promoted=await runQuarantineCycle(scanner,{keyId,secret,scan:async()=>{rescans++;return "clean";},limit:1});
+  assert.equal(promoted.promoted,1);assert.equal(rescans,1);assert.equal(await count(first),1);
+  assert.deepEqual((await admin.query("SELECT row_number,payload FROM public.raw_import_rows WHERE batch_id=$1",[first.batch])).rows,[{row_number:2,payload:first.rows[0]}]);
+  assert.equal((await admin.query("SELECT status FROM public.import_batches WHERE id=$1",[first.batch])).rows[0].status,"review");
+  assert.equal((await request(first.batch,"/rows",{body:JSON.stringify({rows:first.rows}),type:"application/json"})).status,409);
+  assert.equal((await approve(first)).status,422);
+  await assert.rejects(()=>pool.query("SELECT private.claim_quarantine_promotion()"),/permission denied/i);
+  await assert.rejects(()=>pool.query("INSERT INTO private.quarantine_insert_authority VALUES($1,$2,pg_current_xact_id())",[tenant,first.batch]),/permission denied/i);
+  await assert.rejects(()=>withTenant(tenant,subject,c=>c.query("INSERT INTO public.raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,7,$3)",[tenant,first.batch,JSON.stringify(first.rows[0])])),/not approved/i);
+  const second=await seed("INV-PROMO-B");
+  assert.equal((await upload(second)).status,201);
+  assert.equal((await runQuarantineCycle(scanner,{keyId,secret,scan,limit:1})).contentValidated,1);
+  assert.equal((await approve(second)).status,202);
+  const claim=(await scanner.query("SELECT * FROM private.claim_quarantine_promotion()")).rows[0];
+  assert.equal(claim.batch_id,second.batch);
+  assert.equal((await scanner.query("SELECT private.finish_quarantine_promotion($1,$2,$3,$4) AS n",[tenant,second.batch,randomUUID(),JSON.stringify(second.rows)])).rows[0].n,-1);
+  const changed=second.rows.map(row=>({...row,amount:"99.00"}));
+  assert.equal((await scanner.query("SELECT private.finish_quarantine_promotion($1,$2,$3,$4) AS n",[tenant,second.batch,claim.lease_id,JSON.stringify(changed)])).rows[0].n,0);
+  assert.equal(await count(second),0);
+  assert.equal((await admin.query("SELECT state FROM private.quarantine_promotions WHERE batch_id=$1",[second.batch])).rows[0].state,"failed");
+  const third=await seed("INV-PROMO-C");
+  assert.equal((await upload(third)).status,201);
+  assert.equal((await runQuarantineCycle(scanner,{keyId,secret,scan,limit:1})).contentValidated,1);
+  assert.equal((await approve(third)).status,202);
+  await admin.query("SELECT private.set_import_disposal_hold($1,$2,true,'CI_PROMOTION_HOLD')",[tenant,third.batch]);
+  assert.equal((await runQuarantineCycle(scanner,{keyId,secret,scan,limit:1})).promotionFailed,1);
+  assert.equal(await count(third),0);
+  assert.equal((await admin.query("SELECT count(*)::int AS n FROM private.quarantine_insert_authority")).rows[0].n,0);
+  assert.equal((await admin.query("SELECT private.verify_audit_chain($1) AS ok",[tenant])).rows[0].ok,true);
+ }finally{
+  await new Promise(resolve=>api.close(resolve));await new Promise(resolve=>jwks.close(resolve));
+  await scanner.query("RESET ROLE");scanner.release();await Promise.all([pool.end(),admin.end()]);
+ }
+});
