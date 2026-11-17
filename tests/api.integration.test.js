@@ -334,6 +334,13 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(auditView.status,200,"tenant owners must be able to inspect security audit events");
     const auditBody=await auditView.json();
     assert.equal(auditBody.integrity.is_valid,true,"the tenant audit hash chain must verify");
+    for(const actor of ["ci-api-analyst","ci-api-owner"]){
+     await assert.rejects(()=>withTenant(tenantA,actor,c=>c.query("SELECT reason,metadata FROM audit_events")),/permission denied/i);
+     await assert.rejects(()=>withTenant(tenantA,actor,c=>c.query("SELECT * FROM private.verify_audit_chain($1)",[tenantB])),/permission denied/i);
+     await assert.rejects(()=>withTenant(tenantA,actor,c=>c.query("SELECT private.read_audit_summary($1,$2,$3,$4)",[tenantA,20,Math.floor(Date.now()/1000),"0".repeat(64)])),/step-up proof/i);
+    }
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("SELECT * FROM private.read_invoice_manifest_events($1,$2)",[tenantA,tenantA])),/Financial review permissions/i);
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-owner",c=>c.query("SELECT * FROM private.read_invoice_manifest_events($1,$2)",[tenantB,tenantB])),/Financial review permissions/i);
     const privacySubmit=await request(`/v1/tenants/${tenantA}/privacy/requests`,{subject:"ci-api-analyst",method:"POST",body:{requestType:"access",details:"Please provide a copy of personal information held about me."}});
     assert.equal(privacySubmit.status,201,"tenant members must be able to submit privacy requests");
     const privacyItem=await privacySubmit.json();

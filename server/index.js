@@ -95,10 +95,10 @@ app.delete("/v1/tenants/:tenantId/security/permissions/overrides/:userId/:permis
 app.get("/v1/tenants/:tenantId/security/audit",membership,requirePermission("security.audit.read"),requireStepUp(),async(req,res,next)=>{try{
  const limitRaw=Number(req.query.limit||50);
  if(!Number.isInteger(limitRaw)||limitRaw<1||limitRaw>100)return res.status(400).json({error:"Audit page limit must be an integer from 1 to 100"});
- const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const integrity=await client.query("SELECT is_valid,event_count,first_invalid_event FROM private.verify_audit_chain($1)",[req.membership.tenantId]);
-  const events=await client.query("SELECT id,actor_user_id,action,object_type,object_id,correlation_id,created_at,chain_position,encode(previous_hash,'hex') AS previous_hash,encode(event_hash,'hex') AS event_hash FROM audit_events WHERE tenant_id=$1 ORDER BY chain_position DESC LIMIT $2",[req.membership.tenantId,limitRaw]);
-  return {integrity:integrity.rows[0],items:events.rows,scope:"audit_metadata_only"};
+ const tenant=req.membership.tenantId;
+ const result=await withPrivacyStepUp(req.membership,req.identity,tenant,"read_audit_summary:"+limitRaw,async(client,proof)=>{
+  const r=await client.query("SELECT private.read_audit_summary($1,$2,$3,$4) AS result",[tenant,limitRaw,req.identity.authTime,proof]);
+  return r.rows[0].result;
  });
  res.json(result);
 }catch(e){next(e);}});

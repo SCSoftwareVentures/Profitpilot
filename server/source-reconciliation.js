@@ -45,7 +45,7 @@ async function readStoredSource(c,tenantId,batchId){
         FROM allocation_lines l WHERE l.tenant_id=$1 AND l.allocation_run_id=a.id
        ) checks WHERE a.tenant_id=$1 AND a.status='confirmed' LIMIT 2
     ), manifests AS (
-      SELECT metadata FROM audit_events WHERE tenant_id=$1 AND object_id=$2 AND action='invoice_batch_prepared' AND object_type='import_batch' LIMIT 2
+      SELECT metadata FROM private.read_invoice_manifest_events($1,$2)
     )
     SELECT (SELECT to_jsonb(b)-'tenant_id' FROM b) AS batch,
      COALESCE((SELECT jsonb_agg(r ORDER BY r.row_number) FROM raw r),'[]'::jsonb) AS rows,
