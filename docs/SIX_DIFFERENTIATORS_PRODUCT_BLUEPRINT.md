@@ -222,3 +222,10 @@ The browser demonstration includes a synthetic Promise Ledger timeline. Persiste
 A synthetic/test-only evaluator is provided in `src/profit-leak-radar.js` with unit tests in `tests/profit-leak-radar.test.js`. It classifies a potential exception only when the supplied record has a recognised exception type, positive canonical money, explicit currency/tax basis/period, evidence references and a caller-declared complete source-coverage state. When coverage or any required dimension is missing, monetary exposure is withheld. Even a complete candidate has `verifiedLoss: null` and `recoveredValue: null`; human review remains mandatory.
 
 The dashboard demonstrates one candidate and one incomplete-coverage exception. The caller's coverage declaration is not independently certified by this primitive. Persistence, source-manifest verification, domain-specific detection rules, reviewer workflow and measured alert precision/recall remain outstanding.
+
+
+## Implementation record — Verified Value Ledger foundation
+
+A synthetic/test-only event model is provided in `src/verified-value-ledger.js`, with tests in `tests/verified-value-ledger.test.js`. It records quoted, contracted, variation-approved, delivered, customer-accepted, invoiced, credited, refunded, settled and disputed amounts as distinct event types. Each event requires a stable scope, currency, tax basis, period, actor/source identifiers, timezone-aware timestamp, reason and evidence reference. Summaries remain partitioned by scope and reporting dimensions. Unrecorded states return `null`, not zero; credits/refunds remain separate and no net total is produced.
+
+The dashboard includes a synthetic lifecycle table. This is not independent verification of customer acceptance, delivery, invoicing or bank settlement. Durable database persistence, authenticated actor attribution, source reconciliation, reviewer controls and reversal/restatement workflows remain unimplemented.
