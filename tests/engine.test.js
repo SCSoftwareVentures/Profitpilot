@@ -4,7 +4,7 @@ import {money,parseCsv,validateInvoiceRows,allocatePayroll,matchInvoice,aggregat
 
 const BASIS={currency:"AUD",taxBasis:"gst_exclusive",periodStart:"2026-11-01",periodEnd:"2026-11-30"};
 
-test("money accepts canonical decimal strings and returns exact decimal strings",()=>{assert.equal(money("10.13"),"10.13");assert.equal(Number.isNaN(money(10.13)),true);});
+test("money accepts canonical decimal strings and returns exact decimal strings",()=>{assert.equal(money("10.13"),"10.13");assert.equal(money(10.13),null);});
 test("ISO date accepts a valid calendar date",()=>assert.equal(isIsoDate("2026-11-16"),true));
 test("ISO date accepts leap day only in leap years",()=>{assert.equal(isIsoDate("2024-02-29"),true);assert.equal(isIsoDate("2025-02-29"),false);});
 test("ISO date rejects impossible and malformed dates",()=>{assert.equal(isIsoDate("2026-02-31"),false);assert.equal(isIsoDate("16-11-2026"),false);});
@@ -42,12 +42,12 @@ test("contract aggregation rejects empty and malformed collections instead of re
 test("contract aggregation refuses missing basis and invalid money rather than emitting totals",()=>{const missingBasis=aggregateMetrics([{revenue:"100.00",cost:"50.00"},{revenue:"200.00",cost:"100.00"}]);assert.equal(missingBasis.aggregationValid,false);assert.equal(missingBasis.contribution,null);const invalidMoney=aggregateMetrics([{...BASIS,revenue:"100.00",cost:"50.00"},{...BASIS,revenue:"not-money",cost:"25.00"}]);assert.equal(invalidMoney.aggregationValid,false);assert.equal(invalidMoney.contribution,null);});
 
 test("money accepts exact cent values and preserves negative values",()=>{
-  assert.equal(Number.isNaN(money("1.005")),true);
-  assert.equal(Number.isNaN(money("2.675")),true);
+  assert.equal(money("1.005"),null);
+  assert.equal(money("2.675"),null);
   assert.equal(money("-1.00"),"-1.00");
 });
 test("money rejects non-string, non-canonical and out-of-range inputs",()=>{
-  for(const value of ["not-money","1e3","01.00","1.234","1000000000000.00",1.25,Infinity]) assert.equal(Number.isNaN(money(value)),true);
+  for(const value of ["not-money","1e3","01.00","1.234","1000000000000.00",1.25,Infinity]) assert.equal(money(value),null);
 });
 test("payroll allocation sums decimal amounts without binary floating drift",()=>{
   const result=allocatePayroll({pool:"0.30",direct:[{site:"A",amount:"0.10"},{site:"A",amount:"0.20"}],approved:[],nonSite:"0.00",excluded:"0.00"});
@@ -120,7 +120,7 @@ test("invoice validation uses strict decimal syntax without Number coercion",()=
 test("money preserves the full supported PostgreSQL numeric(14,2) range exactly",()=>{
   assert.equal(money("999999999999.99"),"999999999999.99");
   assert.equal(money("-999999999999.99"),"-999999999999.99");
-  assert.equal(Number.isNaN(money("1000000000000.00")),true);
+  assert.equal(money("1000000000000.00"),null);
 });
 
 test("contract aggregation blocks mixed currencies, tax bases and reporting periods",()=>{
