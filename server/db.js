@@ -19,8 +19,8 @@ export async function withTenant(tenantId,subject,fn){
   await client.query("BEGIN");
   // Bound query execution and idle tenant transactions to limit lock exhaustion.
   // SET LOCAL is scoped to this transaction and cannot leak into pooled sessions.
-  await client.query("SET LOCAL statement_timeout = '15s'");
-  await client.query("SET LOCAL idle_in_transaction_session_timeout = '20s'");
+  await client.query("SET LOCAL statement_timeout = '3s'");
+  await client.query("SET LOCAL idle_in_transaction_session_timeout = '5s'");
   await client.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.tenant_subject',$2,true),set_config('app.tenant_expires',$3,true),set_config('app.tenant_nonce',$4,true),set_config('app.tenant_key_id',$5,true),set_config('app.tenant_signature',$6,true)",[tenantId,subject,expires,nonce,keyId,signature]);
   const result=await fn(client);
   await client.query("COMMIT");
