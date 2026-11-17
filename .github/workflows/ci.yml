@@ -103,10 +103,21 @@ jobs:
           npm install --no-audit --no-fund
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/api.integration.test.js
 
+      - name: Verify production database TLS configuration fails closed
+        run: |
+          set -eu
+          if NODE_ENV=production DATABASE_SSL=false DATABASE_URL="postgresql://profitpilot:placeholder@127.0.0.1:5432/profitpilot" node --input-type=module -e "await import('./server/db.js')" >tls-check.log 2>&1; then
+            echo "Production database configuration unexpectedly accepted plaintext connections"
+            exit 1
+          fi
+          grep -q "DATABASE_SSL=true is required in production" tls-check.log
+          NODE_ENV=production DATABASE_SSL=true DATABASE_URL="postgresql://profitpilot:placeholder@127.0.0.1:5432/profitpilot" node --input-type=module -e "await import('./server/db.js')"
+          echo "Production startup rejects disabled TLS and accepts verified-TLS configuration"
+
       - name: Build production API image
         run: docker build --pull -t profitpilot-api:ci .
 
-      - name: Start container and verify database health endpoint
+      - name: Start container and verify database health endpoint (CI test configuration)
         env:
           CORS_ORIGIN: https://ci.invalid
           AUTH_ISSUER: https://profitpilot-ci.invalid/
@@ -115,7 +126,7 @@ jobs:
         run: |
           set -eu
           DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@127.0.0.1:5432/profitpilot"
-          docker run -d --network host --name profitpilot-api-ci -e NODE_ENV=production -e PORT=8080 -e DATABASE_URL="$DATABASE_URL" -e DATABASE_SSL=false -e CORS_ORIGIN="$CORS_ORIGIN" -e AUTH_ISSUER="$AUTH_ISSUER" -e AUTH_AUDIENCE="$AUTH_AUDIENCE" -e AUTH_JWKS_URL="$AUTH_JWKS_URL" -e TENANT_CONTEXT_HMAC_SECRET="$TENANT_CONTEXT_HMAC_SECRET" profitpilot-api:ci
+          docker run -d --network host --name profitpilot-api-ci -e NODE_ENV=test -e PORT=8080 -e DATABASE_URL="$DATABASE_URL" -e DATABASE_SSL=false -e CORS_ORIGIN="$CORS_ORIGIN" -e AUTH_ISSUER="$AUTH_ISSUER" -e AUTH_AUDIENCE="$AUTH_AUDIENCE" -e AUTH_JWKS_URL="$AUTH_JWKS_URL" -e TENANT_CONTEXT_HMAC_SECRET="$TENANT_CONTEXT_HMAC_SECRET" profitpilot-api:ci
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8080/health | grep -q '"database":"connected"'; then
               echo 'Production container health check passed'
