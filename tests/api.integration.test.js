@@ -457,7 +457,9 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(exported.completePersonalDataExport,false);
     assert.equal(exported.scope,"account-v2");
     assert.equal(exported.schemaVersion,2);
-    assert.equal(exported.attributedActivity.filter(x=>x.kind==="import_created").length,1,"export includes only the requester's own import attribution");
+    const ownImports=await admin.query("SELECT created_at FROM import_batches WHERE tenant_id=$1 AND created_by=$2 ORDER BY created_at,id",[tenantA,userA]);
+    assert.equal(ownImports.rowCount,2,"fixture has exactly two own import records");
+    assert.deepEqual(exported.attributedActivity.filter(x=>x.kind==="import_created").map(x=>new Date(x.at).toISOString()).sort(),ownImports.rows.map(x=>x.created_at.toISOString()).sort(),"export includes exactly the requester's import attribution");
     assert.ok(exported.attributedActivity.every(x=>Object.keys(x).sort().join(",")==="at,kind"),"no business record fields in activity projection");
     assert.deepEqual(Object.keys(exported.account).sort(),["createdAt","email","status"]);
     assert.equal(exported.account.email,"analyst@example.invalid");
