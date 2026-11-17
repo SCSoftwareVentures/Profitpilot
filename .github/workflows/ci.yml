@@ -112,6 +112,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/023_identity_session_revocation.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/024_audit_chain_integrity.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/025_identity_admin_recovery.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/026_quarantine_promotion.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
 
       - name: Audit every tenant-scoped table and tenant-to-tenant foreign key
@@ -179,6 +180,12 @@ jobs:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/quarantine-scanner.test.js
+
+      - name: Verify approved manifest-bound quarantine promotion
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
+        run: |
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/quarantine-promotion.integration.test.js
 
       - name: Verify encrypted private file quarantine and database authorization
         env:
