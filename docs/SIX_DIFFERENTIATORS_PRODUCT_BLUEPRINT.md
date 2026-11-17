@@ -1,6 +1,6 @@
 # ProfitPilot — Six Differentiators Product Blueprint
 
-**Status:** approved for product-design exploration; not build authorisation.
+**Status:** owner-approved for staged repository implementation and synthetic/test-environment demonstration. No production, real-data or launch authorisation is implied.
 **Date:** 16 November 2026
 **Scope:** translate the six differentiators previously approved by the founder into bounded product concepts, dependencies, safety rules and validation tests. This document does not claim that any capability is implemented or customer-validated.
 
@@ -8,9 +8,9 @@
 
 ProfitPilot's first commercial hypothesis remains an evidence-led contract-economics workflow for Australian independent commercial cleaning contractors with recurring, multi-site B2B contracts. The initial analysis unit is contract × site × service period.
 
-The six differentiators strengthen the longer-term product thesis. They do not override the concierge-first strategy or G0–G5 build gate. Do not implement production SaaS features until G0–G4 and competitive preconditions pass and G5 records an explicit signed GO with named technical ownership, legal/privacy plan, delivery capacity and approved budget.
+The owner has authorised continued implementation of these six differentiators as part of preparing the complete project for sale. Build them in a staged, coherent sequence with synthetic fixtures, deterministic tests, explicit evidence states and human approval boundaries. G0–G5 remain mandatory before production deployment or real sensitive-data processing, but do not block repository-level feature engineering or synthetic demonstrations.
 
-The first release must remain narrow. Do not add a marketplace, workforce scheduling suite, payroll/award engine, accounting replacement, autonomous approval agent or payment processing to the initial wedge.
+The first demonstrable product should remain coherent around contract economics, evidence, exceptions and business commitments. Do not dilute the initial buyer story with a marketplace, full workforce scheduling suite, payroll/award engine, accounting replacement, autonomous approval agent or payment processing. Longer-term expansion should be clearly separated from the initial product scope.
 
 ## 2. Six approved differentiators
 
