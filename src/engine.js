@@ -149,12 +149,12 @@ export function aggregateMetrics(contracts){
     const values=contracts.map(c=>c[key]);
     return values.some(v=>v===undefined||v===null||v==="")||new Set(values).size!==1;
   });
-  if(inconsistent)return {revenue:null,cost:null,contribution:null,margin:null,contracts:rows,complete:false,errors:["Cannot aggregate contracts across missing or mixed currency, tax basis or reporting periods"]};
+  if(inconsistent)return {revenue:null,cost:null,contribution:null,margin:null,contracts:rows,aggregationValid:false,completeness:"unverified",errors:["Cannot aggregate contracts across missing or mixed currency, tax basis or reporting periods"]};
   const revenue=sumCents(rows.map(r=>r.revenue)),cost=sumCents(rows.map(r=>r.cost));
-  if(revenue===null||cost===null)return {revenue:null,cost:null,contribution:null,margin:null,contracts:rows,complete:false,errors:["Cannot aggregate missing or invalid canonical monetary inputs"]};
+  if(revenue===null||cost===null)return {revenue:null,cost:null,contribution:null,margin:null,contracts:rows,aggregationValid:false,completeness:"unverified",errors:["Cannot aggregate missing or invalid canonical monetary inputs"]};
   const contribution=revenue-cost;
   const margin=revenue?ratioCents(contribution*10000n,revenue):null;
-  return {revenue:fromCents(revenue),cost:fromCents(cost),contribution:fromCents(contribution),margin:margin===null?null:fromCents(margin),contracts:rows,complete:true,errors:[]};
+  return {revenue:fromCents(revenue),cost:fromCents(cost),contribution:fromCents(contribution),margin:margin===null?null:fromCents(margin),contracts:rows,aggregationValid:true,completeness:"unverified",errors:[]};
 }
 
 
