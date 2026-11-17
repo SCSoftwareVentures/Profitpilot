@@ -117,6 +117,16 @@ jobs:
       - name: Build production API image
         run: docker build --pull -t profitpilot-api:ci .
 
+      - name: Verify production image runs as non-root
+        run: |
+          set -eu
+          image_user="$(docker image inspect profitpilot-api:ci --format '{{.Config.User}}')"
+          if [ "$image_user" != "node" ]; then
+            echo "Production image must run as the non-root node user; got: $image_user" >&2
+            exit 1
+          fi
+          echo "Production image declares non-root node user"
+
       - name: Start container and verify database health endpoint (CI test configuration)
         env:
           CORS_ORIGIN: https://ci.invalid
