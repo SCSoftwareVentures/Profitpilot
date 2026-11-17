@@ -41,8 +41,11 @@ test("database quarantine restricts access, validates checksum, blocks ingestion
   await admin.query("INSERT INTO public.import_batches(id,tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by) VALUES($1,$2,'customer_invoice','CI synthetic authority','registered',$3,'synthetic.csv',$4)",[batch,tenant,e.sha,actor]);
   await assert.rejects(()=>put(),/authority denied/i);
   await assert.rejects(()=>put("isolation-tenant-d",other),/authority denied/i);
-  await admin.query("UPDATE public.tenant_memberships SET role='admin' WHERE tenant_id=$1 AND user_id=$2",[tenant,actor]);
+  const changed=await admin.query("UPDATE public.tenant_memberships SET role='admin' WHERE tenant_id=$1 AND user_id=$2 RETURNING role,status",[tenant,actor]);
+  assert.deepEqual(changed.rows,[{role:"admin",status:"active"}],"admin fixture must be active");
   try{
+   const context=await withTenant(tenant,subject,c=>c.query("SELECT private.current_tenant_id() AS tenant,private.current_actor_role() AS role"));
+   assert.deepEqual(context.rows[0],{tenant,role:"admin"},"signed quarantine actor must be admin");
    const bad=[...args];bad[2]="0".repeat(64);
    await assert.rejects(()=>put(subject,tenant,bad),/not eligible/i);
    const receipt=(await put()).rows[0].receipt;
