@@ -31,8 +31,37 @@ ALTER TABLE private.discarded_import_retention_policies OWNER TO profitpilot_con
 ALTER TABLE private.discarded_import_purges OWNER TO profitpilot_context_owner;
 ALTER TABLE private.discarded_import_holds OWNER TO profitpilot_context_owner;
 REVOKE ALL ON private.discarded_import_retention_policies,private.discarded_import_purges,private.discarded_import_holds FROM PUBLIC,profitpilot_app;
-REVOKE UPDATE,DELETE,TRUNCATE ON public.raw_import_rows FROM profitpilot_app;
-REVOKE DELETE,TRUNCATE ON public.import_batches FROM profitpilot_app;
+-- Direct runtime writes cannot forge import age or discard timestamps.
+ALTER TABLE public.import_batches ADD COLUMN discarded_at timestamptz;
+UPDATE public.import_batches SET discarded_at=clock_timestamp() WHERE status IN ('rejected','failed');
+ALTER TABLE public.import_batches ADD CONSTRAINT discarded_import_timestamp_check
+ CHECK((status IN ('rejected','failed'))=(discarded_at IS NOT NULL));
+REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON public.raw_import_rows FROM profitpilot_app;
+GRANT INSERT(tenant_id,batch_id,row_number,payload) ON public.raw_import_rows TO profitpilot_app;
+REVOKE INSERT,UPDATE,DELETE,TRUNCATE ON public.import_batches FROM profitpilot_app;
+GRANT INSERT(id,tenant_id,source_type,source_period_start,source_period_end,permission_ref,status,file_sha256,file_name,created_by) ON public.import_batches TO profitpilot_app;
+GRANT UPDATE(status) ON public.import_batches TO profitpilot_app;
+GRANT SELECT,UPDATE(status) ON public.import_batches TO profitpilot_context_owner;
+GRANT SELECT(raw_row_id) ON public.mapping_decisions TO profitpilot_context_owner;
+CREATE FUNCTION private.set_import_discard_timestamp() RETURNS trigger
+LANGUAGE plpgsql SET search_path=pg_catalog AS $fn$
+BEGIN
+ IF NEW.status IN ('rejected','failed') THEN
+  IF TG_OP='INSERT' THEN
+   NEW.discarded_at:=coalesce(NEW.discarded_at,clock_timestamp());
+  ELSIF OLD.status NOT IN ('rejected','failed') OR NEW.status IS DISTINCT FROM OLD.status THEN
+   NEW.discarded_at:=clock_timestamp();
+  ELSE NEW.discarded_at:=OLD.discarded_at;
+  END IF;
+ ELSE NEW.discarded_at:=NULL;
+ END IF;
+ RETURN NEW;
+END
+$fn$;
+ALTER FUNCTION private.set_import_discard_timestamp() OWNER TO profitpilot_context_owner;
+REVOKE ALL ON FUNCTION private.set_import_discard_timestamp() FROM PUBLIC,profitpilot_app;
+CREATE TRIGGER import_discard_timestamp BEFORE INSERT OR UPDATE ON public.import_batches
+ FOR EACH ROW EXECUTE FUNCTION private.set_import_discard_timestamp();
 GRANT SELECT,UPDATE(payload) ON public.raw_import_rows TO profitpilot_context_owner;
 GRANT SELECT ON public.invoice_lines,public.payroll_pools TO profitpilot_context_owner;
 
@@ -57,9 +86,8 @@ CREATE TRIGGER discarded_import_hold_serialization BEFORE INSERT OR UPDATE OR DE
  FOR EACH ROW EXECUTE FUNCTION private.serialize_import_retention_hold();
 CREATE TRIGGER subject_hold_import_serialization BEFORE INSERT OR UPDATE OR DELETE ON private.privacy_retention_holds
  FOR EACH ROW EXECUTE FUNCTION private.serialize_import_retention_hold();
-CREATE TRIGGER request_hold_import_serialization BEFORE UPDATE OF status ON public.privacy_requests
- FOR EACH ROW WHEN (OLD.status IS DISTINCT FROM NEW.status AND (OLD.status='legal_hold' OR NEW.status='legal_hold'))
- EXECUTE FUNCTION private.serialize_import_retention_hold();
+CREATE TRIGGER request_hold_import_serialization BEFORE INSERT OR UPDATE OF status ON public.privacy_requests
+ FOR EACH ROW EXECUTE FUNCTION private.serialize_import_retention_hold();
 
 CREATE FUNCTION private.protect_purged_import_batch() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,private AS $fn$
@@ -144,7 +172,9 @@ BEGIN
  SELECT * INTO policy FROM private.discarded_import_retention_policies WHERE tenant_id=p_tenant AND source_type=batch.source_type FOR SHARE;
  IF NOT FOUND OR NOT policy.enabled THEN RAISE EXCEPTION 'Explicit source-specific retention policy required';END IF;
  at_time:=clock_timestamp();
- IF batch.created_at>at_time-make_interval(days=>policy.minimum_age_days)
+ IF batch.discarded_at IS NULL OR batch.discarded_at>at_time-make_interval(days=>policy.minimum_age_days)
+ OR batch.created_at>at_time-make_interval(days=>policy.minimum_age_days)
+ OR EXISTS(SELECT 1 FROM public.raw_import_rows WHERE tenant_id=p_tenant AND batch_id=p_batch AND created_at>at_time-make_interval(days=>policy.minimum_age_days))
  OR EXISTS(SELECT 1 FROM private.discarded_import_holds WHERE tenant_id=p_tenant)
  OR EXISTS(SELECT 1 FROM private.privacy_retention_holds WHERE tenant_id=p_tenant)
  OR EXISTS(SELECT 1 FROM public.privacy_requests WHERE tenant_id=p_tenant AND status IN ('requested','identity_verification','under_review','legal_hold')) THEN

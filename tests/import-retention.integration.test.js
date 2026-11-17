@@ -13,13 +13,19 @@ test("discarded source payload purge is narrow, held, policy gated and restore-a
   await admin.query("INSERT INTO users(id,auth_subject,email,auth_issuer) VALUES($1,'discarded-import-ci','discarded@example.invalid','https://ci.invalid')",[u]);
   await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role) VALUES($1,$2,'owner')",[t,u]);
   for(const [i,b,s,type,age] of [[1,batch,'rejected','payroll',40],[2,accepted,'accepted','payroll',40],[3,linked,'failed','payroll',40],[4,recent,'failed','payroll',0],[5,invoice,'failed','supplier_invoice',40]]){
-   await admin.query("INSERT INTO import_batches(id,tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by,created_at) VALUES($1,$2,$3,'synthetic',$4,$5,'synthetic.csv',$6,now()-make_interval(days=>$7))",[b,t,type,s,String(i).repeat(64),u,age]);
-   await admin.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,$3)",[t,b,JSON.stringify({employee:"Synthetic Person",amount:123})]);
+   await admin.query("INSERT INTO import_batches(id,tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by,created_at,discarded_at) VALUES($1,$2,$3,'synthetic',$4,$5,'synthetic.csv',$6,now()-make_interval(days=>$7),CASE WHEN $4 IN ('failed','rejected') THEN now()-make_interval(days=>$7) ELSE NULL END)",[b,t,type,s,String(i).repeat(64),u,age]);
+   await admin.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload,created_at) VALUES($1,$2,1,$3,now()-make_interval(days=>$4))",[t,b,JSON.stringify({employee:"Synthetic Person",amount:123}),age]);
   }
   await assert.rejects(()=>purge(),/retention policy required/i);
   await admin.query("INSERT INTO private.discarded_import_retention_policies(tenant_id,source_type,enabled,minimum_age_days,authority_reference) VALUES($1,'payroll',true,30,'CI only')",[t]);
   await assert.rejects(()=>purge(accepted),/Only a discarded/);
   await assert.rejects(()=>purge(recent),/Retention age/);
+  const newlyDiscarded=uuid(6);
+  await admin.query("INSERT INTO import_batches(id,tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by,created_at) VALUES($1,$2,'payroll','CI','review',$3,'old.csv',$4,now()-interval '60 days')",[newlyDiscarded,t,"6".repeat(64),u]);
+  await admin.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload,created_at) VALUES($1,$2,1,'{}',now()-interval '60 days')",[t,newlyDiscarded]);
+  await admin.query("UPDATE import_batches SET status='failed' WHERE id=$1",[newlyDiscarded]);
+  await assert.rejects(()=>purge(newlyDiscarded),/Retention age/);
+  await assert.rejects(()=>app.query("UPDATE import_batches SET discarded_at=now()-interval '100 days' WHERE id=$1",[newlyDiscarded]),/permission denied/i);
   await assert.rejects(()=>purge(invoice),/retention policy required/i);
   await admin.query("INSERT INTO payroll_pools(tenant_id,batch_id,period_start,period_end,total_amount,source_ref) VALUES($1,$2,'2026-01-01','2026-01-31',123,'CI')",[t,linked]);
   await assert.rejects(()=>purge(linked),/Referenced source evidence/);
