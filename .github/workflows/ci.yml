@@ -109,6 +109,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/020_private_file_quarantine.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/021_quarantine_scanner_lifecycle.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/022_quarantine_content_validation.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/023_identity_session_revocation.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
 
       - name: Audit every tenant-scoped table and tenant-to-tenant foreign key
@@ -134,6 +135,12 @@ jobs:
           npm ci --no-audit --no-fund
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/api.integration.test.js
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" psql "postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.runtime.sql
+
+      - name: Verify identity session revocation and fresh authentication
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
+        run: |
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/identity-session.integration.test.js
 
       - name: Verify distributed rate limiting and counter retention with real PostgreSQL
         env:
