@@ -233,3 +233,18 @@ This is a database-enforced prototype control, not independent security assuranc
 GitHub Actions run **#667** passed on exact PR head `6b98299006d9aa620f494ec4fe52d095e82947c4`. The PostgreSQL 16 job applied migration 014, passed authenticated API integration tests covering direct-SQL analyst denial, reviewer authorization, reviewer identity binding, evidence immutability, final-decision immutability and atomic audit creation, and completed the verified TLS trust/rejection and production-mode API health checks. Node.js 22 passed 56 tests with 0 failures (3 database-dependent tests skipped in the Node-only job and covered in the PostgreSQL job).
 
 This verifies the migration and integration behaviour in ephemeral CI only. It does not replace independent penetration testing or validate production identity, hosting, secrets, storage, backups, operational response or legal/privacy controls.
+
+ 
+### Migration 014 exact-head verification — 17 November 2026
+
+The earlier pending statement is superseded. CI run **#43983962328** passed on exact hardening head `6b98299006d9aa620f494ec4fe52d095e82947c4`. Both Node.js 22 and PostgreSQL 16 jobs passed. PostgreSQL applied migrations through 014 and the authenticated API integration suite passed:
+- direct SQL analyst denial and reviewer permission;
+- reviewer identity must match the signed active user;
+- reviewer cannot attribute a decision to another tenant member;
+- candidate evidence/identity cannot be rewritten;
+- final decisions cannot be changed;
+- audit reason is mandatory;
+- direct SQL and API decisions generate an audit event in the same transaction;
+- payroll confirmation reviewer must match the signed actor.
+
+The same run passed the 20-table tenant/FK catalogue audit, restricted-role RLS, trusted-CA TLS connection, untrusted-CA rejection and production-mode API health check. This is automated prototype evidence, not independent penetration testing or production assurance.
