@@ -21,7 +21,7 @@ ProfitPilot is not yet a complete customer-facing application, a verified accoun
 | PR #26 | Historical product blueprint source branch | Its documentation was integrated into PR #27 |
 | PR #27 | Combined integration candidate | Draft/unmerged integration base for current hardening |
 | PR #28 | `hardening/financial-security-followup`, based on PR #27 | Active hardening review; draft and unmerged |
-| Latest verified PR #28 head | `c21643325f5e16e8f7fe3fe0be5fcbd7316d1453`, CI run #43988100076 / run #770 | Node.js 22 and PostgreSQL 16 jobs passed on the exact head; see section 25 for scope |
+| Latest verified PR #28 head | `e6fde42e3808cd5c269768c35619ede6d1361ecc`, CI run #43988100076 / run #770 | Node.js 22 and PostgreSQL 16 jobs passed on the exact head; see section 25 for scope |
 | Production | No production deployment or configured customer environment established | No customer data, pilot or payment activity authorised |
 
 ### Acquisition objective
@@ -409,7 +409,7 @@ This closes the exact-head CI verification item for PR #28. It does not close th
 
 ### Exact-head CI evidence
 
-PR #28 (`hardening/financial-security-followup`) exact head `c21643325f5e16e8f7fe3fe0be5fcbd7316d1453` passed GitHub Actions run **#43988100076 (run #770)**.
+PR #28 (`hardening/financial-security-followup`) exact head `e6fde42e3808cd5c269768c35619ede6d1361ecc` passed GitHub Actions run **#43988234834 (run #773)**.
 
 - **Node.js 22:** 70 tests, 67 passed, 0 failed, 3 database-dependent tests skipped in this job.
 - **PostgreSQL 16:** migration application through 014, 20-table tenant/FK catalogue audit, restricted-role RLS, authenticated API integration tests, production API image build, trusted-CA TLS acceptance, untrusted-CA TLS rejection and production-mode database health all passed.
