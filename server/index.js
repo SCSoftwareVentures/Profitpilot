@@ -68,14 +68,11 @@ app.post("/v1/tenants/:tenantId/security/permissions/overrides",membership,requi
     typeof permissionKey!=="string"||permissionKey.length>128||permissionKey.startsWith("security.")||permissionKey.startsWith("privacy.")||
     !["grant","deny"].includes(effect)||typeof reason!=="string"||reason.trim().length<3||reason.length>1000)
   return res.status(400).json({error:"Valid member, non-security permission, effect and reason are required"});
- const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const target=await client.query("SELECT 1 FROM tenant_memberships WHERE tenant_id=$1 AND user_id=$2 AND status='active'",[req.membership.tenantId,userId]);
-  if(!target.rowCount)return {status:404,error:"Active tenant member not found"};
-  const permission=await client.query("SELECT 1 FROM permission_catalog WHERE permission_key=$1",[permissionKey]);
-  if(!permission.rowCount)return {status:400,error:"Unknown permission"};
-  await client.query("SELECT private.set_member_permission_override($1,$2,$3,$4,$5,$6)",[req.membership.tenantId,req.membership.userId,userId,permissionKey,effect,reason.trim()]);
-  await appendAudit(client,req.membership,"member_permission_override_set","tenant_membership_permission_override",userId,reason.trim(),{permissionKey,effect});
-  return {status:201,override:{userId,permissionKey,effect,reason:reason.trim()}};
+ const evidence=JSON.stringify({effect:effect,permissionKey,reason:reason.trim()});
+ const action="permission_override:"+createHash("sha256").update(evidence).digest("hex");
+ const result=await withPrivacyStepUp(req.membership,req.identity,userId,action,async(client,proof)=>{
+  const r=await client.query("SELECT private.apply_reviewed_permission_override($1,$2,$3,$4,$5) AS result",[req.membership.tenantId,userId,evidence,req.identity.authTime,proof]);
+  return r.rows[0].result;
  });
  if(result.error)return res.status(result.status).json({error:result.error});
  res.status(result.status).json(result.override);
@@ -87,11 +84,11 @@ app.delete("/v1/tenants/:tenantId/security/permissions/overrides/:userId/:permis
     typeof permissionKey!=="string"||permissionKey.startsWith("security.")||permissionKey.startsWith("privacy.")||
     typeof reason!=="string"||reason.trim().length<3||reason.length>1000)
   return res.status(400).json({error:"Valid member, permission and removal reason are required"});
- const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const removed=await client.query("SELECT private.remove_member_permission_override($1,$2,$3,$4) AS removed",[req.membership.tenantId,req.membership.userId,userId,permissionKey]);
-  if(!removed.rows[0].removed)return {status:404,error:"Permission override not found"};
-  await appendAudit(client,req.membership,"member_permission_override_removed","tenant_membership_permission_override",userId,reason.trim(),{permissionKey});
-  return {status:200};
+ const evidence=JSON.stringify({effect:"remove",permissionKey,reason:reason.trim()});
+ const action="permission_override:"+createHash("sha256").update(evidence).digest("hex");
+ const result=await withPrivacyStepUp(req.membership,req.identity,userId,action,async(client,proof)=>{
+  const r=await client.query("SELECT private.apply_reviewed_permission_override($1,$2,$3,$4,$5) AS result",[req.membership.tenantId,userId,evidence,req.identity.authTime,proof]);
+  return r.rows[0].result;
  });
  if(result.error)return res.status(result.status).json({error:result.error});
  res.status(result.status).json({removed:true,userId,permissionKey});

@@ -349,6 +349,15 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const permissionView=await request(`/v1/tenants/${tenantA}/security/permissions`,{subject:"ci-api-owner"});
     assert.equal(permissionView.status,200,"tenant owners must be able to inspect the permission catalogue and overrides");
     assert.ok((await permissionView.json()).catalogue.some(x=>x.permission_key==="security.audit.read"));
+    {
+     const acl=(await admin.query("SELECT has_function_privilege('profitpilot_app','private.set_member_permission_override(uuid,uuid,uuid,text,text,text)','EXECUTE') AS legacy_set,has_function_privilege('profitpilot_app','private.remove_member_permission_override(uuid,uuid,uuid,text)','EXECUTE') AS legacy_remove,has_function_privilege('profitpilot_app','private.apply_reviewed_permission_override(uuid,uuid,text,bigint,text)','EXECUTE') AS reviewed")).rows[0];
+     assert.deepEqual(acl,{legacy_set:false,legacy_remove:false,reviewed:true});
+     const target=userD;
+     const now=Math.floor(Date.now()/1000);
+     const evidence=JSON.stringify({effect:"deny",permissionKey:"imports.create",reason:"Synthetic proof negative test"});
+     await assert.rejects(()=>withTenant(tenantA,"ci-api-owner",c=>c.query("SELECT private.apply_reviewed_permission_override($1,$2,$3,$4,$5)",[tenantA,target,evidence,now,"0".repeat(64)])),/step-up proof/i);
+     assert.equal((await admin.query("SELECT count(*)::int AS n FROM tenant_membership_permission_overrides WHERE tenant_id=$1 AND user_id=$2 AND permission_key='imports.create'",[tenantA,target])).rows[0].n,0);
+    }
     const ownerGrant=await request(`/v1/tenants/${tenantA}/security/permissions/overrides`,{subject:"ci-api-owner",method:"POST",body:{userId:userD,permissionKey:"imports.create",effect:"grant",reason:"Temporary delegated import authority"}});
     assert.equal(ownerGrant.status,201,"an owner may create a step-up-protected member permission override");
     const grantedImport=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-reviewer",method:"POST",body:{...importBody,sha256:"1".repeat(64)}});
@@ -359,6 +368,9 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(deniedImport.status,403,"an explicit member denial must override role defaults and prior grants");
     const removedOverride=await fetch(base+`/v1/tenants/${tenantA}/security/permissions/overrides/${userD}/imports.create`,{method:"DELETE",headers:{"content-type":"application/json",authorization:"Bearer "+await token("ci-api-owner")},body:JSON.stringify({reason:"Return to default role permissions"})});
     assert.equal(removedOverride.status,200,"an owner may remove a member override with a recorded reason");
+    const permissionAudit=await admin.query("SELECT action,metadata FROM audit_events WHERE tenant_id=$1 AND object_id=$2 AND object_type='tenant_membership_permission_override' ORDER BY chain_position",[tenantA,userD]);
+    assert.deepEqual(permissionAudit.rows.map(x=>x.action),["member_permission_override_set","member_permission_override_set","member_permission_override_removed"]);
+    assert.deepEqual(permissionAudit.rows.map(x=>x.metadata.effect??"removed"),["grant","deny","removed"]);
     const auditView=await request(`/v1/tenants/${tenantA}/security/audit?limit=20`,{subject:"ci-api-owner"});
     assert.equal(auditView.status,200,"tenant owners must be able to inspect security audit events");
     const auditBody=await auditView.json();
