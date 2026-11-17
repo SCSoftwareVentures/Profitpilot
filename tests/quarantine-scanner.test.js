@@ -91,5 +91,16 @@ test("scanner database role enforces lease ownership, holds, expiry and permanen
   assert.deepEqual((await admin.query("SELECT scan_state,ciphertext FROM private.quarantined_files WHERE batch_id=$1",[batch])).rows[0],{scan_state:"disposed",ciphertext:null});
   await assert.rejects(()=>admin.query("INSERT INTO public.raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,'{}')",[tenant,batch]),/not approved/i);
   assert.deepEqual((await admin.query("SELECT event_type FROM private.quarantine_lifecycle_events WHERE batch_id=$1 ORDER BY id",[batch])).rows.map(x=>x.event_type),["claimed","infected","disposed"]);
+  for(const contentState of ["validated","rejected"]){
+   const id=randomUUID(), envelope=sealQuarantine(Buffer.from("synthetic "+id),tenant,id,{id:keyId,secret});
+   await admin.query("INSERT INTO public.import_batches(id,tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by) VALUES($1,$2,'customer_invoice','CI synthetic authority','registered',$3,'synthetic.csv',$4)",[id,tenant,envelope.sha,actor]);
+   await admin.query("INSERT INTO private.quarantined_files(tenant_id,batch_id,file_sha256,byte_count,key_id,nonce,auth_tag,ciphertext,uploaded_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",[tenant,id,envelope.sha,envelope.ciphertext.length,keyId,envelope.nonce,envelope.tag,envelope.ciphertext,actor]);
+   const claimed=(await scanner.query("SELECT * FROM private.claim_quarantine_scan()")).rows[0];
+   assert.equal(claimed.batch_id,id);
+   assert.equal((await scanner.query("SELECT private.finish_quarantine_scan_with_content($1,$2,$3,'clean',$4) AS ok",[tenant,id,claimed.lease_id,contentState])).rows[0].ok,true);
+   assert.deepEqual((await admin.query("SELECT scan_state,content_state FROM private.quarantined_files WHERE batch_id=$1",[id])).rows[0],{scan_state:"clean",content_state:contentState});
+   assert.deepEqual((await admin.query("SELECT event_type FROM private.quarantine_lifecycle_events WHERE batch_id=$1 ORDER BY id",[id])).rows.map(x=>x.event_type),["claimed","clean","content_"+contentState]);
+   await assert.rejects(()=>admin.query("INSERT INTO public.raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,'{}')",[tenant,id]),/not approved/i);
+  }
  }finally{await scanner.query("RESET ROLE");scanner.release();await Promise.all([admin.end(),app.end()]);}
 });
