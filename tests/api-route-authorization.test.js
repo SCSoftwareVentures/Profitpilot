@@ -13,7 +13,8 @@ const expected=new Map([
   ["POST /v1/tenants/:tenantId/imports/:batchId/rows","role"],
   ["POST /v1/tenants/:tenantId/imports/:batchId/validate","role"],
   ["POST /v1/tenants/:tenantId/matches/:matchId/decision","role"],
-  ["POST /v1/tenants/:tenantId/calculations","role"]
+  ["POST /v1/tenants/:tenantId/calculations","role"],
+  ["GET /v1/tenants/:tenantId/calculations/:runId","member"]
 ]);
 
 test("every registered API endpoint has an explicit reviewed authorization classification",()=>{
