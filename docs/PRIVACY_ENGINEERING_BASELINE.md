@@ -157,3 +157,6 @@ Migration 037 enables independently reviewed, requester-confirmed restriction of
 
 ## Verified permission administration
 Migration 038 requires exact mutation evidence (target, effect, permission and rationale), signed fresh MFA and current owner authority at the database boundary. The mutation and audit event share one transaction. The runtime cannot call legacy permission mutation helpers directly. Existing role defaults and explicit deny precedence are preserved. Privileged operator access and requests already executing at revocation remain separate trust boundaries.
+
+## Transaction-bound session operations
+Migration 039 removes runtime execution of direct admission, listing and revocation helpers. The authenticated server attests the exact action, provider identity, token claims and target to the current database transaction and backend, using a domain-separated HMAC. Every operation rechecks exact token binding and expiry with current account status. Session lists are limited to 100 with a truncation indicator. This prevents direct runtime SQL-only cross-account session calls, not compromise of the signing secret, privileged operators, external refresh tokens or operations already in flight.

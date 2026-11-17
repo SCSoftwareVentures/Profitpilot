@@ -68,7 +68,7 @@ export function authRequired(){
    return res.status(503).json({error:"Session security service unavailable"});
   }
   if(revoked)return res.status(401).json({error:"Session revoked or unavailable"});
-  req.identity={subject:payload.sub,email:typeof payload.email==="string"?payload.email:null,emailVerified:payload.email_verified===true,issuedAt:payload.iat,issuer:c.issuer,jti:payload.jti,authTime:Number.isSafeInteger(payload.auth_time)&&payload.auth_time>=0&&payload.auth_time<=payload.iat+5?payload.auth_time:null,acr:typeof payload.acr==="string"?payload.acr:null,amr:Array.isArray(payload.amr)&&payload.amr.every(v=>typeof v==="string")?payload.amr:[]};
+  req.identity={subject:payload.sub,email:typeof payload.email==="string"?payload.email:null,emailVerified:payload.email_verified===true,issuedAt:payload.iat,expiresAt:payload.exp,issuer:c.issuer,jti:payload.jti,authTime:Number.isSafeInteger(payload.auth_time)&&payload.auth_time>=0&&payload.auth_time<=payload.iat+5?payload.auth_time:null,acr:typeof payload.acr==="string"?payload.acr:null,amr:Array.isArray(payload.amr)&&payload.amr.every(v=>typeof v==="string")?payload.amr:[]};
   return next();
  };
 }

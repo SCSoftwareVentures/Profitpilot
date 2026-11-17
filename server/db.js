@@ -39,23 +39,36 @@ export async function withTenant(tenantId,subject,fn,{repeatableRead=false}={}){
 }
 export async function health(){const r=await pool.query("SELECT 1 AS ok");return r.rows[0].ok===1;}
 
-export async function registerAndCheckAuthSession({jti,subject,issuer,issuedAt,expiresAt}){
+// Only call from verified identity middleware or authenticated account routes.
+// A proof is valid for the exact database transaction and backend, not another connection.
+async function verifiedSessionOperation(action,{jti,subject,issuer,issuedAt,expiresAt},target=null){
+ const keyId=process.env.TENANT_CONTEXT_HMAC_KEY_ID||"primary",secret=process.env.TENANT_CONTEXT_HMAC_SECRET||"";
+ if(!/^[A-Za-z0-9._-]{1,128}$/.test(keyId)||secret.length%2!==0||!/^[a-f0-9]{64,256}$/i.test(secret))throw Error("Session signing configuration is invalid");
+ const body=JSON.stringify({action,jti,subject,issuer,issuedAt,expiresAt,target});
  const client=await pool.connect();
  try{
   await client.query("BEGIN");
-  const result=await client.query("SELECT private.accept_bound_access_session($1,$2,$3,to_timestamp($4),to_timestamp($5)) AS accepted",[jti,subject,issuer,issuedAt,expiresAt]);
+  const {rows:[ctx]}=await client.query("SELECT txid_current()::text AS tx,pg_backend_pid()::text AS pid");
+  const proof=createHmac("sha256",Buffer.from(secret,"hex")).update(["profitpilot-session-op-v1",ctx.tx,ctx.pid,keyId,body].join("\n")).digest("hex");
+  const result=await client.query("SELECT private.verified_session_operation($1,$2,$3) AS result",[keyId,body,proof]);
   await client.query("COMMIT");
-  return result.rows[0]?.accepted!==true;
+  return result.rows[0]?.result;
  }catch(error){await client.query("ROLLBACK");throw error;}
  finally{client.release();}
 }
-export async function listAuthSessions(subject){
- const result=await pool.query("SELECT jti,issued_at,expires_at,last_seen_at,revoked_at FROM private.list_auth_sessions($1)",[subject]);
- return result.rows;
+export async function registerAndCheckAuthSession(identity){
+ const result=await verifiedSessionOperation("admit",identity);
+ return result?.accepted!==true;
 }
-export async function revokeAuthSession(jti,subject,reason="self_service_revocation"){
- const result=await pool.query("SELECT private.revoke_auth_session($1,$2,$3) AS revoked",[jti,subject,reason]);
- return result.rows[0].revoked===true;
+export async function listAuthSessions(identity){
+ const result=await verifiedSessionOperation("list",identity);
+ if(result?.accepted!==true)throw Object.assign(new Error("Session unavailable"),{status:401});
+ return result;
+}
+export async function revokeAuthSession(jti,identity){
+ const result=await verifiedSessionOperation("revoke",identity,jti);
+ if(result?.accepted!==true)throw Object.assign(new Error("Session unavailable"),{status:401});
+ return result.revoked===true;
 }
 
  // Call only after requireStepUp has validated the provider's signed claims.

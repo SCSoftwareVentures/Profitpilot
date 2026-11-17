@@ -115,9 +115,16 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const revocableSessionToken=await token("ci-api-analyst");
     const revocableSessionResponse=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+revocableSessionToken}});
     assert.equal(revocableSessionResponse.status,200);
+    {
+     const privileges=(await admin.query("SELECT has_function_privilege('profitpilot_app','private.accept_bound_access_session(text,text,text,timestamptz,timestamptz)','EXECUTE') AS admit,has_function_privilege('profitpilot_app','private.list_auth_sessions(text)','EXECUTE') AS list,has_function_privilege('profitpilot_app','private.revoke_auth_session(text,text,text)','EXECUTE') AS revoke")).rows[0];
+     assert.deepEqual(privileges,{admit:false,list:false,revoke:false});
+     await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("SELECT private.verified_session_operation($1,$2,$3)",["primary",JSON.stringify({action:"list",subject:"ci-api-owner"}),"0".repeat(64)])),/session attestation/i);
+    }
     const sessionListResponse=await fetch(base+"/v1/me/sessions",{headers:{authorization:"Bearer "+trackedSessionToken}});
     assert.equal(sessionListResponse.status,200,"users must be able to inspect their own active and revoked sessions");
-    const sessionList=(await sessionListResponse.json()).items;
+    const sessionInventory=await sessionListResponse.json();
+    assert.equal(sessionInventory.truncated,false);
+    const sessionList=sessionInventory.items;
     assert.ok(sessionList.length>=2,"session inventory must contain registered sessions");
     const sessionPayload=JSON.parse(Buffer.from(revocableSessionToken.split(".")[1],"base64url").toString("utf8"));
     const revokeResponse=await fetch(base+`/v1/me/sessions/${sessionPayload.jti}`,{method:"DELETE",headers:{authorization:"Bearer "+trackedSessionToken}});

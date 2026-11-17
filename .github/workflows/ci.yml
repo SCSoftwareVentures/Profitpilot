@@ -114,6 +114,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/036_encrypted_attachment_quarantine.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/037_source_ingestion_restriction.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/038_reviewed_permission_changes.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/039_verified_session_operations.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:

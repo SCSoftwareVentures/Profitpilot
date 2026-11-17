@@ -105,13 +105,13 @@ app.get("/v1/tenants/:tenantId/security/audit",membership,requirePermission("sec
 }catch(e){next(e);}});
 
 app.get("/v1/me/sessions",async(req,res,next)=>{try{
- const sessions=await listAuthSessions(req.identity.subject);
- res.json({items:sessions.map(s=>({sessionId:s.jti,issuedAt:s.issued_at,expiresAt:s.expires_at,lastSeenAt:s.last_seen_at,revokedAt:s.revoked_at}))});
+ const sessions=await listAuthSessions(req.identity);
+ res.json({items:sessions.items.map(s=>({sessionId:s.jti,issuedAt:s.issued_at,expiresAt:s.expires_at,lastSeenAt:s.last_seen_at,revokedAt:s.revoked_at})),truncated:sessions.truncated});
 }catch(e){next(e);}});
 app.delete("/v1/me/sessions/:jti",async(req,res,next)=>{try{
  const jti=req.params.jti;
  if(typeof jti!=="string"||jti.length<16||jti.length>128||!/^[A-Za-z0-9._~-]+$/.test(jti))return res.status(400).json({error:"Invalid session identifier"});
- const revoked=await revokeAuthSession(jti,req.identity.subject);
+ const revoked=await revokeAuthSession(jti,req.identity);
  if(!revoked)return res.status(404).json({error:"Active session not found"});
  res.status(200).json({sessionId:jti,revoked:true});
 }catch(e){next(e);}});
