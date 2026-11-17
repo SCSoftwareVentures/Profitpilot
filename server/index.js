@@ -98,7 +98,7 @@ app.delete("/v1/me/sessions/:jti",async(req,res,next)=>{try{
 }catch(e){next(e);}});
 app.post("/v1/tenants/:tenantId/privacy/requests",membership,requirePermission("privacy.requests.submit"),async(req,res,next)=>{try{
  const {requestType,details}=req.body||{};
- if(!["access","correction","export","deletion","restriction"].includes(requestType)||typeof details!=="string"||details.trim().length<3||details.length>2000)
+ if(!["access","correction","export","deletion","restriction","account_closure"].includes(requestType)||typeof details!=="string"||details.trim().length<3||details.length>2000)
   return res.status(400).json({error:"A supported request type and concise description are required"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const created=await client.query("INSERT INTO privacy_requests(tenant_id,subject_user_id,submitted_by,request_type,details) VALUES($1,$2,$2,$3,$4) RETURNING id,request_type,status,created_at",[req.membership.tenantId,req.membership.userId,requestType,details.trim()]);
@@ -181,6 +181,21 @@ for(const [route,permission,fn] of [
   const result=await withPrivacyStepUp(req.membership,req.identity,id,fn+":"+target.toLowerCase(),async(client,proof)=>{
    // fn is from a fixed server-side allowlist, never user input.
    const r=await client.query("SELECT private."+fn+"($1,$2,$3,$4,$5) AS result",[req.membership.tenantId,id,target,req.identity.authTime,proof]);
+   return r.rows[0].result;
+  });
+  if(result.error)return res.status(result.status).json({error:result.error});
+  res.status(result.status).json(result.item);
+ }catch(e){next(e);}});
+}
+for(const [route,permission,fn] of [
+ ["approve-closure","privacy.requests.manage","approve_account_closure"],
+ ["execute-closure","privacy.requests.submit","execute_account_closure"]
+]){
+ app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/"+route,membership,requirePermission(permission),requireStepUp(),async(req,res,next)=>{try{
+  const id=req.params.requestId,erase=req.body?.eraseEmail;
+  if(!privacyRequestIdValid(id)||typeof erase!=="boolean")return res.status(400).json({error:"Valid request ID and explicit eraseEmail choice required"});
+  const result=await withPrivacyStepUp(req.membership,req.identity,id,fn+":"+String(erase),async(client,proof)=>{
+   const r=await client.query("SELECT private."+fn+"($1,$2,$3,$4,$5) AS result",[req.membership.tenantId,id,erase,req.identity.authTime,proof]);
    return r.rows[0].result;
   });
   if(result.error)return res.status(result.status).json({error:result.error});

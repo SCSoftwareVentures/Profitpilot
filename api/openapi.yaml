@@ -33,7 +33,7 @@ paths:
               type: object
               required: [requestType, details]
               properties:
-                requestType: { type: string, enum: [access, correction, export, deletion, restriction] }
+                requestType: { type: string, enum: [access, correction, export, deletion, restriction, account_closure] }
                 details: { type: string, minLength: 3, maxLength: 2000 }
       responses:
         "201": { description: Privacy request recorded for review; no data is automatically exported or deleted }
@@ -170,6 +170,54 @@ paths:
         "403": { description: Permission or MFA required }
         "404": { description: Request or eligible target not found }
         "409": { description: Retention, hold, expiry or approval conflict }
+  /tenants/{tenantId}/privacy/requests/{requestId}/approve-closure:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Independently approve local account closure
+      description: Single-tenant non-owner account only; no holds or outstanding requests. Optional email erasure requires explicitly enabled policy.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eraseEmail]
+              properties:
+                eraseEmail: { type: boolean }
+      responses:
+        "200": { description: Binding one-use approval valid for 15 minutes }
+        "403": { description: Permission or MFA required }
+        "404": { description: Request not found }
+        "409": { description: Ineligible account or retention conflict }
+  /tenants/{tenantId}/privacy/requests/{requestId}/execute-closure:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Execute independently approved local account closure
+      description: Requester only, new MFA after approval, rechecks eligibility and policy. Revokes local sessions and disables account; does not delete external identity or backup data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eraseEmail]
+              properties:
+                eraseEmail: { type: boolean }
+      responses:
+        "200": { description: Local closure receipt }
+        "403": { description: Permission or MFA required }
+        "404": { description: Request not owned by caller }
+        "409": { description: Approval, policy or account conflict }
   /tenants/{tenantId}/privacy/requests/{requestId}/withdraw:
     parameters:
       - $ref: '#/components/parameters/TenantId'
