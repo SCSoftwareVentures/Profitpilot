@@ -16,6 +16,7 @@ import {registerSourceReconciliationRoutes} from "./source-reconciliation.js";
 import {importPayloadAllowed} from "../src/import-privacy.js";
 import {parseFinancialCsv} from "../src/secure-csv.js";
 import {accountRateLimit} from "./request-guard.js";
+import {registerAttachmentQuarantineRoutes} from "./attachment-quarantine.js";
 
 const app=express();
 app.disable("x-powered-by");
@@ -446,6 +447,7 @@ app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requirePer
  res.status(201).json({decision:result});
  }catch(e){next(e);}});
 
+registerAttachmentQuarantineRoutes(app,membership);
 registerInvoiceRoutes(app,membership);
 registerSourceReconciliationRoutes(app,membership);
 registerContributionRoutes(app,membership);

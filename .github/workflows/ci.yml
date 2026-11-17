@@ -111,6 +111,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/033_csv_ingestion_audit.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/034_signing_key_lifecycle.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/035_local_profile_correction.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/036_encrypted_attachment_quarantine.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:
@@ -140,6 +141,7 @@ jobs:
           node --test tests/route-tenant-isolation.integration.test.js
           node --test tests/payroll-allocation.integration.test.js
           node --test tests/account-closure.integration.test.js
+          node --test tests/attachment-quarantine.integration.test.js
           node --test tests/import-retention.integration.test.js
           node --test tests/api.integration.test.js
           node --test tests/tenant-isolation-catalog.integration.test.js
