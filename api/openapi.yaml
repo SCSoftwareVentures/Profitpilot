@@ -15,6 +15,85 @@ paths:
       responses:
         "200": { description: Verified identity only; membership discovery requires a separately reviewed endpoint. }
         "401": { description: Unauthenticated }
+  /tenants/{tenantId}/privacy/requests:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      summary: List privacy requests submitted by the authenticated tenant member
+      responses:
+        "200": { description: The caller's tenant-scoped privacy requests }
+        "403": { description: Privacy request read permission not granted }
+    post:
+      summary: Submit a privacy request for the authenticated tenant member
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestType, details]
+              properties:
+                requestType: { type: string, enum: [access, correction, export, deletion, restriction] }
+                details: { type: string, minLength: 3, maxLength: 2000 }
+      responses:
+        "201": { description: Privacy request recorded for review; no data is automatically exported or deleted }
+        "400": { description: Invalid request }
+  /tenants/{tenantId}/privacy/requests/manage:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      summary: List tenant privacy requests for authorised privacy administrators
+      responses:
+        "200": { description: Tenant privacy request queue }
+        "403": { description: Privacy administration permission not granted }
+  /tenants/{tenantId}/privacy/requests/{requestId}/decision:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Advance a privacy request through verified review and resolution
+      description: Requires privacy administration permission and fresh step-up authentication. A legal hold blocks fulfilment until explicitly released. Fulfilment records a resolution; it does not automatically delete or export underlying data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action, reason]
+              properties:
+                action: { type: string, enum: [verify_identity, begin_review, place_legal_hold, release_legal_hold, fulfil, reject] }
+                reason: { type: string, minLength: 3, maxLength: 1000 }
+                resolutionSummary: { type: string, minLength: 3, maxLength: 2000 }
+      responses:
+        "200": { description: Privacy request status advanced and audit event appended }
+        "400": { description: Invalid action or missing resolution summary }
+        "403": { description: Not authorised or step-up authentication required }
+        "404": { description: Request not found in this tenant }
+        "409": { description: Invalid state transition }
+  /tenants/{tenantId}/privacy/requests/{requestId}/withdraw:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Withdraw the authenticated member's privacy request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 1000 }
+      responses:
+        "200": { description: Request withdrawn }
+        "404": { description: Withdrawable request not found }
   /tenants/{tenantId}/contracts:
     parameters:
       - $ref: '#/components/parameters/TenantId'
