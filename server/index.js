@@ -326,13 +326,14 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requirePer
  }catch(e){next(e);}});
 
 app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requirePermission("matching.decide"),requireStepUp(),async(req,res,next)=>{try{
- const {decision,reason,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed}=req.body||{};
+ const {decision,reason,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,expectedDirection}=req.body||{};
  if(!["confirmed","rejected","held"].includes(decision)||typeof reason!=="string"||reason.trim().length<3||reason.length>2000)return res.status(400).json({error:"Decision and reason are required"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const member=req.membership;
   const candidate=await client.query("SELECT mr.id,mr.contract_id,mr.site_id,mr.service_period_start::text AS service_start,mr.service_period_end::text AS service_end,mr.confidence,mr.evidence,i.direction,i.currency,i.tax_basis FROM match_reviews mr JOIN invoice_lines il ON il.id=mr.invoice_line_id AND il.tenant_id=mr.tenant_id JOIN invoices i ON i.id=il.invoice_id AND i.tenant_id=il.tenant_id WHERE mr.id=$1 AND mr.tenant_id=$2 AND mr.decision IN ('candidate','held') FOR UPDATE OF mr",[req.params.matchId,member.tenantId]);
   if(!candidate.rowCount)return null;
   const m=candidate.rows[0];
+  if(expectedDirection!==undefined&&(!["customer","supplier"].includes(expectedDirection)||expectedDirection!==m.direction))return {error:"Invoice direction mismatch",status:422};
   const canonical=m.evidence?.canonicalInvoice;
   if(canonical?.method==="canonical-invoice-0.1.0"&&decision==="confirmed"&&(canonical.preparedBy===member.userId||canonical.importedBy===member.userId))return {error:"Independent match confirmer required",status:403};
   let expenseReview=null;

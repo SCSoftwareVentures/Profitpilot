@@ -439,6 +439,7 @@ paths:
               properties:
                 decision: { type: string, enum: [confirmed, rejected, held] }
                 reason: { type: string, minLength: 3, maxLength: 2000 }
+                expectedDirection: { type: string, enum: [customer, supplier], description: Optional direction guard for selected match. }
                 costCategory: { type: string, enum: [supplier, subcontractor, other_delivery] }
                 payrollOverlapReviewed: { type: boolean }
                 duplicateExpenseReviewed: { type: boolean }

@@ -2,7 +2,7 @@ import {createPayrollClient,PayrollRequestError} from "./payroll-client.js";
 const $=id=>document.getElementById(id);
 const value=id=>$(id).value.trim();
 const PAGE=50;
-let offset=0,totalRows=0,busy=false,loaded=null,queue=null;
+let offset=0,totalRows=0,busy=false,loaded=null,queue=null,invoiceQueue=null;
 const client=createPayrollClient({getAccessToken:async()=>{const token=value("token");$("token").value="";return token;}});
 const scope=()=>[value("tenant"),value("pool"),value("allocation")].join("|");
 function invalidate(){loaded=null;$("ack").checked=false;$("detail").textContent="";$("confirmButton").disabled=true;}
@@ -11,11 +11,12 @@ function status(message){$("status").textContent=message;}
 function sync(){for(const b of document.querySelectorAll("button"))b.disabled=busy;
  $("previous").disabled=busy||!queue||offset===0;$("next").disabled=busy||!queue||offset+PAGE>=totalRows;
  $("confirmButton").disabled=busy||loaded!==scope()||!$("ack").checked;
+ $("invoiceDecisionButton").disabled=busy||!selectedInvoice()||!$("invoiceAck").checked;
 }
 async function execute(action,write=false){
  if(busy)return;busy=true;for(const el of document.querySelectorAll("input,select,textarea"))el.disabled=true;sync();
  try{await action();}
- catch(e){status(e instanceof PayrollRequestError?e.message:e instanceof TypeError?"Check the required IDs, amounts and evidence fields.":"Request failed. Review current server state before taking further action.");if(write)invalidate();}
+ catch(e){status(e instanceof PayrollRequestError?e.message:e instanceof TypeError?"Check the required IDs, amounts and evidence fields.":"Request failed. Review current server state before taking further action.");if(write){invalidate();clearInvoices();}}
  finally{busy=false;for(const el of document.querySelectorAll("input,select,textarea"))el.disabled=false;sync();}
 }
 function showReview(r,requestedOffset){
@@ -52,6 +53,34 @@ $("clear").addEventListener("click",()=>{for(const el of document.querySelectorA
 
 form("expenseConfirm",async()=>{await client.confirmDeliveryExpense(value("tenant"),value("expenseMatch"),{reason:value("expenseReason"),costCategory:value("expenseCategory"),payrollOverlapReviewed:$("expensePayroll").checked,duplicateExpenseReviewed:$("expenseDuplicate").checked});$("expenseConfirm").reset();status("Expense match confirmed by server. Create a new report to include it.");});
 $("tenant").addEventListener("input",()=>{$("expenseConfirm").reset();});
+function invoiceScope(){return [value("tenant"),value("invoiceBatch")].join("|");}
+function selectedInvoice(){
+ if(!invoiceQueue||invoiceQueue.scope!==invoiceScope())return null;
+ const item=invoiceQueue.items.find(i=>i.matchId===value("invoiceCandidate"));
+ return item&&["candidate","held"].includes(item.decision)?item:null;
+}
+function clearInvoices(){
+ invoiceQueue=null;$("invoiceCandidate").replaceChildren(new Option("Load candidates first",""));
+ $("invoiceEvidence").textContent="";$("invoiceDecide").reset();sync();
+}
+function showInvoice(){
+ $("invoiceDecide").reset();
+ const item=invoiceQueue?.items.find(i=>i.matchId===value("invoiceCandidate"));
+ $("invoiceEvidence").textContent=item?JSON.stringify(item,null,2):"";sync();
+}
+for(const key of ["tenant","invoiceBatch"]){
+ $(key).addEventListener("input",()=>{clearInvoices();$("invoiceStage").reset();$("invoicePrepare").reset();if(key==="tenant"){$("invoiceBatch").value="";$("invoiceCreate").reset();}});
+}
+$("clear").addEventListener("click",clearInvoices);
+$("invoiceCandidate").addEventListener("change",showInvoice);
+$("invoiceDecision").addEventListener("change",()=>{$("invoiceAck").checked=false;sync();});
+$("invoiceAck").addEventListener("change",sync);
+function jsonArray(key){let parsed;try{parsed=JSON.parse(value(key));}catch{throw new TypeError("Invalid JSON");}if(!Array.isArray(parsed))throw new TypeError("JSON array required");return parsed;}
+form("invoiceCreate",async()=>{clearInvoices();$("invoiceBatch").value="";const r=await client.createInvoiceBatch(value("tenant"),{sourceType:value("invoiceSource"),fileName:value("invoiceFile"),sha256:value("invoiceHash"),permissionReference:value("invoicePermission"),periodStart:value("invoiceStart"),periodEnd:value("invoiceEnd")});$("invoiceBatch").value=r.batch.id;$("invoiceCreate").reset();$("invoiceStage").reset();$("invoicePrepare").reset();status(r.idempotent?"Existing batch recovered. Verify source before further action.":"Invoice batch created; no financial records confirmed.");});
+form("invoiceStage",async()=>{clearInvoices();const r=await client.stageInvoiceRows(value("tenant"),value("invoiceBatch"),{rows:jsonArray("invoiceRows")});$("invoiceStage").reset();status("Staged "+r.inserted+" rows; exact replays "+r.duplicates+". Separate source review required.");});
+form("invoicePrepare",async()=>{clearInvoices();const r=await client.prepareInvoices(value("tenant"),value("invoiceBatch"),{manifest:jsonArray("invoiceManifest"),expectedRowCount:Number(value("invoiceCount")),reason:value("invoicePrepareReason"),sourceReviewed:$("invoiceSourceReviewed").checked});$("invoicePrepare").reset();status("Prepared "+r.rowCount+" lines. No matches confirmed. Load candidates with a separate reviewer token.");});
+$("invoiceList").addEventListener("click",()=>execute(async()=>{clearInvoices();const s=invoiceScope();const r=await client.invoiceCandidates(value("tenant"),value("invoiceBatch"));if(s!==invoiceScope())throw new TypeError("Scope changed");invoiceQueue={scope:s,items:r.items};for(const i of r.items)$("invoiceCandidate").append(new Option(i.invoiceNumber+" / line "+i.lineNumber+" / "+i.direction+" / "+i.decision,i.matchId));status("Candidates loaded. Select the exact financial record to review.");}));
+form("invoiceDecide",async()=>{const item=selectedInvoice();if(!item||!$("invoiceAck").checked)throw new TypeError("Select and review candidate");await client.decideInvoiceMatch(value("tenant"),item.matchId,{decision:value("invoiceDecision"),expectedDirection:item.direction,reason:value("invoiceDecisionReason"),acknowledged:true,costCategory:value("invoiceCategory"),payrollOverlapReviewed:$("invoiceOverlap").checked,duplicateExpenseReviewed:$("invoiceDuplicate").checked});clearInvoices();status("Decision recorded. Reload candidates to verify current state.");});
 function clearReport(){$("reportResult").textContent="";}
 for(const key of ["tenant","reportContract","reportSite","reportStart","reportEnd"]){$(key).addEventListener("input",()=>{$("reportId").value="";clearReport();});}
 $("reportId").addEventListener("input",clearReport);

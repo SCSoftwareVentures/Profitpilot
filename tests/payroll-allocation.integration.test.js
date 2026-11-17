@@ -298,7 +298,9 @@ test("independent payroll decisions, exact source reconciliation and maker-check
    const p=path(tenantA)+"/matches/"+item.matchId+"/decision";
    const body={decision:"confirmed",reason:"Independently reviewed synthetic source mapping",costCategory:"supplier",payrollOverlapReviewed:true,duplicateExpenseReviewed:true};
    assert.equal((await send("POST",p,"ci-payroll-owner",body)).status,403);
-   assert.equal((await send("POST",p,"ci-payroll-reviewer",body)).status,201);
+   assert.equal((await send("POST",p,"ci-payroll-reviewer",{...body,expectedDirection:"customer"})).status,422);
+   const confirmedMatch=await browserClient("ci-payroll-reviewer").decideInvoiceMatch(tenantA,item.matchId,{...body,expectedDirection:"supplier",acknowledged:true});
+   assert.equal(confirmedMatch.decision.decision,"confirmed");
   }
   const canonicalReport=await browserClient("ci-payroll-importer").createContributionReport(tenantA,reportBody);
   assert.equal(canonicalReport.outputs.contribution,"15.01");

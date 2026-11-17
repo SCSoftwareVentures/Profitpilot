@@ -56,6 +56,37 @@ export function createPayrollClient({getAccessToken,fetchImpl=globalThis.fetch}=
   readAllocation(tenant,poolId,allocationId,{signal}={}){
    return request(allocation(tenant,poolId,allocationId),{signal});
   },
+  createInvoiceBatch(tenant,{sourceType,fileName,sha256,permissionReference,periodStart,periodEnd,signal}={}){
+   if(!["customer_invoice","supplier_invoice"].includes(sourceType)||typeof sha256!=="string"||!/^[a-f0-9]{64}$/i.test(sha256)||![periodStart,periodEnd].every(v=>typeof v==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(v))||periodEnd<periodStart)throw new TypeError("Invalid invoice source metadata");
+   return request(root(tenant)+"/imports",{body:{sourceType,fileName:text(fileName,1,255),sha256,permissionReference:text(permissionReference,3,1000),periodStart,periodEnd},signal});
+  },
+  stageInvoiceRows(tenant,batchId,{rows,signal}={}){
+   if(!Array.isArray(rows)||rows.length<1||rows.length>200||rows.some(r=>!r||typeof r!=="object"||Array.isArray(r)))throw new TypeError("One to 200 invoice rows required");
+   return request(batch(tenant,batchId)+"/rows",{body:{rows},signal});
+  },
+  prepareInvoices(tenant,batchId,{manifest,expectedRowCount,reason,sourceReviewed,signal}={}){
+   if(sourceReviewed!==true||!Array.isArray(manifest)||manifest.length<1||manifest.length>200)throw new TypeError("Explicit source reconciliation required");
+   const safe=manifest.map(h=>{
+    if(!h||typeof h.invoiceNumber!=="string"||!/^[A-Z0-9][A-Z0-9._/-]{0,79}$/.test(h.invoiceNumber)||typeof h.total!=="string"||! /^-?(0|[1-9]\d{0,11})\.\d{2}$/.test(h.total)||h.total==="-0.00")throw new TypeError("Invalid declared invoice");
+    return {invoiceNumber:h.invoiceNumber,total:h.total,lineCount:int(h.lineCount,1,200)};
+   });
+   return request(batch(tenant,batchId)+"/invoices/prepare",{body:{manifest:safe,expectedRowCount:int(expectedRowCount,1,200),reason:text(reason,3,1000),sourceReviewed:true},fresh:true,signal});
+  },
+  async invoiceCandidates(tenant,batchId,{signal}={}){
+   const r=await request(batch(tenant,batchId)+"/invoices/candidates",{fresh:true,signal});
+   if(r?.batchId!==batchId.toLowerCase()||!Array.isArray(r.items)||r.items.length<1||r.items.length>200||r.externallyVerified!==false||r.items.some(i=>!i||!UUID.test(i.matchId||"")||!["customer","supplier"].includes(i.direction)||!["candidate","held","rejected","confirmed"].includes(i.decision)))throw new PayrollRequestError(422);
+   if(new Set(r.items.map(i=>i.matchId)).size!==r.items.length)throw new PayrollRequestError(422);
+   return r;
+  },
+  decideInvoiceMatch(tenant,matchId,{decision,expectedDirection,reason,acknowledged,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,signal}={}){
+   if(acknowledged!==true||!["confirmed","held","rejected"].includes(decision)||!["customer","supplier"].includes(expectedDirection))throw new TypeError("Explicit match review required");
+   const body={decision,expectedDirection,reason:text(reason,3,2000)};
+   if(decision==="confirmed"&&expectedDirection==="supplier"){
+    if(!["supplier","subcontractor","other_delivery"].includes(costCategory)||payrollOverlapReviewed!==true||duplicateExpenseReviewed!==true)throw new TypeError("Explicit supplier checks required");
+    Object.assign(body,{costCategory,payrollOverlapReviewed:true,duplicateExpenseReviewed:true});
+   }
+   return request(root(tenant)+"/matches/"+id(matchId)+"/decision",{body,fresh:true,signal});
+  },
   confirmDeliveryExpense(tenant,matchId,{reason,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,signal}={}){
    if(!["supplier","subcontractor","other_delivery"].includes(costCategory)||payrollOverlapReviewed!==true||duplicateExpenseReviewed!==true)throw new TypeError("Explicit cost category and overlap checks required");
    return request(root(tenant)+"/matches/"+id(matchId)+"/decision",{body:{decision:"confirmed",reason:text(reason,3,2000),costCategory,payrollOverlapReviewed:true,duplicateExpenseReviewed:true},fresh:true,signal});

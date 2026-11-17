@@ -93,3 +93,22 @@ test("expense confirmation requires explicit classification, duplicate review an
  assert.equal(calls[0].path,`/v1/tenants/${tenant}/matches/${run}/decision`);
  assert.deepEqual(tokens,[true]);assert.deepEqual(JSON.parse(calls[0].opts.body),{decision:"confirmed",reason:"Reviewed",costCategory:"supplier",payrollOverlapReviewed:true,duplicateExpenseReviewed:true});
 });
+
+test("invoice workflow uses fixed routes, explicit source review and MFA",async()=>{
+ const {client,calls,tokens}=fixture();
+ const manifest=[{invoiceNumber:"INV-1",total:"10.00",lineCount:1}];
+ assert.throws(()=>client.prepareInvoices(tenant,batch,{manifest,expectedRowCount:1,reason:"Review",sourceReviewed:false}),TypeError);
+ assert.throws(()=>client.prepareInvoices(tenant,batch,{manifest:[{...manifest[0],total:10}],expectedRowCount:1,reason:"Review",sourceReviewed:true}),TypeError);
+ await client.prepareInvoices(tenant,batch,{manifest,expectedRowCount:1,reason:"Review",sourceReviewed:true});
+ await client.decideInvoiceMatch(tenant,run,{decision:"confirmed",expectedDirection:"customer",reason:"Review",acknowledged:true,costCategory:"supplier"});
+ assert.deepEqual(tokens,[true,true]);
+ assert.deepEqual(calls.map(c=>c.path),["/v1/tenants/"+tenant+"/imports/"+batch+"/invoices/prepare","/v1/tenants/"+tenant+"/matches/"+run+"/decision"]);
+ assert.deepEqual(JSON.parse(calls[1].opts.body),{decision:"confirmed",expectedDirection:"customer",reason:"Review"});
+ assert.throws(()=>client.decideInvoiceMatch(tenant,run,{decision:"confirmed",expectedDirection:"supplier",reason:"Review",acknowledged:true,costCategory:"supplier"}),TypeError);
+});
+test("invoice candidate list fails closed for wrong batch, duplicate IDs and unknown direction",async()=>{
+ const item={matchId:run,direction:"customer",decision:"candidate"};
+ const result={batchId:batch,items:[item],externallyVerified:false};
+ for(const reply of [{...result,batchId:site},{...result,items:[item,item]},{...result,items:[{...item,direction:"unknown"}]}])await assert.rejects(fixture(reply).client.invoiceCandidates(tenant,batch),e=>e.status===422);
+ const f=fixture(result);assert.deepEqual(await f.client.invoiceCandidates(tenant,batch),result);assert.deepEqual(f.tokens,[true]);
+});
