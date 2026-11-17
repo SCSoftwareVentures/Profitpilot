@@ -35,7 +35,7 @@ function validateLedger(ledger){
   const ids=new Set();
   let previous=null;
   for(const event of ledger.events){
-    if(!event||!VALUE_EVENT_TYPES.has(event.type)||ids.has(event.id)||!textValue(event.id))throw new TypeError("Value ledger event history is malformed");
+    if(!event||!VALUE_EVENT_TYPES.has(event.type)||ids.has(event.id)||!textValue(event.id)||!textValue(event.valueId)||cents(event.amount)===null||cents(event.amount)<=0n||!textValue(event.currency)||!textValue(event.taxBasis)||!isIsoDate(event.periodStart)||!isIsoDate(event.periodEnd)||event.periodEnd<event.periodStart||!textValue(event.actorId)||!textValue(event.evidenceRef)||!textValue(event.sourceRef)||!OFFSET_TIMESTAMP.test(event.occurredAt)||!Number.isFinite(Date.parse(event.occurredAt)))throw new TypeError("Value ledger event history is malformed");
     ids.add(event.id);
     if(previous&&Date.parse(event.occurredAt)<Date.parse(previous.occurredAt))throw new TypeError("Value ledger events must be chronological");
     previous=event;
@@ -73,7 +73,7 @@ export function appendValueEvent(ledger,input){
   if(input.type==="invoiced"&&!textValue(input.invoiceRef))throw new TypeError("Invoice events require an invoice reference");
   const sameValue=ledger.events.filter(event=>event.valueId===input.valueId);
   for(const event of sameValue){
-    if(event.currency!==reportingBasis.currency||event.taxBasis!==reportingBasis.taxBasis)throw new TypeError("Value history cannot silently mix currencies or tax bases");
+    if(event.currency!==reportingBasis.currency||event.taxBasis!==reportingBasis.taxBasis||event.periodStart!==reportingBasis.periodStart||event.periodEnd!==reportingBasis.periodEnd)throw new TypeError("Value history cannot silently mix currencies, tax bases or reporting periods");
   }
   if(["credited","refunded"].includes(input.type)){
     const invoiced=sameValue.filter(event=>event.type==="invoiced"&&event.invoiceRef===input.invoiceRef).reduce((sum,event)=>sum+cents(event.amount),0n);
@@ -91,19 +91,23 @@ export function appendValueEvent(ledger,input){
 
 export function summarizeValueLedger(ledger){
   validateLedger(ledger);
-  const totals=Object.fromEntries(TOTAL_TYPES.map(type=>[type,"0.00"]));
-  const accumulators=Object.fromEntries(TOTAL_TYPES.map(type=>[type,0n]));
-  for(const event of ledger.events)accumulators[event.type]+=cents(event.amount);
-  for(const type of TOTAL_TYPES)totals[type]=decimal(accumulators[type]);
-  const currencies=[...new Set(ledger.events.map(event=>event.currency))];
-  const taxBases=[...new Set(ledger.events.map(event=>event.taxBasis))];
+  const groups=new Map();
+  for(const event of ledger.events){
+    const key=[event.currency,event.taxBasis,event.periodStart,event.periodEnd].join("|");
+    if(!groups.has(key))groups.set(key,{currency:event.currency,taxBasis:event.taxBasis,periodStart:event.periodStart,periodEnd:event.periodEnd,accumulators:Object.fromEntries(TOTAL_TYPES.map(type=>[type,0n]))});
+    groups.get(key).accumulators[event.type]+=cents(event.amount);
+  }
+  const totalsByBasis=[...groups.values()].map(group=>({
+    currency:group.currency,taxBasis:group.taxBasis,periodStart:group.periodStart,periodEnd:group.periodEnd,
+    totalsByState:Object.fromEntries(TOTAL_TYPES.map(type=>[type,decimal(group.accumulators[type])]))
+  }));
+  const single=totalsByBasis.length===1?totalsByBasis[0]:null;
   return {
     ledgerId:ledger.id,tenantId:ledger.tenantId,eventCount:ledger.events.length,
-    totalsByState:totals,
-    currency:currencies.length===1?currencies[0]:null,
-    taxBasis:taxBases.length===1?taxBases[0]:null,
-    mixedReportingBasis:currencies.length>1||taxBases.length>1,
+    totalsByState:single?single.totalsByState:null,
+    totalsByBasis,
+    mixedReportingBasis:totalsByBasis.length>1,
     settlementStatus:"not_in_scope",
-    interpretation:"Stage totals are reported separately and must not be added together as realised value. Credits and refunds remain separate. No provider settlement, bank receipt, profit or recovered value is certified."
+    interpretation:"Stage totals are grouped by currency, tax basis and reporting period. Totals at different lifecycle stages must not be added together as realised value. Credits and refunds remain separate. No provider settlement, bank receipt, profit or recovered value is certified."
   };
 }
