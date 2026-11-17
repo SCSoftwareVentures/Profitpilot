@@ -15,6 +15,13 @@ function cleanState(state){
  const seen=new Set();
  return state.markers.map(m=>{
   // Global account security markers intentionally have no tenant or provider identifier.
+  if(m?.kind==="individual_session_revocation"){
+   if(!uuid.test(m.id)||!hex.test(m.tokenFingerprint||"")||typeof m.at!=="string"||typeof m.expiresAt!=="string"||!/^\d+(\.\d+)?$/.test(m.at)||!/^\d+(\.\d+)?$/.test(m.expiresAt))throw Error("Invalid individual session revocation marker");
+   const index=m.kind+":"+m.id;
+   if(seen.has(index))throw Error("Duplicate privacy marker");
+   seen.add(index);
+   return {kind:m.kind,id:m.id,tokenFingerprint:m.tokenFingerprint,at:m.at,expiresAt:m.expiresAt};
+  }
   if(m?.kind==="account_session_revocation"){
    if(!uuid.test(m.id)||!uuid.test(m.userId)||typeof m.at!=="string"||!/^\d{1,15}$/.test(m.at)||!Number.isSafeInteger(Number(m.at)))throw Error("Invalid session revocation marker");
    const index=m.kind+":"+m.id;

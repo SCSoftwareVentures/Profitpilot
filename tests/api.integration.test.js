@@ -131,6 +131,23 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(revokeResponse.status,200,"a user must be able to revoke another one of their own sessions");
     const revokedSessionUse=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+revocableSessionToken}});
     assert.equal(revokedSessionUse.status,401,"a revoked access session must be rejected on its next request");
+    const singleEvidence=(await admin.query("SELECT id FROM private.individual_session_revocation_receipts WHERE token_fingerprint=public.digest(convert_to($1,'UTF8'),'sha256')",[sessionPayload.jti])).rows[0];
+    assert.ok(singleEvidence);
+    await assert.rejects(()=>appPool.query("SELECT * FROM private.individual_session_revocation_receipts"),/permission denied/i);
+    await assert.rejects(()=>admin.query("DELETE FROM private.individual_session_revocation_receipts WHERE id=$1",[singleEvidence.id]),/immutable/i);
+    const singleProbe=await admin.connect();
+    try{
+     await singleProbe.query("BEGIN");
+     await singleProbe.query("UPDATE private.auth_sessions SET revoked_at=NULL,revocation_reason=NULL WHERE jti=$1",[sessionPayload.jti]);
+     const inconsistent=(await singleProbe.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;
+     assert.ok(inconsistent.violations.some(v=>v.kind==="individually_revoked_session_reinstated"&&v.id===singleEvidence.id));
+     await singleProbe.query("DELETE FROM private.auth_sessions WHERE jti=$1",[sessionPayload.jti]);
+     const denied=(await singleProbe.query("SELECT private.accept_bound_access_session($1,$2,$3,to_timestamp($4),to_timestamp($5)) AS allowed",[sessionPayload.jti,sessionPayload.sub,sessionPayload.iss,sessionPayload.iat,sessionPayload.exp])).rows[0];
+     assert.equal(denied.allowed,false,"a missing session row must not bypass an independent revocation receipt");
+    }finally{await singleProbe.query("ROLLBACK");singleProbe.release();}
+    const singleState=(await admin.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;
+    assert.ok(singleState.markers.some(m=>m.kind==="individual_session_revocation"&&m.id===singleEvidence.id));
+    assert.equal(JSON.stringify(singleState.markers).includes(sessionPayload.jti),false);
 
     // Isolated identity: exercise a security incident without breaking the other fixtures.
     const incidentSubject="ci-api-incident";

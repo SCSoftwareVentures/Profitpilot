@@ -26,6 +26,12 @@ const revocationCheckpoint=signCheckpoint({markers:revocations,violations:[]},op
 const revocationVerify={...options,expectedDigest:checkpointDigest(revocationCheckpoint)};
 assert.throws(()=>verifyCheckpoint(revocationCheckpoint,old,revocationVerify),/missing or has changed/);
 assert.equal(verifyCheckpoint(revocationCheckpoint,fresh,revocationVerify).verified,true);
+const individual=live.markers.filter(m=>m.kind==="individual_session_revocation");
+assert.ok(individual.length>=1,"physical restore drill must include individually revoked access tokens");
+const individualCheckpoint=signCheckpoint({markers:individual,violations:[]},options);
+const individualVerify={...options,expectedDigest:checkpointDigest(individualCheckpoint)};
+assert.throws(()=>verifyCheckpoint(individualCheckpoint,old,individualVerify),/missing or has changed/);
+assert.equal(verifyCheckpoint(individualCheckpoint,fresh,individualVerify).verified,true);
 const checkpoint=signCheckpoint(live,options);
 const verify={...options,expectedDigest:checkpointDigest(checkpoint)};
 assert.throws(()=>verifyCheckpoint(checkpoint,old,verify),/missing or has changed/);

@@ -64,3 +64,18 @@ test("account-wide revocation evidence survives repeated incidents without discl
  for(const at of ["-1","1.5","Infinity","12345678901234567"])assert.throws(()=>signCheckpoint({markers:[{...first,at}],violations:[]},{key,deploymentId,now}),/Invalid session revocation marker/);
  assert.equal(JSON.stringify(latestDoc).includes("tenantId"),false);
 });
+
+test("individual revocation receipts detect rollback and fingerprint or expiry substitution",()=>{
+ const receipt={kind:"individual_session_revocation",id:uuid(10),tokenFingerprint:"de".repeat(32),at:"1794873600.123456",expiresAt:"1794873900.000000"};
+ const st={markers:[receipt],violations:[]};
+ const signed=signCheckpoint(st,{key,deploymentId,now});
+ const options={...opt,expectedDigest:checkpointDigest(signed)};
+ assert.equal(verifyCheckpoint(signed,st,options).requiredMarkers,1);
+ assert.throws(()=>verifyCheckpoint(signed,{markers:[],violations:[]},options),/missing or has changed/);
+ for(const patch of [{tokenFingerprint:"ef".repeat(32)},{expiresAt:"1794873901.000000"},{at:"1794873601.123456"}]){
+  assert.throws(()=>verifyCheckpoint(signed,{markers:[{...receipt,...patch}],violations:[]},options),/missing or has changed/);
+ }
+ assert.throws(()=>verifyCheckpoint(signed,{...st,violations:[{kind:"individually_revoked_session_reinstated"}]},options),/inconsistent/);
+ assert.throws(()=>signCheckpoint({markers:[{...receipt,tokenFingerprint:"raw-token"}],violations:[]},{key,deploymentId,now}),/Invalid individual session revocation marker/);
+ assert.equal(JSON.stringify(signed).includes("subject"),false);
+});
