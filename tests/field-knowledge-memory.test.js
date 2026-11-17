@@ -34,6 +34,7 @@ test("customer-visible knowledge is restricted to the matching customer in the t
   assert.equal(canReadKnowledgeEntry(entry,{tenantId:"tenant-001",customerId:"customer-1"}),true);
   assert.equal(canReadKnowledgeEntry(entry,{tenantId:"tenant-001",customerId:"customer-2"}),false);
   assert.equal(canReadKnowledgeEntry(entry,{tenantId:"tenant-002",customerId:"customer-1"}),false);
+  assert.equal(canReadKnowledgeEntry(entry,{tenantId:"tenant-001",userId:"admin-1",roles:["admin"]}),true);
 });
 
 test("restricted knowledge is owner-only except tenant owner/admin roles",()=>{
