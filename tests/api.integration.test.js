@@ -72,6 +72,43 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const noToken=await request("/v1/me");
     assert.equal(noToken.status,401,"requests without a bearer token must be rejected");
 
+    // Adversarial API boundary matrix: a valid identity from tenant A must
+    // never acquire tenant B access by changing URL IDs or supplying B objects.
+    // Check denial before any operation can create or mutate a record.
+    const forbiddenCrossTenantRequests=[
+      {path:`/v1/tenants/${tenantB}/contracts`},
+      {path:`/v1/tenants/${tenantB}/imports`,method:"POST",body:{
+        sourceType:"customer_invoice",fileName:"synthetic.csv",
+        sha256:"f".repeat(64),permissionReference:"synthetic test",
+        periodStart:"2026-01-01",periodEnd:"2026-01-31"
+      }},
+      {path:`/v1/tenants/${tenantB}/imports/${importB}/rows`,method:"POST",
+       body:{rows:[{synthetic:"only"}]}},
+      {path:`/v1/tenants/${tenantB}/imports/${importB}/validate`,method:"POST",body:{}},
+      {path:`/v1/tenants/${tenantB}/matches/99999999-9999-4999-8999-999999999999/decision`,
+       method:"POST",body:{decision:"held",reason:"synthetic cross-tenant denial"}},
+      {path:`/v1/tenants/${tenantB}/calculations`,method:"POST",body:{
+        contractId:contractB,siteId:"99999999-9999-4999-8999-999999999999",
+        periodStart:"2026-01-01",periodEnd:"2026-01-31"
+      }}
+    ];
+    for(const entry of forbiddenCrossTenantRequests){
+      const response=await request(entry.path,{subject:"ci-api-analyst",...entry});
+      assert.equal(response.status,403,`cross-tenant API access must be forbidden: ${entry.method||"GET"} ${entry.path}`);
+    }
+    // A legitimate read-only member may list own contracts but may not
+    // register import metadata or write rows, even with a valid token.
+    const readerContracts=await request(`/v1/tenants/${tenantA}/contracts`,{subject:"ci-api-reader"});
+    assert.equal(readerContracts.status,200,"read-only tenant members retain permitted reads");
+    const readerWrite=await request(`/v1/tenants/${tenantA}/imports`,{
+      subject:"ci-api-reader",method:"POST",body:{
+        sourceType:"customer_invoice",fileName:"reader-denied.csv",
+        sha256:"a".repeat(64),permissionReference:"synthetic test",
+        periodStart:"2026-01-01",periodEnd:"2026-01-31"
+      }
+    });
+    assert.equal(readerWrite.status,403,"read-only tenant members cannot register imports");
+
     const own=await request(`/v1/tenants/${tenantA}/contracts`,{subject:"ci-api-analyst"});
     assert.equal(own.status,200);
     const ownBody=await own.json();
