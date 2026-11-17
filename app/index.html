@@ -42,6 +42,13 @@ const promiseDemoRecords=(()=>{
   return [accepted,disputed,task];
 })();
 
+const profitLeakDemoResult=detectProfitLeaks({
+  reportingBasis:{currency:"AUD",taxBasis:"gst_exclusive",periodStart:"2026-11-01",periodEnd:"2026-11-30"},
+  contract:{amount:"1000.00",currency:"AUD",taxBasis:"gst_exclusive",periodStart:"2026-11-01",periodEnd:"2026-11-30",coverage:"complete",evidenceRef:"synthetic:contract-C102"},
+  variations:{approvedAmount:"100.00",currency:"AUD",taxBasis:"gst_exclusive",periodStart:"2026-11-01",periodEnd:"2026-11-30",coverage:"complete",evidenceRef:"synthetic:approved-variation-V3"},
+  invoices:{amount:"950.00",currency:"AUD",taxBasis:"gst_exclusive",periodStart:"2026-11-01",periodEnd:"2026-11-30",coverage:"complete",evidenceRef:"synthetic:invoice-batch-11",rows:[{status:"unmatched",amount:"25.50",evidenceRef:"synthetic:invoice-row-17"},{status:"duplicate_candidate",amount:"25.50",evidenceRef:"synthetic:invoice-row-18"}]},
+  payroll:{poolAmount:"1000.00",allocatedAmount:"850.10",currency:"AUD",taxBasis:"gst_exclusive",periodStart:"2026-11-01",periodEnd:"2026-11-30",coverage:"complete",evidenceRef:"synthetic:payroll-pool-11"}
+});
 const fmt=formatDemoMoney;
 const escapeHtml=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
 const displayMargin=value=>typeof value==="string"&&/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value)?escapeHtml(value)+"%":"Unavailable";
