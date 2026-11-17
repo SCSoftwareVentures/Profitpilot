@@ -7,6 +7,10 @@ on:
   pull_request:
     branches:
       - main
+      - integration/pr25-pr26-validation
+      - feature/job-readiness-engine
+      - feature/promise-ledger
+      - feature/verified-value-ledger
   workflow_dispatch:
 
 permissions:
@@ -92,6 +96,8 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/010_payroll_source_row_ledger.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/011_payroll_confirmation_integrity.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/012_contract_tax_basis.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/013_actor_authorization.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/014_match_decision_audit.sql
 
       - name: Audit every tenant-scoped table and tenant-to-tenant foreign key
         env:
@@ -120,7 +126,42 @@ jobs:
       - name: Build production API image
         run: docker build --pull -t profitpilot-api:ci .
 
-      - name: Start container and verify database health endpoint
+      - name: Enable verified TLS on ephemeral PostgreSQL
+        env:
+          PGPASSWORD: ci-admin-password
+        run: |
+          set -eu
+          CERT="$RUNNER_TEMP/profitpilot-postgres.crt"
+          KEY="$RUNNER_TEMP/profitpilot-postgres.key"
+          openssl req -new -x509 -newkey rsa:2048 -nodes -days 1 -keyout "$KEY" -out "$CERT" -subj "/CN=localhost" -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" -addext "basicConstraints=critical,CA:TRUE"
+          PG_CONTAINER="$(docker ps --filter "ancestor=postgres:16-alpine" --format '{{.ID}}' | head -n 1)"
+          test -n "$PG_CONTAINER"
+          docker cp "$CERT" "$PG_CONTAINER:/var/lib/postgresql/data/server.crt"
+          docker cp "$KEY" "$PG_CONTAINER:/var/lib/postgresql/data/server.key"
+          docker exec -u root "$PG_CONTAINER" chown postgres:postgres /var/lib/postgresql/data/server.crt /var/lib/postgresql/data/server.key
+          docker exec -u root "$PG_CONTAINER" chmod 600 /var/lib/postgresql/data/server.key
+          ADMIN_URL="postgresql://profitpilot_admin:ci-admin-password@127.0.0.1:5432/profitpilot"
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl='on'"
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl_cert_file='server.crt'"
+          psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "ALTER SYSTEM SET ssl_key_file='server.key'"
+          docker restart "$PG_CONTAINER"
+          for attempt in $(seq 1 30); do
+            if psql "$ADMIN_URL" -v ON_ERROR_STOP=1 -c "SHOW ssl" | grep -q on; then break; fi
+            sleep 2
+          done
+          psql "$ADMIN_URL?sslmode=require" -v ON_ERROR_STOP=1 -c "SHOW ssl" | grep -q on
+          {
+            echo 'DATABASE_SSL_CA<<PROFITPILOT_CA'
+            cat "$CERT"
+            echo 'PROFITPILOT_CA'
+          } >> "$GITHUB_ENV"
+
+      - name: Verify PostgreSQL TLS certificate validation
+        env:
+          DATABASE_SSL_TEST_URL: postgresql://profitpilot_app:${{ env.POSTGRES_APP_PASSWORD }}@127.0.0.1:5432/profitpilot
+        run: node --test tests/db-tls.integration.test.js
+
+      - name: Start production-mode container and verify database TLS health endpoint
         env:
           CORS_ORIGIN: https://ci.invalid
           AUTH_ISSUER: https://profitpilot-ci.invalid/
@@ -129,10 +170,10 @@ jobs:
         run: |
           set -eu
           DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@127.0.0.1:5432/profitpilot"
-          docker run -d --network host --name profitpilot-api-ci --init --read-only --cap-drop=ALL --security-opt=no-new-privileges --pids-limit=100 --tmpfs /tmp:rw,noexec,nosuid,size=64m -e NODE_ENV=production -e PORT=8080 -e DATABASE_URL="$DATABASE_URL" -e DATABASE_SSL=false -e CORS_ORIGIN="$CORS_ORIGIN" -e AUTH_ISSUER="$AUTH_ISSUER" -e AUTH_AUDIENCE="$AUTH_AUDIENCE" -e AUTH_JWKS_URL="$AUTH_JWKS_URL" -e TENANT_CONTEXT_HMAC_SECRET="$TENANT_CONTEXT_HMAC_SECRET" profitpilot-api:ci
+          docker run -d --network host --name profitpilot-api-ci --init --read-only --cap-drop=ALL --security-opt=no-new-privileges --pids-limit=100 --tmpfs /tmp:rw,noexec,nosuid,size=64m -e NODE_ENV=production -e PORT=8080 -e DATABASE_URL="$DATABASE_URL" -e DATABASE_SSL=true -e DATABASE_SSL_CA -e CORS_ORIGIN="$CORS_ORIGIN" -e AUTH_ISSUER="$AUTH_ISSUER" -e AUTH_AUDIENCE="$AUTH_AUDIENCE" -e AUTH_JWKS_URL="$AUTH_JWKS_URL" -e TENANT_CONTEXT_HMAC_SECRET="$TENANT_CONTEXT_HMAC_SECRET" profitpilot-api:ci
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8080/health | grep -q '"database":"connected"'; then
-              echo 'Production container health check passed'
+              echo 'Production-mode verified database TLS health check passed'
               docker rm -f profitpilot-api-ci
               exit 0
             fi
