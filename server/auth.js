@@ -69,7 +69,7 @@ export function authRequired(){
    return res.status(503).json({error:"Session security service unavailable"});
   }
   if(revoked)return res.status(401).json({error:"Session revoked or unavailable"});
-  req.identity={subject:payload.sub,email:typeof payload.email==="string"?payload.email:null,jti:payload.jti,authTime:Number.isSafeInteger(payload.auth_time)&&payload.auth_time>=0&&payload.auth_time<=payload.iat+5?payload.auth_time:null,acr:typeof payload.acr==="string"?payload.acr:null};
+  req.identity={subject:payload.sub,email:typeof payload.email==="string"?payload.email:null,jti:payload.jti,authTime:Number.isSafeInteger(payload.auth_time)&&payload.auth_time>=0&&payload.auth_time<=payload.iat+5?payload.auth_time:null,acr:typeof payload.acr==="string"?payload.acr:null,amr:Array.isArray(payload.amr)&&payload.amr.every(v=>typeof v==="string")?payload.amr:[]};
   return next();
  };
 }
@@ -116,7 +116,8 @@ export function requireStepUp(){
   const now=Math.floor(Date.now()/1000);
   const fresh=Number.isSafeInteger(authTime)&&authTime>=0&&authTime<=now&&now-authTime<=maxAge;
   const acr=req.identity?.acr;
-  if(!requiredAcr||!Number.isInteger(maxAge)||maxAge<30||maxAge>900||!fresh||acr!==requiredAcr){
+  const hasMfa=Array.isArray(req.identity?.amr)&&req.identity.amr.includes("mfa");
+  if(!hasMfa||!requiredAcr||!Number.isInteger(maxAge)||maxAge<30||maxAge>900||!fresh||acr!==requiredAcr){
    return res.status(403).json({error:"Recent step-up authentication required"});
   }
   return next();
