@@ -9,7 +9,7 @@ import {randomUUID,createHash} from "node:crypto";
 import {withTenant,health} from "./db.js";
 import {validateProductionSecrets} from "./production-config.js";
 validateProductionSecrets();
-import {authRequired,requireRole} from "./auth.js";
+import {authRequired,requireRole,requireRecentMfa} from "./auth.js";
 import {parseCsv,validateInvoiceRows,isIsoDate,money} from "../src/engine.js";
 
 const app=express();
@@ -177,6 +177,23 @@ app.get("/v1/tenants/:tenantId/calculations/:runId",membership,async(req,res,nex
  res.json(result.rows[0]);
  }catch(e){next(e);}});
  
+
+// A single, ephemeral, JSON summary; never an unrestricted database download.
+app.post("/v1/tenants/:tenantId/calculations/:runId/export",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const runId=req.params.runId,purpose=req.body?.purpose;
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(runId)||!["internal_review","customer_reporting","accountant_review"].includes(purpose)||Object.keys(req.body||{}).length!==1)
+    return res.status(400).json({error:"Valid calculation ID and approved export purpose required"});
+  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
+   const r=await client.query("SELECT private.export_calculation_summary($1,$2,$3) AS summary",[req.membership.tenantId,runId,purpose]);
+   return r.rows[0]?.summary;
+  });
+  if(!result)return res.status(404).json({error:"Calculation run not found"});
+  res.set("Content-Disposition",'attachment; filename="profitpilot-calculation.json"');
+  res.set("X-Content-Type-Options","nosniff");
+  res.json(result);
+ }catch(e){if(e.code==="42501")return res.status(403).json({error:"Export authority denied"});next(e);}
+});
 
 app.use((err,req,res,next)=>{const id=randomUUID();const status=err.code==="23505"?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
