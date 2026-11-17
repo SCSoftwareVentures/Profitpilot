@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {signCheckpoint,verifyCheckpoint,checkpointDigest,assessBackupInventory} from "../scripts/privacy-restore-checkpoint.js";
+import {signCheckpoint,verifyCheckpoint,checkpointDigest,assessBackupInventory,restorePoolOptions} from "../scripts/privacy-restore-checkpoint.js";
 const now=Date.parse("2026-11-17T00:00:00Z"),key="ab".repeat(32),deploymentId="profitpilot-ci";
 const uuid=n=>n.toString(16).padStart(8,"0")+"-1111-4111-8111-111111111111";
 const closure={kind:"closure",id:uuid(1),tenantId:uuid(2),requestId:uuid(3),at:"1794873600.123456",emailErased:true};
@@ -31,4 +31,9 @@ test("backup expiry is reviewed, never automatically deleted; legal holds must h
  assert.deepEqual(result[1].issues,["missing_hold_evidence"]);
  assert.deepEqual(result[2].issues,[]);
  assert.throws(()=>assessBackupInventory([b],{now,maxRetentionDays:0}),/policy/);
+});
+
+test("operator recovery connection requires verified TLS without URL overrides",()=>{
+ assert.deepEqual(restorePoolOptions("postgresql://operator:placeholder@db.example.invalid/profitpilot").ssl,{rejectUnauthorized:true});
+ for(const url of ["postgres://operator@db.example.invalid/profitpilot?sslmode=disable","postgres://operator@db.example.invalid/profitpilot?sslmode=require","postgresql://operator@db.example.invalid/profitpilot?sslrootcert=anything","https://db.example.invalid/profitpilot","not-a-url"])assert.throws(()=>restorePoolOptions(url),/PostgreSQL URL/);
 });

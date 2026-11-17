@@ -65,10 +65,18 @@ export function assessBackupInventory(inventory,{now=Date.now(),maxRetentionDays
   return {id:b.id,legalHold:b.legalHold,expiryReviewDue:!b.legalHold&&expires<=now,issues};
  });
 }
-async function readState(){
- const connectionString=process.env.PRIVACY_ADMIN_DATABASE_URL;
+export function restorePoolOptions(connectionString){
  if(!connectionString)throw Error("Operator database connection required");
- const pool=new pg.Pool({connectionString,ssl:{rejectUnauthorized:true},max:1,connectionTimeoutMillis:5000,statement_timeout:15000});
+ let url;
+ try{url=new URL(connectionString);}catch{throw Error("Invalid operator PostgreSQL URL");}
+ // pg connection-string parameters can override the explicit SSL configuration.
+ // Accept only plain PostgreSQL URLs; verification options are set here, not by URL.
+ if(!["postgres:","postgresql:"].includes(url.protocol)||!url.hostname||url.search||url.hash)
+  throw Error("Operator PostgreSQL URL must not contain query parameters or fragments");
+ return {connectionString,ssl:{rejectUnauthorized:true},max:1,connectionTimeoutMillis:5000,statement_timeout:15000};
+}
+async function readState(){
+ const pool=new pg.Pool(restorePoolOptions(process.env.PRIVACY_ADMIN_DATABASE_URL));
  try{return (await pool.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;}
  finally{await pool.end();}
 }

@@ -89,6 +89,14 @@ test("account closure, token revocation, email erasure and restore safeguards",{
   await assert.rejects(()=>admin.query("UPDATE users SET email='resurrected@example.invalid' WHERE id=$1",[user]),/Closed account/);
   await assert.rejects(()=>admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role) VALUES($1,$2,'analyst')",[otherTenant,user]),/Closed account/);
   await assert.rejects(()=>withTenant(tenant,"closure-owner",c=>c.query("SELECT private.privacy_restore_state()")),/permission denied/);
+  // Closure without erasure must preserve data, independently of the optional email-erasure scope.
+  const retained=await reviewed("closure-other","closure-owner");
+  assert.equal((await req(retained.p+"/approve-closure","closure-owner",{eraseEmail:false})).status,200);
+  await new Promise(r=>setTimeout(r,1100));
+  const retainedResult=await req(retained.p+"/execute-closure","closure-other",{eraseEmail:false});
+  assert.equal(retainedResult.status,200);
+  assert.equal((await retainedResult.json()).profileEmailErased,false);
+  assert.deepEqual((await admin.query("SELECT status,email FROM users WHERE id=$1",[other])).rows[0],{status:"disabled",email:"other@example.invalid"});
   const state=(await admin.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;
   assert.deepEqual(state.violations,[]);
   assert.equal(state.markers.find(m=>m.id===user).emailErased,true);

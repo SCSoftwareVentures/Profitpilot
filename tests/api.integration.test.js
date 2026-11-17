@@ -407,6 +407,17 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(after.rows[0].details,"[Removed under approved retention policy]");
     assert.ok(after.rows[0].details_redacted_at);
     assert.equal(after.rows[0].status,"withdrawn","retain legal record");
+    await assert.rejects(()=>admin.query("UPDATE privacy_requests SET details='Restore deleted narrative' WHERE id=$1",[secondPrivacyItem.id]),/Redacted data must not be restored/);
+    const restoreState=(await admin.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;
+    assert.deepEqual(restoreState.violations,[]);
+    const marker=restoreState.markers.find(m=>m.kind==="redaction"&&m.id===secondPrivacyItem.id);
+    assert.ok(marker,"actual redaction appears in restore evidence");
+    const {signCheckpoint,verifyCheckpoint,checkpointDigest}=await import("../scripts/privacy-restore-checkpoint.js");
+    const opts={key:"ef".repeat(32),deploymentId:"ci-redaction",now:Date.now()};
+    const checkpoint=signCheckpoint(restoreState,opts);
+    const verifyOpts={...opts,expectedDigest:checkpointDigest(checkpoint)};
+    assert.equal(verifyCheckpoint(checkpoint,restoreState,verifyOpts).verified,true);
+    assert.throws(()=>verifyCheckpoint(checkpoint,{...restoreState,markers:restoreState.markers.filter(m=>m.id!==secondPrivacyItem.id)},verifyOpts),/missing or has changed/);
     assert.equal((await admin.query("SELECT status FROM privacy_requests WHERE id=$1",[deletionId])).rows[0].status,"under_review","partial deletion is not full fulfilment");
     assert.equal((await admin.query("SELECT count(*)::int AS n FROM audit_events WHERE object_id=$1 AND action='privacy_redaction_executed'",[deletionId])).rows[0].n,1);
     const privacyAudit=await request(`/v1/tenants/${tenantA}/security/audit?limit=100`,{subject:"ci-api-owner"});
