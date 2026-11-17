@@ -3,7 +3,8 @@ import {createHmac,randomBytes} from "node:crypto";
 import {databaseSslConfig} from "./db-config.js";
 const {Pool}=pg;
 const ssl=databaseSslConfig();
-export const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl,max:10,idleTimeoutMillis:30000,connectionTimeoutMillis:5000});
+export const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl,max:10,idleTimeoutMillis:30000,connectionTimeoutMillis:5000,statement_timeout:3000});
+pool.on("error",()=>process.stderr.write(JSON.stringify({event:"idle_database_connection_error"})+"\n"));
 export async function withTenant(tenantId,subject,fn){
  if(typeof subject!=="string"||!subject)throw new Error("Verified identity subject is required for tenant context");
  const secret=process.env.TENANT_CONTEXT_HMAC_SECRET||"";
