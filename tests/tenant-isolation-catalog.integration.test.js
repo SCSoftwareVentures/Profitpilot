@@ -117,6 +117,9 @@ test("all public tables require explicit security classification and restrictive
    const {rows:[access]}=await admin.query("SELECT has_schema_privilege('profitpilot_app',$1,'CREATE') AS allowed",[schema]);
    assert.equal(access.allowed,false,"runtime cannot shadow schema objects: "+schema);
   }
+  for(const table of ["tenant_memberships","import_batches","raw_import_rows","mapping_decisions","payroll_pools","allocation_runs","allocation_lines","invoices","invoice_lines","match_reviews","calculation_runs","contract_versions"]){
+   assert.ok(policies.some(p=>p.tablename===table&&p.cmd==="SELECT"&&p.policyname==="runtime_select_authority"),"role-scoped read policy missing: "+table);
+  }
   const {rows:[rawAccess]}=await admin.query("SELECT has_column_privilege('profitpilot_app','public.raw_import_rows','payload','SELECT') AS payload_read,has_column_privilege('profitpilot_app','public.raw_import_rows','payload','INSERT') AS payload_insert");
   assert.deepEqual(rawAccess,{payload_read:false,payload_insert:false},"raw financial payloads require controlled read and stage functions");
   const {rows:[defaults]}=await admin.query([

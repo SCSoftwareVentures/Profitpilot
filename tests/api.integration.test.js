@@ -311,6 +311,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(ownBody.items[0].id,contractA);
     const scopedRows=await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT id FROM contracts ORDER BY id"));
     assert.deepEqual(scopedRows.rows.map(row=>row.id),[contractA],"database RLS must hide tenant B contract rows even from a tenant A scoped connection");
+    const ownMembershipRows=await withTenant(tenantA,"ci-api-analyst",c=>c.query("SELECT user_id FROM tenant_memberships ORDER BY user_id"));
+    assert.deepEqual(ownMembershipRows.rows,[{user_id:userA}],"ordinary database membership reads reveal only the authenticated user's membership");
     const ownIdentityRows=await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT auth_subject FROM users ORDER BY auth_subject"));
     assert.deepEqual(ownIdentityRows.rows.map(row=>row.auth_subject),["ci-api-analyst"],"a signed subject may read only its own global identity row");
     const unscopedIdentityRows=await appPool.query("SELECT auth_subject FROM users");
@@ -478,6 +480,14 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal((await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/validate",{subject:"ci-api-analyst",method:"POST",body:{}})).status,200);
     assert.equal((await admin.query("SELECT count(*)::int AS n FROM mapping_decisions md JOIN raw_import_rows r ON r.id=md.raw_row_id WHERE r.batch_id=$1",[payrollId])).rows[0].n,3,"revalidation is idempotent");
     assert.equal((await admin.query("SELECT count(*)::int AS n FROM payroll_pools WHERE batch_id=$1",[payrollId])).rows[0].n,0,"structural validation must not create payroll pools");
+    for(const table of ["import_batches","raw_import_rows","mapping_decisions","payroll_pools","allocation_lines","allocation_runs","match_reviews","invoices","invoice_lines"]){
+     const read=await withTenant(tenantA,"ci-api-reader",c=>c.query("SELECT id FROM public."+table+" LIMIT 1"));
+     assert.equal(read.rowCount,0,"read-only member cannot directly access unrelated financial source table "+table);
+    }
+    assert.ok((await withTenant(tenantA,"ci-api-analyst",c=>c.query("SELECT id FROM raw_import_rows WHERE batch_id=$1",[payrollId]))).rowCount>0);
+    for(const [table,column] of [["payroll_pools","source_ref"],["allocation_lines","source_ref"],["allocation_runs","approval_reason"],["contract_versions","scope"],["contract_versions","source_ref"]]){
+     await assert.rejects(()=>withTenant(tenantA,"ci-api-owner",c=>c.query("SELECT "+column+" FROM public."+table)),/permission denied/i);
+    }
     assert.equal((await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/validate",{subject:"ci-api-reader",method:"POST",body:{}})).status,403);
 
     // Reviewer sees validation decisions, never the underlying source payload.

@@ -104,7 +104,7 @@ export function registerContributionRoutes(app,membership){
       SELECT c.id,c.business_id FROM contracts c JOIN sites s ON s.tenant_id=c.tenant_id AND s.business_id=c.business_id
       WHERE c.tenant_id=$1 AND c.id=$2 AND s.id=$3 AND c.status='active' AND s.status='active'
     ), versions AS (
-      SELECT cv.* FROM contract_versions cv JOIN target t ON t.id=cv.contract_id
+      SELECT cv.id,cv.version_no,cv.currency,cv.effective_from,cv.effective_to FROM contract_versions cv JOIN target t ON t.id=cv.contract_id
       WHERE cv.tenant_id=$1 AND cv.approved_at IS NOT NULL AND cv.approved_by IS NOT NULL
        AND cv.effective_from <= $5::date AND (cv.effective_to IS NULL OR cv.effective_to >= $4::date)
     ), invoices_selected AS (

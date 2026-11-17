@@ -65,3 +65,5 @@ Migration 048 further narrows application SQL rights and adds restrictive financ
 Migration 049 closes the API-only MFA gap for the selected high-risk financial mutation paths via transaction-bound action/resource proofs checked by database triggers. CI must include both legitimate routes and missing/cross-resource proof rejection.
 
 Migrations 050–053 add signed raw source read and staging boundaries, per-tenant transaction session revalidation, and dual-control provisioning with restore receipts. The production release gate requires separate operator signatures and current evidence, not merely passing CI. Live hosting, provider, legal/retention decisions and independent assessments remain mandatory before production.
+
+Migration 054 adds least-privilege, same-tenant financial read policies and denies unused sensitive fields. It reduces exposure to members without financial-processing permissions, in addition to the signed raw payload boundary in migration 050.

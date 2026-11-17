@@ -134,6 +134,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/051_verified_source_staging.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/052_transaction_session_continuity.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/053_dual_control_access_provisioning.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/054_role_scoped_financial_reads.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:
@@ -199,7 +200,9 @@ jobs:
           echo "Production startup rejects disabled TLS and accepts verified-TLS configuration"
 
       - name: Build production API image
-        run: docker build --pull --build-arg PROFITPILOT_BUILD_REVISION="$GITHUB_SHA" -t profitpilot-api:ci .
+        run: |
+          docker build --pull --build-arg PROFITPILOT_BUILD_REVISION="$GITHUB_SHA" -t profitpilot-api:ci .
+          test "$(docker run --rm --entrypoint cat profitpilot-api:ci /app/BUILD_REVISION)" = "$GITHUB_SHA"
 
       - name: Verify production image runs as non-root
         run: |
