@@ -14,6 +14,11 @@ app.use(helmet());
 app.use(cors({origin:(process.env.CORS_ORIGIN||"").split(",").map(x=>x.trim()).filter(Boolean),credentials:false,methods:["GET","POST"]}));
 app.use(rateLimit({windowMs:60_000,limit:100,standardHeaders:true,legacyHeaders:false}));
 app.use(express.json({limit:"100kb"}));
+// Additional write throttling limits abuse of evidence ingestion and review endpoints.
+// This in-process store is suitable for a single API instance only; production
+// horizontal scaling requires a shared external rate-limit store.
+const mutationLimiter=rateLimit({windowMs:60_000,limit:20,standardHeaders:true,legacyHeaders:false,message:{error:"Too many write requests; retry later"}});
+app.use("/v1/tenants/:tenantId",(req,res,next)=>req.method==="POST"?mutationLimiter(req,res,next):next());
 app.get("/health",async(req,res)=>{try{await health();res.json({status:"ok",database:"connected"});}catch{res.status(503).json({status:"unavailable"});}});
 // Never allow authenticated tenant responses to be cached by browsers or shared proxies.
 app.use("/v1",(req,res,next)=>{res.set("Cache-Control","no-store");res.set("Pragma","no-cache");next();});
