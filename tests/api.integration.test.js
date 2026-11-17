@@ -102,7 +102,6 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const sessionListResponse=await fetch(base+"/v1/me/sessions",{headers:{authorization:"Bearer "+trackedSessionToken}});
     assert.equal(sessionListResponse.status,200,"users must be able to inspect their own active and revoked sessions");
     const sessionList=(await sessionListResponse.json()).items;
-    const revocableSession=sessionList.find(item=>item.sessionId!==undefined&&item.sessionId!==undefined&&item.sessionId!==undefined);
     assert.ok(sessionList.length>=2,"session inventory must contain registered sessions");
     const sessionPayload=JSON.parse(Buffer.from(revocableSessionToken.split(".")[1],"base64url").toString("utf8"));
     const revokeResponse=await fetch(base+`/v1/me/sessions/${sessionPayload.jti}`,{method:"DELETE",headers:{authorization:"Bearer "+trackedSessionToken}});
