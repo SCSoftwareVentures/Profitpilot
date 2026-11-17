@@ -80,6 +80,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/005_prevent_duplicate_confirmations.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/006_tenant_actor_membership_fks.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/007_users_self_rls.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/008_granular_permissions.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:
