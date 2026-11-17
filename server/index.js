@@ -28,6 +28,63 @@ async function membership(req,res,next){
  }catch(e){next(e);}
 }
 app.get("/v1/me",async(req,res)=>{res.json({subject:req.identity.subject,email:req.identity.email,membershipsEndpoint:"Membership discovery is not exposed until a separately reviewed security-definer function is installed."});});
+app.get("/v1/me/security",async(req,res)=>{res.set("Cache-Control","no-store");res.json({
+ authentication:{issuerConfigured:Boolean(process.env.AUTH_ISSUER),audienceConfigured:Boolean(process.env.AUTH_AUDIENCE),stepUpConfigured:Boolean(process.env.AUTH_STEP_UP_ACR),stepUpMaxAgeSeconds:Number(process.env.AUTH_STEP_UP_MAX_AGE_SECONDS||300)},
+ currentSession:{sessionId:req.identity.jti,authenticatedAt:req.identity.authTime,assuranceClass:req.identity.acr}
+});});
+app.get("/v1/tenants/:tenantId/security/permissions",membership,requirePermission("security.permissions.read"),async(req,res,next)=>{try{
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
+  const catalogue=await client.query("SELECT pc.permission_key,pc.description,pc.sensitive,rp.role,(rp.permission_key IS NOT NULL) AS granted_by_role FROM permission_catalog pc LEFT JOIN role_permissions rp ON rp.permission_key=pc.permission_key ORDER BY pc.permission_key,rp.role");
+  const overrides=await client.query("SELECT user_id,permission_key,effect,reason,granted_by,created_at FROM tenant_membership_permission_overrides WHERE tenant_id=$1 ORDER BY user_id,permission_key",[req.membership.tenantId]);
+  return {catalogue:catalogue.rows,overrides:overrides.rows};
+ });
+ res.json(result);
+}catch(e){next(e);}});
+app.post("/v1/tenants/:tenantId/security/permissions/overrides",membership,requirePermission("security.permissions.manage"),requireStepUp(),async(req,res,next)=>{try{
+ const {userId,permissionKey,effect,reason}=req.body||{};
+ if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId||"")||
+    typeof permissionKey!=="string"||permissionKey.length>128||permissionKey.startsWith("security.")||permissionKey.startsWith("privacy.")||
+    !["grant","deny"].includes(effect)||typeof reason!=="string"||reason.trim().length<3||reason.length>1000)
+  return res.status(400).json({error:"Valid member, non-security permission, effect and reason are required"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
+  const target=await client.query("SELECT 1 FROM tenant_memberships tm JOIN users u ON u.id=tm.user_id WHERE tm.tenant_id=$1 AND tm.user_id=$2 AND tm.status='active' AND u.status='active'",[req.membership.tenantId,userId]);
+  if(!target.rowCount)return {status:404,error:"Active tenant member not found"};
+  const permission=await client.query("SELECT 1 FROM permission_catalog WHERE permission_key=$1",[permissionKey]);
+  if(!permission.rowCount)return {status:400,error:"Unknown permission"};
+  await client.query("SELECT private.set_member_permission_override($1,$2,$3,$4,$5,$6)",[req.membership.tenantId,req.membership.userId,userId,permissionKey,effect,reason.trim()]);
+  await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'member_permission_override_set','tenant_membership_permission_override',$3,$4,$5)",[req.membership.tenantId,req.membership.userId,userId,reason.trim(),JSON.stringify({permissionKey,effect})]);
+  return {status:201,override:{userId,permissionKey,effect,reason:reason.trim()}};
+ });
+ if(result.error)return res.status(result.status).json({error:result.error});
+ res.status(result.status).json(result.override);
+}catch(e){next(e);}});
+app.delete("/v1/tenants/:tenantId/security/permissions/overrides/:userId/:permissionKey",membership,requirePermission("security.permissions.manage"),requireStepUp(),async(req,res,next)=>{try{
+ const {userId,permissionKey}=req.params;
+ const {reason}=req.body||{};
+ if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(userId||"")||
+    typeof permissionKey!=="string"||permissionKey.startsWith("security.")||permissionKey.startsWith("privacy.")||
+    typeof reason!=="string"||reason.trim().length<3||reason.length>1000)
+  return res.status(400).json({error:"Valid member, permission and removal reason are required"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
+  const removed=await client.query("SELECT private.remove_member_permission_override($1,$2,$3,$4) AS removed",[req.membership.tenantId,req.membership.userId,userId,permissionKey]);
+  if(!removed.rows[0].removed)return {status:404,error:"Permission override not found"};
+  await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'member_permission_override_removed','tenant_membership_permission_override',$3,$4,$5)",[req.membership.tenantId,req.membership.userId,userId,reason.trim(),JSON.stringify({permissionKey})]);
+  return {status:200};
+ });
+ if(result.error)return res.status(result.status).json({error:result.error});
+ res.status(result.status).json({removed:true,userId,permissionKey});
+}catch(e){next(e);}});
+app.get("/v1/tenants/:tenantId/security/audit",membership,requirePermission("security.audit.read"),async(req,res,next)=>{try{
+ const limitRaw=Number(req.query.limit||50);
+ if(!Number.isInteger(limitRaw)||limitRaw<1||limitRaw>100)return res.status(400).json({error:"Audit page limit must be an integer from 1 to 100"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
+  const integrity=await client.query("SELECT is_valid,event_count,first_invalid_event FROM private.verify_audit_chain($1)",[req.membership.tenantId]);
+  const events=await client.query("SELECT id,actor_user_id,action,object_type,object_id,reason,correlation_id,metadata,created_at,chain_position,encode(previous_hash,'hex') AS previous_hash,encode(event_hash,'hex') AS event_hash FROM audit_events WHERE tenant_id=$1 ORDER BY chain_position DESC LIMIT $2",[req.membership.tenantId,limitRaw]);
+  return {integrity:integrity.rows[0],items:events.rows};
+ });
+ res.json(result);
+}catch(e){next(e);}});
+
 app.get("/v1/me/sessions",async(req,res,next)=>{try{
  const sessions=await listAuthSessions(req.identity.subject);
  res.json({items:sessions.map(s=>({sessionId:s.jti,issuedAt:s.issued_at,expiresAt:s.expires_at,lastSeenAt:s.last_seen_at,revokedAt:s.revoked_at}))});
