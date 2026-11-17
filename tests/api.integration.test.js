@@ -47,13 +47,14 @@ test("authenticated API enforces tenant membership, role permissions and import 
     return new SignJWT({email:subject+"@example.invalid",auth_time:Math.floor(Date.now()/1000),acr:"urn:profitpilot:step-up"})
       .setProtectedHeader({alg:"RS256",kid:jwk.kid})
       .setIssuer(issuer).setAudience(audience).setSubject(subject)
-      .setIssuedAt().setExpirationTime("5m").sign(privateKey);
+      .setIssuedAt().setExpirationTime("5m").setJti(randomBytes(16).toString("hex")).sign(privateKey);
   }
   async function customToken(subject,{issuedAt=Math.floor(Date.now()/1000),expiresAt=Math.floor(Date.now()/1000)+300,includeIssuedAt=true,includeExpiry=true,authTime,acr}={}){
     const claims={email:subject+"@example.invalid"};if(authTime!==undefined)claims.auth_time=authTime;if(acr!==undefined)claims.acr=acr;
     let jwt=new SignJWT(claims).setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(issuer).setAudience(audience).setSubject(subject);
     if(includeIssuedAt)jwt=jwt.setIssuedAt(issuedAt);
     if(includeExpiry)jwt=jwt.setExpirationTime(expiresAt);
+    jwt=jwt.setJti(randomBytes(16).toString("hex"));
     return jwt.sign(privateKey);
   }
   async function request(path,{subject,method="GET",body}={}){
@@ -92,6 +93,23 @@ test("authenticated API enforces tenant membership, role permissions and import 
     process.env.AUTH_JWKS_URL=savedJwksUrl;
     const oversizedToken=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+"a".repeat(8193)}});
     assert.equal(oversizedToken.status,401,"oversized bearer tokens must be rejected before remote key verification");
+    const trackedSessionToken=await token("ci-api-analyst");
+    const trackedSessionResponse=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+trackedSessionToken}});
+    assert.equal(trackedSessionResponse.status,200,"valid jti-bearing tokens must register a server-side session");
+    const revocableSessionToken=await token("ci-api-analyst");
+    const revocableSessionResponse=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+revocableSessionToken}});
+    assert.equal(revocableSessionResponse.status,200);
+    const sessionListResponse=await fetch(base+"/v1/me/sessions",{headers:{authorization:"Bearer "+trackedSessionToken}});
+    assert.equal(sessionListResponse.status,200,"users must be able to inspect their own active and revoked sessions");
+    const sessionList=(await sessionListResponse.json()).items;
+    const revocableSession=sessionList.find(item=>item.sessionId!==undefined&&item.sessionId!==undefined&&item.sessionId!==undefined);
+    assert.ok(sessionList.length>=2,"session inventory must contain registered sessions");
+    const sessionPayload=JSON.parse(Buffer.from(revocableSessionToken.split(".")[1],"base64url").toString("utf8"));
+    const revokeResponse=await fetch(base+`/v1/me/sessions/${sessionPayload.jti}`,{method:"DELETE",headers:{authorization:"Bearer "+trackedSessionToken}});
+    assert.equal(revokeResponse.status,200,"a user must be able to revoke another one of their own sessions");
+    const revokedSessionUse=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+revocableSessionToken}});
+    assert.equal(revokedSessionUse.status,401,"a revoked access session must be rejected on its next request");
+
     const noToken=await request("/v1/me");
     assert.equal(noToken.status,401,"requests without a bearer token must be rejected");
     const noExpiry=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+await customToken("ci-api-analyst",{includeExpiry:false})}});
