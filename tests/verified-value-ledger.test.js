@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {appendValueEvent,summariseValueEvents} from "../src/verified-value-ledger.js";
 
-const base={valueId:"value-001",eventId:"event-001",actorId:"user-001",type:"quoted",amount:"1000.00",currency:"AUD",taxBasis:"gst_exclusive",periodStart:"2026-11-01",periodEnd:"2026-11-30",sourceRef:"quote-001",occurredAt:"2026-11-17T09:00:00+11:00",reason:"Initial quoted service value",evidenceRefs:["quote-001"]};
+const base={valueId:"value-001",eventId:"event-001",actorId:"user-001",scopeRef:"contract-site-C101",type:"quoted",amount:"1000.00",currency:"AUD",taxBasis:"gst_exclusive",periodStart:"2026-11-01",periodEnd:"2026-11-30",sourceRef:"quote-001",occurredAt:"2026-11-17T09:00:00+11:00",reason:"Initial quoted service value",evidenceRefs:["quote-001"]};
 const event=(overrides={})=>({...base,...overrides});
 
 test("value events require explicit amount, dimensions, actor, reason and evidence",()=>{
@@ -28,7 +28,7 @@ test("value summaries preserve each commercial state and do not net credits or r
   assert.equal(summary.recordedAmounts.customer_accepted,"850.00");
   assert.equal(summary.recordedAmounts.invoiced,"1000.00");
   assert.equal(summary.recordedAmounts.credited,"100.00");
-  assert.equal(summary.recordedAmounts.settled,"900.00");
+  assert.equal(summary.recordedAmounts.settled,"900.00");\n  assert.equal(summary.recordedAmounts.refunded,null);\n  assert.equal(summary.eventTypeCounts.refunded,0);
   assert.equal(summary.creditedAndRefunded,"100.00");
   assert.equal(summary.nettedTotal,null);
   assert.equal(summary.verificationStatus,"not_independently_verified");
@@ -36,7 +36,7 @@ test("value summaries preserve each commercial state and do not net credits or r
 
 test("unlike currencies, tax bases and periods are kept in separate summary groups",()=>{
   const a=appendValueEvent({event:base});
-  const b=appendValueEvent({event:event({eventId:"event-002",currency:"NZD",sourceRef:"quote-002",occurredAt:"2026-11-17T09:01:00+11:00",evidenceRefs:["quote-002"]})});
+  const b=appendValueEvent({event:event({eventId:"event-002",scopeRef:"contract-site-C102",currency:"NZD",sourceRef:"quote-002",occurredAt:"2026-11-17T09:01:00+11:00",evidenceRefs:["quote-002"]})});
   const summaries=summariseValueEvents([...a.events,...b.events]);
   assert.equal(summaries.length,2);
   assert.deepEqual(summaries.map(x=>x.currency).sort(),["AUD","NZD"]);
