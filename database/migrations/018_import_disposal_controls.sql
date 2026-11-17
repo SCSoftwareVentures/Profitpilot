@@ -93,8 +93,9 @@ END $$;
 CREATE FUNCTION private.guard_disposed_import()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 BEGIN
+ IF session_user='profitpilot_app' AND private.current_tenant_id() IS DISTINCT FROM NEW.tenant_id THEN RETURN NEW; END IF;
  IF EXISTS(SELECT 1 FROM private.import_disposal_tombstones WHERE tenant_id=NEW.tenant_id AND (batch_id=NEW.id OR file_sha256=NEW.file_sha256)) THEN
-  RAISE EXCEPTION 'Import source was previously disposed' USING ERRCODE='23514';
+  RAISE EXCEPTION 'Import source was previously disposed' USING ERRCODE='23505';
  END IF;
  RETURN NEW;
 END $$;
@@ -126,12 +127,16 @@ CREATE TRIGGER raw_import_delete_guard BEFORE DELETE ON public.raw_import_rows
 CREATE FUNCTION private.guard_import_terminal_state()
 RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $
 BEGIN
+ IF current_user='profitpilot_app' AND TG_OP='INSERT' THEN
+  IF NEW.status<>'registered' THEN RAISE EXCEPTION 'New imports must be registered' USING ERRCODE='42501'; END IF;
+  RETURN NEW;
+ END IF;
  IF current_user='profitpilot_app' AND (OLD.status IN ('accepted','rejected','failed') OR NEW.status IN ('accepted','rejected','failed')) AND OLD.status IS DISTINCT FROM NEW.status THEN
   RAISE EXCEPTION 'Terminal import states require administrator review' USING ERRCODE='42501';
  END IF;
  RETURN NEW;
 END $;
-CREATE TRIGGER import_terminal_state_guard BEFORE UPDATE ON public.import_batches
+CREATE TRIGGER import_terminal_state_guard BEFORE INSERT OR UPDATE ON public.import_batches
  FOR EACH ROW EXECUTE FUNCTION private.guard_import_terminal_state();
 
 CREATE FUNCTION private.execute_import_disposal(p_tenant uuid,p_batch uuid)
@@ -164,6 +169,7 @@ BEGIN
   actual:=private.assert_disposable_import(p_tenant,p_batch);
   IF actual<>p_digest THEN RAISE EXCEPTION 'Restored import does not match authoritative tombstone'; END IF;
  END IF;
+ IF EXISTS(SELECT 1 FROM private.import_disposal_controls WHERE tenant_id=p_tenant AND batch_id=p_batch AND hold_active) THEN RAISE EXCEPTION 'Active legal hold blocks replay'; END IF;
  IF EXISTS(SELECT 1 FROM public.import_batches WHERE tenant_id=p_tenant AND file_sha256=p_digest AND id<>p_batch) THEN RAISE EXCEPTION 'Restored checksum conflicts with another batch'; END IF;
  INSERT INTO private.import_disposal_tombstones(tenant_id,batch_id,file_sha256,authority_ref,disposed_at)
  VALUES(p_tenant,p_batch,p_digest,p_ref,p_disposed) ON CONFLICT(tenant_id,batch_id) DO NOTHING;
