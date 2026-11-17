@@ -443,3 +443,19 @@ The owner confirms the intended outcome is sale of the entire ProfitPilot projec
 The AUD 30,000–50,000 figure is an initial reference target only and is not a ceiling, appraisal, guaranteed valuation or buyer commitment. No predetermined upper valuation limit is set; the objective is to maximise evidence-backed strategic value. The former AUD 500 initial and AUD 100 monthly project caps are withdrawn as planning constraints. Actual paid spend, subscriptions, contractors, external services or other financial commitments still require explicit owner approval.
 
 This changes the commercial objective and removes the former budget caps; it does not waive technical correctness, privacy/security safeguards, IP diligence, evidence discipline or the owner's authority over external actions. No merge, deployment, real-data intake, buyer outreach, sale or transfer of ownership is authorised.
+
+
+## 26. Six differentiator domain foundations — 17 November 2026
+
+Owner-authorised synthetic/test-only implementations have been added for all six approved differentiators:
+
+1. Job Readiness Engine — `src/job-readiness.js`, `tests/job-readiness.test.js`.
+2. Promise Ledger — `src/promise-ledger.js`, `tests/promise-ledger.test.js`.
+3. Profit Leak Radar — `src/profit-leak-radar.js`, `tests/profit-leak-radar.test.js`.
+4. Verified Value Ledger — `src/verified-value-ledger.js`, `tests/verified-value-ledger.test.js`.
+5. SwitchProof Migration — `src/switchproof-migration.js`, `tests/switchproof-migration.test.js`.
+6. Field Knowledge Memory — `src/field-knowledge-memory.js`, `tests/field-knowledge-memory.test.js`.
+
+The synthetic browser dashboard now exposes a panel for each domain. These are initial domain and demonstration foundations, not production-complete features. Persistence, server-side authorisation, source provenance enforcement, full workflow lifecycle, secure file handling, integrations and specialist assurance remain outstanding.
+
+An initial CI run on the first integration attempt exposed syntax defects caused by literal escaped newline sequences in two modules and one test file. These were corrected on the branch. Exact-head CI for the corrected tree is pending and must pass before these additions are marked verified. Do not infer production readiness from domain unit tests or a browser demonstration.
