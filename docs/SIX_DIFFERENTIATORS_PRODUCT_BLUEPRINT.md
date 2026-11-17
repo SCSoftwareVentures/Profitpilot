@@ -171,7 +171,14 @@ The **Promise Ledger** now also has an initial in-memory domain state machine an
 - Fulfilment requires evidence; missed status cannot be recorded before the due timestamp.
 - Disputes/cancellations require reasons; terminal states cannot be rewritten.
 
-The Promise Ledger is not yet persisted, searchable, connected to authenticated customer identities, or integrated with notification channels. Evidence references and actor types are recorded assertions, not independent verification. The remaining four differentiators are not represented as implemented merely because they are specified below.
+The Promise Ledger is not yet persisted, searchable, connected to authenticated customer identities, or integrated with notification channels. Evidence references and actor types are recorded assertions, not independent verification. The **Profit Leak Radar** now has an initial deterministic candidate engine and synthetic dashboard demonstration:
+- Compares contract amounts with explicitly approved variations and invoice totals only when all sources have complete matching currency, tax-basis and period evidence.
+- Compares payroll pool and allocation totals using exact-cent arithmetic.
+- Surfaces unmatched invoice rows and duplicate candidates separately.
+- Incomplete, malformed or mismatched source coverage remains unknown, never zero.
+- Every monetary alert is a candidate for human review; no confirmed loss, saving, fraud or recovery status is emitted.
+
+This radar is an in-memory evidence-gated candidate engine, not a persisted monitoring service, accounting adjustment workflow or verified loss detector. The remaining three differentiators are not represented as implemented merely because they are specified below.
 
 ## 4. Shared platform foundations
 
