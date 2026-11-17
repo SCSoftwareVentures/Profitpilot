@@ -154,9 +154,8 @@ app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/withdraw",membership
  const {reason}=req.body||{};
  if(typeof reason!=="string"||reason.trim().length<3||reason.length>1000)return res.status(400).json({error:"A withdrawal reason is required"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const updated=await client.query("UPDATE privacy_requests SET status='withdrawn',updated_at=clock_timestamp() WHERE id=$1 AND tenant_id=$2 AND subject_user_id=$3 AND status IN ('requested','identity_verification','under_review') RETURNING id,status,updated_at",[req.params.requestId,req.membership.tenantId,req.membership.userId]);
+  const updated=await client.query("SELECT request_id AS id,request_status AS status,request_updated_at AS updated_at FROM private.withdraw_privacy_request($1,$2,$3)",[req.membership.tenantId,req.params.requestId,reason.trim()]);
   if(!updated.rowCount)return {status:404,error:"Withdrawable privacy request not found"};
-  await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'privacy_request_withdrawn','privacy_request',$3,$4,'{}'::jsonb)",[req.membership.tenantId,req.membership.userId,req.params.requestId,reason.trim()]);
   return {status:200,item:updated.rows[0]};
  });
  if(result.error)return res.status(result.status).json({error:result.error});
