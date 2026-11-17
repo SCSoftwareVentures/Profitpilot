@@ -43,4 +43,6 @@ test("dashboard exposes the synthetic job readiness workflow and its human-autho
   assert.match(html,/id="readiness"/);
   assert.match(html,/evaluateJobReadiness/);
   assert.match(html,/No override or approval action is available in this demonstration/);
+  assert.match(html,/escapeHtml\\(x\\.label\\)/);
+  assert.match(html,/escapeHtml\\(x\\.reason\\|\\|x\\.issue\\|\\|x\\.evidenceRef/);
 });
