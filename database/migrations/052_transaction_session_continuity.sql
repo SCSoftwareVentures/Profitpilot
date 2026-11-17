@@ -4,14 +4,14 @@ CREATE FUNCTION private.assert_admitted_tenant_session(p_body text,p_proof text)
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog,public,private AS $fn$
 DECLARE secret_value bytea; expected text; claims jsonb; actor uuid; cutoff bigint; issued bigint; expires bigint; auth_epoch bigint; now_epoch bigint; session_key text;
 BEGIN
- IF private.current_tenant_id() IS NULL OR p_body IS NULL OR octet_length(p_body)>8192 OR p_proof IS NULL OR p_proof !~ '^[a-f0-9]{64}$'
+ IF p_body IS NULL OR octet_length(p_body)>8192 OR p_proof IS NULL OR p_proof !~ '^[a-f0-9]{64}$'
  THEN RAISE EXCEPTION 'Invalid transaction session attestation' USING ERRCODE='42501'; END IF;
  SELECT secret INTO secret_value FROM private.tenant_context_keys WHERE key_id=current_setting('app.tenant_key_id',true) AND active;
  expected:=encode(public.hmac(convert_to('profitpilot-tenant-session-v1'||E'\n'||txid_current()::text||E'\n'||pg_backend_pid()::text||E'\n'||current_setting('app.tenant_nonce',true)||E'\n'||p_body,'UTF8'),secret_value,'sha256'),'hex');
  IF secret_value IS NULL OR expected IS DISTINCT FROM p_proof THEN RAISE EXCEPTION 'Invalid transaction session attestation' USING ERRCODE='42501'; END IF;
  claims:=p_body::jsonb;
  IF jsonb_typeof(claims) IS DISTINCT FROM 'object' OR claims->>'subject' IS DISTINCT FROM current_setting('app.tenant_subject',true)
- OR claims->>'tenantId' IS DISTINCT FROM private.current_tenant_id()::text OR claims->>'jti' !~ '^[A-Za-z0-9._~-]{16,128}$'
+ OR claims->>'tenantId' IS DISTINCT FROM current_setting('app.tenant_id',true) OR claims->>'jti' !~ '^[A-Za-z0-9._~-]{16,128}$'
  OR jsonb_typeof(claims->'issuedAt') IS DISTINCT FROM 'number' OR jsonb_typeof(claims->'expiresAt') IS DISTINCT FROM 'number'
  THEN RETURN false; END IF;
  issued:=(claims->>'issuedAt')::bigint; expires:=(claims->>'expiresAt')::bigint;
