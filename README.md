@@ -100,7 +100,7 @@ The owner's commercial objective is to explore a possible AUD 30,000–50,000 sa
 
 ## Governance and release boundary
 
-Software implementation remains blocked until G0–G4 and competitive preconditions are evidenced and G5 records an explicit signed GO with named technical ownership, legal/privacy plan, delivery capacity and approved budget. A passing CI run or completed design document does not substitute for those approvals.
+Owner instruction dated 17 November 2026 authorises continued repository-level engineering hardening and synthetic prototype development. This is not a signed G5 release approval. Production customer-data features, real-data handling, merge to the protected release branch, deployment, customer pilot and payments remain gated by G0–G5 evidence, specialist approvals and explicit release authorisation. A passing CI run or completed design document does not substitute for those approvals.
 
 No merge, deployment, live customer-data intake or payment activity is authorised by the documents.
  
