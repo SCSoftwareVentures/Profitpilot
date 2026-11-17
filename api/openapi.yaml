@@ -314,6 +314,86 @@ paths:
         "422": { description: Unsupported source type or missing persisted rows }
         "403": { description: Not authorised }
         "404": { description: Batch not found in this tenant }
+  /tenants/{tenantId}/imports/{batchId}/payroll/rows/{rowNumber}/decision:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+      - name: rowNumber
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1, maximum: 9999999 }
+    post:
+      summary: Independently accept or reject a structurally validated payroll row
+      description: Fresh MFA and payroll.rows.decide permission required. Import creator cannot approve their own source rows. Held rows can only be rejected. Every row decision is audited.
+      responses:
+        "200": { description: Source row decision recorded, no automatic cost allocation }
+        "403": { description: Missing permission, step-up or independent reviewer }
+        "404": { description: Source batch or row not found }
+        "409": { description: Source not validated or decision already final }
+  /tenants/{tenantId}/imports/{batchId}/payroll/pool:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    post:
+      summary: Reconcile accepted payroll rows to a separately declared source total
+      description: Source-declared amount is NOT externally verified. All rows need independent decisions, accepted references must be unique and pay periods must equal the batch period. The importer cannot reconcile their own batch. No financial allocations are created automatically.
+      responses:
+        "201": { description: Immutable reconciled source pool; import batch sealed }
+        "403": { description: Missing independent authority or step-up }
+        "409": { description: Incomplete review or already reconciled }
+        "422": { description: Source amount, references or pay periods do not reconcile }
+  /tenants/{tenantId}/payroll/pools/{poolId}/allocations:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: poolId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Draft an evidence-referenced payroll allocation
+      description: Accepted payroll pool divided into direct, approved-allocated, non-site, excluded and automatic unallocated residual. Exact cents reconciliation required. Draft is excluded from calculations until separately confirmed.
+      responses:
+        "201": { description: Immutable allocation-line draft pending independent approval }
+        "403": { description: Insufficient permission }
+        "404": { description: Pool absent or outside tenant }
+        "422": { description: Foreign site or sum exceeds source pool }
+  /tenants/{tenantId}/payroll/pools/{poolId}/allocations/{allocationId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: poolId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: allocationId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read tenant allocation summaries and line buckets without raw source refs
+      responses:
+        "200": { description: Reviewable allocation ledger without personal source payloads }
+        "403": { description: Insufficient permission }
+        "404": { description: Allocation absent or outside tenant }
+  /tenants/{tenantId}/payroll/pools/{poolId}/allocations/{allocationId}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: poolId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: allocationId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Confirm an exactly reconciled allocation with an independent MFA reviewer
+      description: Re-verifies allocation lines and source pool under a transaction. Only one confirmed allocation per source pool. Confirmation makes included direct and approved site costs eligible for management calculations, not statutory profit.
+      responses:
+        "200": { description: Confirmed immutable allocation and audit event }
+        "403": { description: Not independent or step-up failed }
+        "404": { description: Foreign or missing allocation }
+        "409": { description: Already confirmed, rejected or stale }
+        "422": { description: Source pool or allocation mismatch }
   /tenants/{tenantId}/matches/{matchId}/decision:
     parameters:
       - $ref: '#/components/parameters/TenantId'

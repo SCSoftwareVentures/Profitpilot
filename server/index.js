@@ -7,6 +7,7 @@ import {randomUUID,createHash} from "node:crypto";
 import {withTenant,health,listAuthSessions,revokeAuthSession,withPrivacyStepUp} from "./db.js";
 import {authRequired,requirePermission,requireStepUp} from "./auth.js";
 import {parseCsv,validateInvoiceRows,validatePayrollRows,isIsoDate} from "../src/engine.js";
+import {registerPayrollRoutes} from "./payroll.js";
 
 const app=express();
 app.disable("x-powered-by");
@@ -351,6 +352,8 @@ app.get("/v1/tenants/:tenantId/calculations/:runId",membership,requirePermission
  res.json(result.rows[0]);
  }catch(e){next(e);}});
  
+
+registerPayrollRoutes(app,membership);
 
 app.use((err,req,res,next)=>{const id=randomUUID();const status=err.code==="23505"?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);const safeCode=typeof err.code==="string"&&/^[A-Z0-9_]{1,32}$/.test(err.code)?err.code:undefined;process.stderr.write(JSON.stringify({event:"request_error",reference:id,status,method:req.method,errorCode:safeCode,timestamp:new Date().toISOString()})+"\n");const publicErrors={400:"Invalid request",401:"Authentication required",403:"Request denied",404:"Resource not found",409:"Conflicting record; refresh and review the current state",413:"Request too large",415:"Unsupported media type",422:"Request could not be processed",429:"Too many requests"};res.status(status).json({error:publicErrors[status]||"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
