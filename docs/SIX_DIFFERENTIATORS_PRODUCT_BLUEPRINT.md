@@ -215,3 +215,10 @@ This is a domain foundation only. It is not yet integrated with persisted jobs, 
 A synthetic/test-only state-machine implementation is provided in `src/promise-ledger.js`, with transition and evidence tests in `tests/promise-ledger.test.js`. The prototype enforces a proposed → communicated → accepted progression, explicit evidence for material state changes, unique event IDs, timezone-aware timestamps, chronological append order and terminal fulfilled/cancelled states. It does not send communications or treat a sent message as proof of customer acceptance.
 
 The browser demonstration includes a synthetic Promise Ledger timeline. Persistence, authenticated actor attribution, event-store/database enforcement, customer notification integrations, search, due-date workflows and a complete user-facing review process remain unimplemented.
+
+
+## Implementation record — Profit Leak Radar foundation
+
+A synthetic/test-only evaluator is provided in `src/profit-leak-radar.js` with unit tests in `tests/profit-leak-radar.test.js`. It classifies a potential exception only when the supplied record has a recognised exception type, positive canonical money, explicit currency/tax basis/period, evidence references and a caller-declared complete source-coverage state. When coverage or any required dimension is missing, monetary exposure is withheld. Even a complete candidate has `verifiedLoss: null` and `recoveredValue: null`; human review remains mandatory.
+
+The dashboard demonstrates one candidate and one incomplete-coverage exception. The caller's coverage declaration is not independently certified by this primitive. Persistence, source-manifest verification, domain-specific detection rules, reviewer workflow and measured alert precision/recall remain outstanding.
