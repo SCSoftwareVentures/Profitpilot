@@ -28,6 +28,7 @@ services:
       - ./database/migrations/013_actor_authorization.sql:/docker-entrypoint-initdb.d/015-actor-authorization.sql:ro
       - ./database/migrations/014_match_decision_audit.sql:/docker-entrypoint-initdb.d/016-match-decision-audit.sql:ro
       - ./database/migrations/015_shared_rate_limits.sql:/docker-entrypoint-initdb.d/017-shared-rate-limits.sql:ro
+      - ./database/migrations/016_tenant_key_lifecycle.sql:/docker-entrypoint-initdb.d/018-tenant-key-lifecycle.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
