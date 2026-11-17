@@ -74,3 +74,14 @@ test("missing credentials prevent any request",async()=>{
  await assert.rejects(client.review(tenant,batch),e=>e.status===401);
  assert.equal(count,0);
 });
+
+test("contribution reports use fixed tenant routes and server-calculated inputs only",async()=>{
+ const {client,calls,tokens}=fixture();
+ assert.throws(()=>client.createContributionReport(tenant,{contractId:batch,siteId:site,periodStart:"2026-02-14",periodEnd:"2026-02-01"}),TypeError);
+ await client.createContributionReport(tenant,{contractId:batch,siteId:site,periodStart:"2026-02-01",periodEnd:"2026-02-14",revenue:"999999"});
+ await client.readContributionReport(tenant,run);
+ assert.deepEqual(JSON.parse(calls[0].opts.body),{contractId:batch,siteId:site,periodStart:"2026-02-01",periodEnd:"2026-02-14"});
+ assert.equal(calls[0].path,`/v1/tenants/${tenant}/calculations`);
+ assert.equal(calls[1].path,`/v1/tenants/${tenant}/calculations/${run}`);
+ assert.equal(calls[1].opts.cache,"no-store");assert.deepEqual(tokens,[false,false]);
+});

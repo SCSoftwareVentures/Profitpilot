@@ -56,6 +56,13 @@ export function createPayrollClient({getAccessToken,fetchImpl=globalThis.fetch}=
   readAllocation(tenant,poolId,allocationId,{signal}={}){
    return request(allocation(tenant,poolId,allocationId),{signal});
   },
+  createContributionReport(tenant,{contractId,siteId,periodStart,periodEnd,signal}={}){
+   if(![periodStart,periodEnd].every(v=>typeof v==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(v))||periodEnd<periodStart)throw new TypeError("Valid service period required");
+   return request(root(tenant)+"/calculations",{body:{contractId:id(contractId),siteId:id(siteId),periodStart,periodEnd},signal});
+  },
+  readContributionReport(tenant,runId,{signal}={}){
+   return request(root(tenant)+"/calculations/"+id(runId),{signal});
+  },
   confirm(tenant,poolId,allocationId,{reason,acknowledged=false,signal}={}){
    if(acknowledged!==true)throw new TypeError("Explicit confirmation required");
    return request(allocation(tenant,poolId,allocationId)+"/confirm",{body:{reason:text(reason,3,1000)},fresh:true,signal});

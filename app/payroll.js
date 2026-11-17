@@ -49,4 +49,24 @@ $("inspect").addEventListener("click",()=>execute(async()=>{invalidate();const t
 }));
 form("confirm",async()=>{if(loaded!==scope()||!$("ack").checked)throw new TypeError("Read and acknowledge the specific allocation first");const r=await client.confirm(value("tenant"),value("pool"),value("allocation"),{reason:value("confirmReason"),acknowledged:true});invalidate();$("confirm").reset();status("Server returned "+r.status+". Reload allocation to verify current state.");});
 $("clear").addEventListener("click",()=>{for(const el of document.querySelectorAll("input,textarea")){if(el.type==="checkbox")el.checked=false;else el.value="";}for(const f of document.querySelectorAll("form"))f.reset();$("lines").replaceChildren();addLine();clearQueue();invalidate();$("poolResult").textContent="";status("Workspace cleared. Provider session revocation is separate.");sync();});
+
+function clearReport(){$("reportResult").textContent="";}
+for(const key of ["tenant","reportContract","reportSite","reportStart","reportEnd"]){$(key).addEventListener("input",()=>{$("reportId").value="";clearReport();});}
+$("reportId").addEventListener("input",clearReport);
+$("clear").addEventListener("click",clearReport);
+function renderReport(r,withEvidence){
+ const o=r.outputs;
+ if((r.formulaVersion??r.formula_version)!=="0.2.0"||o?.reportType!=="partial_management_contribution"||o.completeness!=="incomplete"||o.marginPercent!==null)throw new TypeError("Unsupported report version");
+ const lines=["PARTIAL MANAGEMENT CONTRIBUTION · INCOMPLETE","Report: "+r.id,"Formula: 0.2.0","Currency: AUD · "+o.taxBasis,
+  "Confirmed customer revenue: AUD "+o.revenue,"Direct labour: AUD "+o.directLabour,"Approved allocated labour: AUD "+o.approvedAllocatedLabour,
+  "Included labour: AUD "+o.deliveryCost,"Partial contribution: AUD "+o.contribution,"Definitive margin: unavailable",
+  "Confirmed invoice lines: "+o.invoiceLineCount,"Confirmed allocation lines: "+o.allocationLineCount,
+  "Whole selected payroll pools (not additional contract costs):","Source-declared total: AUD "+o.poolContext.sourceDeclaredTotal,
+  "Non-site: AUD "+o.poolContext.nonSite,"Excluded: AUD "+o.poolContext.excluded,"Unallocated: AUD "+o.poolContext.unallocated,
+  ...o.limitations];
+ if(withEvidence){lines.push("Saved scope: "+r.contract_id+" / "+r.site_id,"Period: "+r.period_start+" to "+r.period_end,"Evidence snapshot:",JSON.stringify(r.inputs,null,2));}
+ $("reportResult").textContent=lines.join("\n");
+}
+form("reportCreate",async()=>{clearReport();$("reportId").value="";const r=await client.createContributionReport(value("tenant"),{contractId:value("reportContract"),siteId:value("reportSite"),periodStart:value("reportStart"),periodEnd:value("reportEnd")});$("reportId").value=r.id;renderReport(r,false);status("Partial report saved. Load it again to inspect the evidence snapshot.");});
+$("reportRead").addEventListener("click",()=>execute(async()=>{clearReport();const r=await client.readContributionReport(value("tenant"),value("reportId"));if(r.id!==value("reportId"))throw new TypeError("Mismatched report");renderReport(r,true);status("Saved report and evidence loaded.");}));
 sync();

@@ -215,15 +215,11 @@ test("independent payroll decisions, exact source reconciliation and maker-check
   await admin.query("INSERT INTO match_reviews(id,tenant_id,invoice_line_id,contract_id,site_id,service_period_start,service_period_end,confidence,decision,reviewer_id,reviewed_at) VALUES($1,$2,$3,$4,$5,'2026-02-01','2026-02-14','HIGH','confirmed',$6,now())",[match,tenantA,invoiceLine,contract,siteA,reviewer]);
   const reportPath=path(tenantA)+"/calculations";
   const reportBody={contractId:contract,siteId:siteA,periodStart:"2026-02-01",periodEnd:"2026-02-14"};
-  const reportReply=await send("POST",reportPath,"ci-payroll-importer",reportBody);
-  assert.equal(reportReply.status,201,await reportReply.clone().text());
-  const report=await reportReply.json();
+  const report=await browserClient("ci-payroll-importer").createContributionReport(tenantA,reportBody);
   assert.equal(report.formulaVersion,"0.2.0");
   assert.deepEqual([report.outputs.revenue,report.outputs.directLabour,report.outputs.approvedAllocatedLabour,report.outputs.contribution,report.outputs.marginPercent],["120.01","60.00","20.00","40.01",null]);
   assert.equal(report.outputs.poolContext.unallocated,"10.00");
-  const snapshot=await send("GET",reportPath+"/"+report.id,"ci-payroll-reviewer");
-  assert.equal(snapshot.status,200);
-  const savedReport=await snapshot.json();
+  const savedReport=await browserClient("ci-payroll-reviewer").readContributionReport(tenantA,report.id);
   assert.equal(savedReport.inputs.invoiceEvidence[0].matchId,match);
   assert.equal(savedReport.inputs.payrollEvidence.length,2);
   assert.equal(savedReport.completeness,"incomplete");
