@@ -25,7 +25,7 @@ export function createKnowledgeEntry(input={}){
 export function canReadKnowledgeEntry(entry,actor){
   if(!entry||!actor||typeof actor!=="object"||Array.isArray(actor)||actor.tenantId!==entry.tenantId)return false;
   if(entry.visibility==="internal")return true;
-  if(entry.visibility==="customer_visible")return typeof actor.customerId==="string"&&actor.customerId===entry.customerId;
+  if(entry.visibility==="customer_visible")return (typeof actor.customerId==="string"&&actor.customerId===entry.customerId)||(Array.isArray(actor.roles)&&actor.roles.some(role=>["owner","admin"].includes(role)));
   if(entry.visibility==="restricted")return actor.userId===entry.ownerId||Array.isArray(actor.roles)&&actor.roles.some(role=>["owner","admin"].includes(role));
   return false;
 }
