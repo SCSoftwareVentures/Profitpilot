@@ -31,7 +31,7 @@ function ratioCents(numerator,denominator){
   const rounded=quotient+(remainder*2n>=d?1n:0n);
   return negative?-rounded:rounded;
 }
-export const money=value=>{const cents=decimalCents(value);return cents===null?NaN:fromCents(cents);};
+export const money=value=>{const cents=decimalCents(value);return cents===null?null:fromCents(cents);};
 export function isIsoDate(value){
   if(typeof value!=="string"||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value))return false;
   const date=new Date(value+"T00:00:00.000Z");
@@ -113,7 +113,7 @@ export function allocatePayroll({pool,direct,approved,nonSite,excluded}={}){
     siteCents[key]=(siteCents[key]||0n)+amount;
   }
   const valid=validInputs&&p>=0n&&d>=0n&&a>=0n&&n>=0n&&e>=0n&&residual>=0n&&sitesValid&&Object.values(siteCents).every(v=>v>=0n);
-  const safe=v=>v===null?NaN:fromCents(v);
+  const safe=v=>v===null?null:fromCents(v);
   return {pool:safe(p),direct:safe(d),approvedAllocated:safe(a),nonSite:safe(n),excluded:safe(e),unallocated:safe(residual),siteTotals:Object.fromEntries(Object.entries(siteCents).map(([k,v])=>[k,fromCents(v)])),reconciles:valid&&d+a+n+e+residual===p,errors:valid?[]:["Invalid monetary input, missing site identity, negative bucket or allocation exceeds eligible payroll pool"]};
 }
 export function matchInvoice(row,contract){
