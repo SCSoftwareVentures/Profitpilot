@@ -70,6 +70,9 @@ Commercial validation remains evidence-led: use authorised data only through an 
 
 ## Application prototype and development
 
+- [SwitchProof Migration synthetic demo](demo/switchproof.html)
+- [SwitchProof Migration engine](src/switchproof.js)
+- [SwitchProof Migration specification](docs/SWITCHPROOF_MIGRATION.md)
 - [PostgreSQL schema scaffold](database/schema.sql)
 - [Prototype calculation/import engine](src/engine.js)
 - [Interactive application prototype](app/index.html)
