@@ -72,6 +72,22 @@ BEGIN
         fk.source_table,fk.target_table;
     END IF;
   END LOOP;
+  -- The runtime role must never bypass policies, even if a grant or a
+  -- future migration accidentally broadens table privileges.
+  IF EXISTS (
+    SELECT 1 FROM pg_roles
+    WHERE rolname='profitpilot_app' AND (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb)
+  ) THEN RAISE EXCEPTION 'Runtime role has privileged attributes that defeat least privilege'; END IF;
+  -- A nullable tenant key can undermine tenant integrity and joins even
+  -- when RLS is enabled. Check every public tenant-owned base table.
+  IF EXISTS (
+    SELECT 1 FROM pg_class c
+    JOIN pg_namespace n ON n.oid=c.relnamespace
+    JOIN pg_attribute a ON a.attrelid=c.oid
+    WHERE n.nspname='public' AND c.relkind IN ('r','p')
+      AND a.attname='tenant_id' AND a.attnum>0 AND NOT a.attisdropped
+      AND NOT a.attnotnull
+  ) THEN RAISE EXCEPTION 'Tenant-owned table has a nullable tenant_id'; END IF;
   IF EXISTS (
     SELECT 1 FROM pg_auth_members m
     JOIN pg_roles app_role ON app_role.oid=m.member
