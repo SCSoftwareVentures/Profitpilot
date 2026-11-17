@@ -14,13 +14,17 @@ function cleanState(state){
  if(!state||!Array.isArray(state.markers)||!Array.isArray(state.violations)||state.violations.length)throw Error("Privacy state missing or inconsistent");
  const seen=new Set();
  return state.markers.map(m=>{
-  if(!m||!["closure","redaction"].includes(m.kind)||!uuid.test(m.id)||!uuid.test(m.tenantId)||typeof m.at!=="string"||!/^\d+(\.\d+)?$/.test(m.at))throw Error("Invalid privacy marker");
+  if(!m||!["closure","redaction","session_cleanup"].includes(m.kind)||!uuid.test(m.id)||!uuid.test(m.tenantId)||typeof m.at!=="string"||!/^\d+(\.\d+)?$/.test(m.at))throw Error("Invalid privacy marker");
   const index=m.kind+":"+m.id;
   if(seen.has(index))throw Error("Duplicate privacy marker");
   seen.add(index);
   if(m.kind==="closure"){
    if(!uuid.test(m.requestId)||typeof m.emailErased!=="boolean")throw Error("Invalid closure marker");
    return {kind:m.kind,id:m.id,tenantId:m.tenantId,requestId:m.requestId,at:m.at,emailErased:m.emailErased};
+  }
+  if(m.kind==="session_cleanup"){
+   if(!uuid.test(m.userId)||typeof m.cutoff!=="string"||!/^\d+(\.\d+)?$/.test(m.cutoff))throw Error("Invalid cleanup marker");
+   return {kind:m.kind,id:m.id,tenantId:m.tenantId,userId:m.userId,at:m.at,cutoff:m.cutoff};
   }
   return {kind:m.kind,id:m.id,tenantId:m.tenantId,at:m.at};
  }).sort((a,b)=>(a.kind+":"+a.id).localeCompare(b.kind+":"+b.id));

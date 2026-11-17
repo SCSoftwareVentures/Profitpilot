@@ -96,6 +96,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/018_account_closure.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/019_privacy_restore_safeguards.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/020_multi_tenant_account_closure.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/021_closed_session_retention.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:
@@ -110,9 +111,10 @@ jobs:
       - name: Capture isolated pre-privacy-action backup
         env:
           PGPASSWORD: ci-admin-password
+          PG_CI_CONTAINER: ${{ job.services.postgres.id }}
         run: |
           umask 077
-          pg_dump -h localhost -U profitpilot_admin -Fc -f "$RUNNER_TEMP/privacy-before.dump" profitpilot
+          docker exec -e PGPASSWORD "$PG_CI_CONTAINER" pg_dump -h 127.0.0.1 -U profitpilot_admin -Fc profitpilot > "$RUNNER_TEMP/privacy-before.dump"
 
       - name: Run authenticated API integration tests
         env:
@@ -128,15 +130,16 @@ jobs:
           PGPASSWORD: ci-admin-password
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
           PRIVACY_RESTORE_CI: "1"
+          PG_CI_CONTAINER: ${{ job.services.postgres.id }}
         run: |
           set -eu
           umask 077
           trap 'rm -f "$RUNNER_TEMP/privacy-before.dump" "$RUNNER_TEMP/privacy-after.dump"; dropdb -h localhost -U profitpilot_admin --if-exists privacy_restore_old_ci; dropdb -h localhost -U profitpilot_admin --if-exists privacy_restore_new_ci' EXIT
-          pg_dump -h localhost -U profitpilot_admin -Fc -f "$RUNNER_TEMP/privacy-after.dump" profitpilot
+          docker exec -e PGPASSWORD "$PG_CI_CONTAINER" pg_dump -h 127.0.0.1 -U profitpilot_admin -Fc profitpilot > "$RUNNER_TEMP/privacy-after.dump"
           createdb -h localhost -U profitpilot_admin privacy_restore_old_ci
           createdb -h localhost -U profitpilot_admin privacy_restore_new_ci
-          pg_restore -h localhost -U profitpilot_admin --exit-on-error -d privacy_restore_old_ci "$RUNNER_TEMP/privacy-before.dump"
-          pg_restore -h localhost -U profitpilot_admin --exit-on-error -d privacy_restore_new_ci "$RUNNER_TEMP/privacy-after.dump"
+          docker exec -i -e PGPASSWORD "$PG_CI_CONTAINER" pg_restore -h 127.0.0.1 -U profitpilot_admin --exit-on-error -d privacy_restore_old_ci < "$RUNNER_TEMP/privacy-before.dump"
+          docker exec -i -e PGPASSWORD "$PG_CI_CONTAINER" pg_restore -h 127.0.0.1 -U profitpilot_admin --exit-on-error -d privacy_restore_new_ci < "$RUNNER_TEMP/privacy-after.dump"
           PRIVACY_DRILL_KEY="$(openssl rand -hex 32)" node tests/physical-restore-drill.js
 
       - name: Verify production database TLS configuration fails closed

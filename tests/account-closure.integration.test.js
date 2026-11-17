@@ -120,7 +120,20 @@ test("account closure, token revocation, email erasure and restore safeguards",{
   await new Promise(r=>setTimeout(r,1100));
   assert.equal((await req(ownerReq.p+"/execute-closure","closure-owner",{eraseEmail:false})).status,200);
   assert.equal((await req("/v1/me","closure-successor")).status,200);
+  // Closed account session cleanup requires explicit policy across all memberships.
+  await assert.rejects(()=>admin.query("SELECT private.cleanup_closed_sessions($1,'CI synthetic policy')",[user]),/Retention authorization/);
+  await assert.rejects(()=>withTenant(tenant,"closure-successor",c=>c.query("SELECT private.cleanup_closed_sessions($1,'not authorized')",[user])),/permission denied/i);
+  await admin.query("UPDATE private.privacy_retention_policies SET allow_expired_session_erasure=true,session_retention_days=30 WHERE tenant_id=$1",[tenant]);
+  await admin.query("INSERT INTO private.auth_sessions(jti,subject,issued_at,expires_at,last_seen_at,revoked_at,revocation_reason) VALUES('synthetic-expired-session','closure-user',now()-interval '40 days',now()-interval '39 days',now()-interval '40 days',now()-interval '39 days','CI retained session')");
+  await admin.query("INSERT INTO private.privacy_retention_holds(tenant_id,subject_user_id,authority_reference) VALUES($1,$2,'CI retained session hold')",[tenant,user]);
+  await assert.rejects(()=>admin.query("SELECT private.cleanup_closed_sessions($1,'CI synthetic policy')",[user]),/hold/);
+  await admin.query("DELETE FROM private.privacy_retention_holds WHERE tenant_id=$1 AND subject_user_id=$2",[tenant,user]);
+  const cleaned=(await admin.query("SELECT private.cleanup_closed_sessions($1,'CI synthetic policy') AS result",[user])).rows[0].result;
+  assert.equal(cleaned.removed,1);
+  assert.equal((await admin.query("SELECT count(*)::int AS n FROM private.auth_sessions WHERE subject='closure-user' AND jti='synthetic-expired-session'")).rows[0].n,0);
+  assert.ok((await admin.query("SELECT count(*)::int AS n FROM private.auth_sessions WHERE subject='closure-user'")).rows[0].n>0,"recent sessions retained");
   const state=(await admin.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;
+  assert.ok(state.markers.some(m=>m.kind==="session_cleanup"&&m.userId===user));
   assert.deepEqual(state.violations,[]);
   assert.equal(state.markers.find(m=>m.id===user).emailErased,true);
   const opts={key:"ef".repeat(32),deploymentId:"ci-closure",now:Date.now()};
