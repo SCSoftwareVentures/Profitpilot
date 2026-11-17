@@ -252,6 +252,44 @@ test("independent payroll decisions, exact source reconciliation and maker-check
   assert.deepEqual(expandedSaved.inputs.expenseEvidence.map(e=>e.matchId).sort(),expenseMatches.sort());
   assert.equal(JSON.stringify(expandedSaved).includes("SYNTHETIC-EXPENSE"),false);
   assert.equal((await browserClient("ci-payroll-reviewer").readContributionReport(tenantA,report.id)).outputs.contribution,"40.01","prior immutable report keeps its original snapshot");
+  // Canonical source-to-report flow: raw rows, reconciled invoice, separate confirmation.
+  const invoiceBatch=await send("POST",path(tenantA)+"/imports","ci-payroll-importer",{sourceType:"supplier_invoice",fileName:"synthetic-canonical.csv",sha256:randomBytes(32).toString("hex"),permissionReference:"SYNTHETIC CI",periodStart:"2026-02-01",periodEnd:"2026-02-14"});
+  assert.equal(invoiceBatch.status,201);
+  const canonicalBatch=(await invoiceBatch.json()).batch.id;
+  const source={invoice_id:"CANON-"+randomUUID().toUpperCase(),date:"2026-03-02",currency:"AUD",tax_basis:"gst_exclusive",description:"Synthetic canonical expense",contract_id:contract,site_id:siteA,service_start:"2026-02-01",service_end:"2026-02-14"};
+  const canonicalRows=[{...source,line_number:1,amount:"12.10"},{...source,line_number:2,amount:"-2.10"}];
+  assert.equal((await send("POST",path(tenantA)+"/imports/"+canonicalBatch+"/rows","ci-payroll-importer",{rows:canonicalRows})).status,201);
+  const canonicalRowPath=path(tenantA)+"/imports/"+canonicalBatch+"/rows";
+  const replay=await send("POST",canonicalRowPath,"ci-payroll-importer",{rows:canonicalRows});
+  assert.equal(replay.status,201);assert.equal((await replay.json()).duplicates,2);
+  assert.equal((await send("POST",canonicalRowPath,"ci-payroll-importer",{rows:[{...canonicalRows[0],amount:"99.99"},canonicalRows[1]]})).status,409);
+  const preparePath=path(tenantA)+"/imports/"+canonicalBatch+"/invoices/prepare";
+  const prep={manifest:[{invoiceNumber:source.invoice_id,total:"10.00",lineCount:2}],expectedRowCount:2,reason:"Reviewed synthetic source and independent declared total",sourceReviewed:true};
+  assert.equal((await send("POST",preparePath,"ci-payroll-importer",prep)).status,403);
+  assert.equal((await send("POST",preparePath,"ci-payroll-owner",prep,{mfa:false})).status,403);
+  assert.equal((await send("POST",preparePath,"ci-payroll-owner",{...prep,manifest:[{...prep.manifest[0],total:"9.99"}]})).status,422);
+  assert.equal((await admin.query("SELECT count(*)::int AS n FROM invoice_lines l JOIN raw_import_rows r ON r.id=l.source_row_id WHERE r.batch_id=$1",[canonicalBatch])).rows[0].n,0);
+  const preparation=await send("POST",preparePath,"ci-payroll-owner",prep);
+  assert.equal(preparation.status,201,await preparation.clone().text());
+  const canonical=await preparation.json();
+  assert.equal(canonical.automaticallyConfirmed,0);
+  assert.equal(canonical.candidates.length,2);
+  const canonicalReview=await send("GET",path(tenantA)+"/imports/"+canonicalBatch+"/review","ci-payroll-reviewer");
+  assert.equal(canonicalReview.status,200);
+  assert.equal((await canonicalReview.json()).summary.accepted,2);
+  assert.equal((await send("POST",preparePath,"ci-payroll-owner",prep)).status,409);
+  assert.equal((await send("POST",path(tenantB)+"/imports/"+canonicalBatch+"/invoices/prepare","ci-payroll-outside",prep)).status,404);
+  const pendingReport=await browserClient("ci-payroll-importer").createContributionReport(tenantA,reportBody);
+  assert.equal(pendingReport.outputs.contribution,"25.01");
+  for(const item of canonical.candidates){
+   const p=path(tenantA)+"/matches/"+item.matchId+"/decision";
+   const body={decision:"confirmed",reason:"Independently reviewed synthetic source mapping",costCategory:"supplier",payrollOverlapReviewed:true,duplicateExpenseReviewed:true};
+   assert.equal((await send("POST",p,"ci-payroll-owner",body)).status,403);
+   assert.equal((await send("POST",p,"ci-payroll-reviewer",body)).status,201);
+  }
+  const canonicalReport=await browserClient("ci-payroll-importer").createContributionReport(tenantA,reportBody);
+  assert.equal(canonicalReport.outputs.contribution,"15.01");
+  assert.equal(canonicalReport.outputs.supplierCost,"15.00");
   await admin.query("INSERT INTO contracts(tenant_id,business_id,customer_name) VALUES($1,$2,'Competing contract')",[tenantA,businessA]);
   assert.equal((await send("POST",reportPath,"ci-payroll-importer",reportBody)).status,422,"shared business contract costs cannot be double-counted");
   const auditState=await admin.query("SELECT * FROM private.verify_audit_chain($1)",[tenantA]);

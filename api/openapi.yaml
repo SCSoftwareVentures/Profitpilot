@@ -314,6 +314,19 @@ paths:
         "422": { description: Unsupported source type or missing persisted rows }
         "403": { description: Not authorised }
         "404": { description: Batch not found in this tenant }
+  /tenants/{tenantId}/imports/{batchId}/invoices/prepare:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    post:
+      summary: Reconcile staged invoice rows and prepare match candidates
+      description: Fresh MFA and an independent source reviewer required. Exact cents and explicit manifest. No match automatically confirmed. Separate reviewer required for confirmation.
+      responses:
+        "201": { description: Reconciled batch and unconfirmed match candidates }
+        "403": { description: Missing permission, MFA or independent reviewer }
+        "404": { description: Batch absent }
+        "409": { description: Duplicate invoice or closed batch }
+        "422": { description: Invalid or unreconciled source }
   /tenants/{tenantId}/imports/{batchId}/payroll/rows/{rowNumber}/decision:
     parameters:
       - $ref: '#/components/parameters/TenantId'

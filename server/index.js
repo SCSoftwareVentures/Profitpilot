@@ -10,6 +10,7 @@ import {authRequired,requirePermission,requireStepUp} from "./auth.js";
 import {parseCsv,validateInvoiceRows,validatePayrollRows,isIsoDate} from "../src/engine.js";
 import {registerPayrollRoutes} from "./payroll.js";
 import {registerContributionRoutes} from "./contribution.js";
+import {registerInvoiceRoutes} from "./invoices.js";
 
 const app=express();
 app.disable("x-powered-by");
@@ -240,9 +241,17 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requirePermiss
  const rows=req.body?.rows;
  if(!Array.isArray(rows)||rows.length<1||rows.length>200||rows.some(x=>!x||typeof x!=="object"||Array.isArray(x)))return res.status(400).json({error:"Provide 1–200 row objects"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const batch=await client.query("SELECT id,status FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.batchId,req.membership.tenantId]);
+  const batch=await client.query("SELECT id,status,source_type FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.batchId,req.membership.tenantId]);
   if(!batch.rowCount)return {status:404,error:"Import batch not found"};
   if(!["uploaded","review","validating"].includes(batch.rows[0].status))return {status:409,error:"Import batch is not open for row ingestion"};
+  // Invoice ingest is a single complete batch; only exact JSONB replays are idempotent.
+  if(["customer_invoice","supplier_invoice"].includes(batch.rows[0].source_type)){
+   const prior=(await client.query("SELECT count(*)::int AS n, COALESCE(jsonb_agg(payload ORDER BY row_number)=$3::jsonb,false) AS identical FROM raw_import_rows WHERE batch_id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId,JSON.stringify(rows)])).rows[0];
+   if(prior.n>0){
+    if(!prior.identical)return {status:409,error:"Invoice batch already contains different rows; create a new batch and reconcile independently"};
+    return {status:201,inserted:0,received:rows.length,duplicates:rows.length};
+   }
+  }
   let inserted=0;
   for(let i=0;i<rows.length;i++){
    const row=await client.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,$3,$4) ON CONFLICT(batch_id,row_number) DO NOTHING RETURNING id",[req.membership.tenantId,req.params.batchId,i+1,JSON.stringify(rows[i])]);
@@ -268,7 +277,7 @@ app.get("/v1/tenants/:tenantId/imports/:batchId/review",membership,requirePermis
   const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
    const batch=await client.query("SELECT id,status,source_type FROM import_batches WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
    if(!batch.rowCount)return null;
-   const methodVersion=batch.rows[0].source_type==="payroll"?"payroll-validator-0.1.0":"invoice-validator-0.1.0";
+   const methodVersion=batch.rows[0].source_type==="payroll"?"payroll-validator-0.1.0":batch.rows[0].status==="accepted"?"canonical-invoice-0.1.0":"invoice-validator-0.1.0";
    const args=[req.params.batchId,req.membership.tenantId,methodVersion];
    const from=" FROM raw_import_rows r LEFT JOIN mapping_decisions d ON d.tenant_id=r.tenant_id AND d.raw_row_id=r.id AND d.method_version=$3 WHERE r.batch_id=$1 AND r.tenant_id=$2";
    const counts=await client.query(
@@ -320,9 +329,11 @@ app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requirePer
  if(!["confirmed","rejected","held"].includes(decision)||typeof reason!=="string"||reason.trim().length<3||reason.length>2000)return res.status(400).json({error:"Decision and reason are required"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const member=req.membership;
-  const candidate=await client.query("SELECT mr.id,mr.contract_id,mr.site_id,mr.service_period_start::text AS service_start,mr.service_period_end::text AS service_end,mr.confidence,i.direction,i.currency,i.tax_basis FROM match_reviews mr JOIN invoice_lines il ON il.id=mr.invoice_line_id AND il.tenant_id=mr.tenant_id JOIN invoices i ON i.id=il.invoice_id AND i.tenant_id=il.tenant_id WHERE mr.id=$1 AND mr.tenant_id=$2 AND mr.decision IN ('candidate','held') FOR UPDATE OF mr",[req.params.matchId,member.tenantId]);
+  const candidate=await client.query("SELECT mr.id,mr.contract_id,mr.site_id,mr.service_period_start::text AS service_start,mr.service_period_end::text AS service_end,mr.confidence,mr.evidence,i.direction,i.currency,i.tax_basis FROM match_reviews mr JOIN invoice_lines il ON il.id=mr.invoice_line_id AND il.tenant_id=mr.tenant_id JOIN invoices i ON i.id=il.invoice_id AND i.tenant_id=il.tenant_id WHERE mr.id=$1 AND mr.tenant_id=$2 AND mr.decision IN ('candidate','held') FOR UPDATE OF mr",[req.params.matchId,member.tenantId]);
   if(!candidate.rowCount)return null;
   const m=candidate.rows[0];
+  const canonical=m.evidence?.canonicalInvoice;
+  if(canonical?.method==="canonical-invoice-0.1.0"&&decision==="confirmed"&&(canonical.preparedBy===member.userId||canonical.importedBy===member.userId))return {error:"Independent match confirmer required",status:403};
   let expenseReview=null;
   if(m.direction!=="supplier"&&[costCategory,payrollOverlapReviewed,duplicateExpenseReviewed].some(v=>v!==undefined))return {error:"Expense review requires a supplier invoice match",status:422};
   if(m.direction==="supplier"&&decision==="confirmed"){
@@ -344,6 +355,7 @@ app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requirePer
  res.status(201).json({decision:result});
  }catch(e){next(e);}});
 
+registerInvoiceRoutes(app,membership);
 registerContributionRoutes(app,membership);
 
 app.get("/v1/tenants/:tenantId/calculations/:runId",membership,requirePermission("calculations.read"),async(req,res,next)=>{try{
