@@ -72,6 +72,9 @@ jobs:
         run: |
           TENANT_CONTEXT_HMAC_SECRET="$(openssl rand -hex 32)"
           POSTGRES_APP_PASSWORD="$(openssl rand -hex 32)"
+          RATE_LIMIT_HASH_SECRET="$(openssl rand -hex 32)"
+          echo "::add-mask::$RATE_LIMIT_HASH_SECRET"
+          echo "RATE_LIMIT_HASH_SECRET=$RATE_LIMIT_HASH_SECRET" >> "$GITHUB_ENV"
           echo "::add-mask::$TENANT_CONTEXT_HMAC_SECRET"
           echo "::add-mask::$POSTGRES_APP_PASSWORD"
           echo "TENANT_CONTEXT_HMAC_SECRET=$TENANT_CONTEXT_HMAC_SECRET" >> "$GITHUB_ENV"
@@ -124,6 +127,12 @@ jobs:
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/api.integration.test.js
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" psql "postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.runtime.sql
 
+      - name: Verify distributed rate limiting and counter retention with real PostgreSQL
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
+        run: |
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/shared-rate-limit.test.js
+
       - name: Build production API image
         run: docker build --pull -t profitpilot-api:ci .
 
@@ -171,7 +180,7 @@ jobs:
         run: |
           set -eu
           DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@127.0.0.1:5432/profitpilot"
-          docker run -d --network host --name profitpilot-api-ci --init --read-only --cap-drop=ALL --security-opt=no-new-privileges --pids-limit=100 --tmpfs /tmp:rw,noexec,nosuid,size=64m -e NODE_ENV=production -e PORT=8080 -e DATABASE_URL="$DATABASE_URL" -e DATABASE_SSL=true -e DATABASE_SSL_CA -e CORS_ORIGIN="$CORS_ORIGIN" -e AUTH_ISSUER="$AUTH_ISSUER" -e AUTH_AUDIENCE="$AUTH_AUDIENCE" -e AUTH_JWKS_URL="$AUTH_JWKS_URL" -e TENANT_CONTEXT_HMAC_SECRET="$TENANT_CONTEXT_HMAC_SECRET" profitpilot-api:ci
+          docker run -d --network host --name profitpilot-api-ci --init --read-only --cap-drop=ALL --security-opt=no-new-privileges --pids-limit=100 --tmpfs /tmp:rw,noexec,nosuid,size=64m -e NODE_ENV=production -e PORT=8080 -e DATABASE_URL="$DATABASE_URL" -e DATABASE_SSL=true -e DATABASE_SSL_CA -e CORS_ORIGIN="$CORS_ORIGIN" -e AUTH_ISSUER="$AUTH_ISSUER" -e AUTH_AUDIENCE="$AUTH_AUDIENCE" -e AUTH_JWKS_URL="$AUTH_JWKS_URL" -e TENANT_CONTEXT_HMAC_SECRET="$TENANT_CONTEXT_HMAC_SECRET" -e RATE_LIMIT_HASH_SECRET profitpilot-api:ci
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8080/health | grep -q '"database":"connected"'; then
               echo 'Production-mode verified database TLS health check passed'
