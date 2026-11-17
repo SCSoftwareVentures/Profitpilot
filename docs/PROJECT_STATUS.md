@@ -76,9 +76,9 @@ See the master completion register, financial test traceability matrix and branc
 
 ## Build-control rule
 
-Do not treat repository setup, CI, documentation, HTML concepts or technical preparation as authorisation to build the SaaS.
+Owner instruction dated 17 November 2026 authorises continued code-level engineering hardening and synthetic prototype development in the repository. This does not constitute a signed G5 release GO.
 
-Software build remains blocked until G0–G4 and competitive preconditions pass and G5 records explicit signed GO with named technical ownership, legal/privacy plan, delivery capacity and approved budget.
+Production customer-data features, secure live-data intake, merge to the protected release branch, deployment, customer pilot and payments remain gated until G0–G4 and competitive preconditions are evidenced and G5 records explicit signed GO with named technical ownership, legal/privacy plan, delivery capacity and approved budget.
 
 G6 is a post-build paid software-pilot exit gate.
 
