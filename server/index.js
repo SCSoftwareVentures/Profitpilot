@@ -10,6 +10,8 @@ import {withTenant,health} from "./db.js";
 import {validateProductionSecrets} from "./production-config.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa} from "./auth.js";
+import {quarantineConfig,sealQuarantine,MAX_QUARANTINE_BYTES} from "./quarantine.js";
+const quarantine=quarantineConfig();
 import {parseCsv,validateInvoiceRows,isIsoDate,money} from "../src/engine.js";
 
 const app=express();
@@ -68,6 +70,7 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requireRole("o
   if(!batch.rowCount)return {status:404,error:"Import batch not found"};
   if(!["registered","review","validating"].includes(batch.rows[0].status))return {status:409,error:"Import batch is not open for row ingestion"};
   if(batch.rows[0].source_type==="payroll")return {status:422,error:"Payroll row ingestion is disabled until the source-row ledger, privacy-safe column mapping and reviewer workflow are implemented. Do not submit employee or payroll personal information."};
+  if((await client.query("SELECT private.quarantine_status($1,$2) AS pending",[req.membership.tenantId,req.params.batchId])).rows[0].pending)return {status:409,error:"Quarantined file is not approved for ingestion"};
   // Screen the entire chunk before persisting anything. Do not echo rejected values.
   const privacy=await client.query("SELECT bool_and(private.invoice_import_payload_safe(value)) AS safe FROM jsonb_array_elements($1::jsonb)",[JSON.stringify(rows)]);
   if(!privacy.rows[0].safe)return {status:422,error:"Invoice rows contain unsupported fields or potentially sensitive information. Use only approved business fields and opaque references."};
@@ -177,6 +180,29 @@ app.get("/v1/tenants/:tenantId/calculations/:runId",membership,async(req,res,nex
  res.json(result.rows[0]);
  }catch(e){next(e);}});
  
+
+// Raw CSV quarantine is opt-in for synthetic non-production testing only.
+app.post("/v1/tenants/:tenantId/imports/:batchId/file",membership,requireRole("owner","admin"),requireRecentMfa,(req,res,next)=>{
+ if(!quarantine)return res.status(503).json({error:"File upload is not enabled"});
+ if(!req.is("text/csv"))return res.status(415).json({error:"Only uncompressed text/csv is supported"});
+ next();
+},express.raw({type:"text/csv",limit:MAX_QUARANTINE_BYTES,inflate:false}),async(req,res,next)=>{
+ const tenant=req.membership.tenantId.toLowerCase(),batch=req.params.batchId.toLowerCase();
+ let envelope;
+ try{envelope=sealQuarantine(req.body,tenant,batch,quarantine);}
+ catch{return res.status(400).json({error:"Invalid or unsupported CSV upload"});}
+ finally{if(Buffer.isBuffer(req.body))req.body.fill(0);}
+ try{
+  const result=await withTenant(tenant,req.identity.subject,async c=>(await c.query("SELECT private.quarantine_invoice_file($1,$2,$3,$4,$5,$6,$7) AS receipt",[tenant,batch,envelope.sha,envelope.keyId,envelope.nonce,envelope.tag,envelope.ciphertext])).rows[0].receipt);
+  if(!result)return res.status(404).json({error:"Import batch not found"});
+  res.status(201).json(result);
+ }catch(e){
+  if(e.code==="42501")return res.status(403).json({error:"Quarantine authority denied"});
+  if(e.code==="23514")return res.status(422).json({error:"File checksum or import state does not match the registered batch"});
+  if(e.code==="54000")return res.status(429).json({error:"Tenant quarantine capacity reached"});
+  next(e);
+ }
+});
 
 // A single, ephemeral, JSON summary; never an unrestricted database download.
 app.post("/v1/tenants/:tenantId/calculations/:runId/export",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
