@@ -37,3 +37,32 @@ Configure a restricted log destination and external uptime checks after choosing
 ## Release evidence required
 
 Before any real data: successful CI on exact integrated head; independent security review and penetration test; reviewed identity-provider/MFA/recovery setup; production TLS and network boundaries; working provider-managed secret injection and least-privilege administrative access; sampled encrypted offsite recovery with RPO/RTO evidence; tested alert delivery; approved data handling/deletion and retention; operational incident owner and response exercise. No automatic merge/deployment is authorized by this document.
+
+
+## Implementation additions — 18 November 2026
+
+These controls are on the unmerged security candidate. Confirm exact-head CI before relying on them.
+
+### Identity and compromised sessions
+
+The configured identity provider must issue a cryptographically verified access token with stable subject, stable session ID (`sid`), integer `auth_time`, issued-at and expiry. Refreshing a token must not replace the original authentication time or session ID. Sensitive upload, approval and export operations additionally require explicit provider-attested MFA within five minutes. Provider-specific claims and account recovery are not yet live-verified.
+
+An approved identity operator can provision an externally verified subject and manage membership via the restricted identity administration functions. No self-registration or self-promotion route exists. Record an opaque approval reference for every action. Never grant the operator role to the API user. Membership changes via the operator procedure require new authentication; the last active owner cannot be removed or downgraded. Emergency disabling of a compromised final owner still requires a supervised recovery procedure. The administrator-only revocation function supports per-session digest revocation, global logout and account disable/enable; revoke globally when uncertain which session was compromised. Revocation affects future authenticated requests, not necessarily a transaction already executing.
+
+Reconcile post-snapshot revocations, account disables, membership changes and signing-key changes from an authoritative external record before restoring traffic. The monotonic replay function does not recreate membership grants or re-enable users. Never assume restoring a backup automatically restores current authorizations.
+
+### File processing
+
+The non-production-only invoice CSV workflow stores AES-GCM ciphertext, verifies the registered checksum, requires a fresh-signature scan and strict bounded content validation, and records a canonical-row manifest digest. An active owner/admin with recent MFA must separately approve processing. The isolated worker reopens and rescans the bytes, verifies the same digest and atomically persists only those rows into financial review, never automatically accepting them. A compromised identity's global revocation, legal hold, expired lease, incorrect manifest or changed source hash blocks promotion. There is no file-download route. Temporary ciphertext expiry is opt-in and respects holds. Disposed markers and source/audit records remain; PostgreSQL logical deletion is not guaranteed physical erasure from existing snapshots or storage.
+
+Before enabling real uploads: provision the restricted scanner role separately, protect the Unix socket and encryption keys, confirm current signature updates, run `CLAMAV_SOCKET_PATH=/approved/socket node scripts/check-live-scanner.js` against an actual isolated ClamAV daemon, and exercise outage, infection, quota, legal-hold and recovery scenarios. Set a reviewed retention policy, confirm appropriate file/row limits and monitor worker scheduling. The harness does not itself provision or run an antivirus service; current production flags still deny upload and worker activation.
+
+### Audit and network boundary
+
+Financial audit events are database-generated and chained by tenant. The application cannot directly insert, modify or delete them. Administrator-only verification detects event mutation, missing/excess events and broken chain continuity. This is tamper-evident against ordinary unauthorized mutations, not tamper-proof against a privileged operator rewriting the chain and checkpoints. Export signed head/count checkpoints to an independently controlled immutable destination and prove verification during recovery. Identity administration and revocation logs are append-only under normal permissions.
+
+Keep direct connections untrusted by default. Configure `TRUSTED_PROXY_IPS` only for exact addresses of the immediate trusted reverse proxy. Ensure the proxy appends the actual peer IP or replaces client-supplied forwarding headers; network firewall must prevent direct bypass of the edge. Verify proxy address changes before redeployment. Browser origins must be exact HTTPS origins in production. The API uses bounded header/request/connection settings; baseline values are engineering defaults, not load-tested capacity limits. An edge network protection layer and deployment-specific stress testing are still required.
+
+### Build integrity
+
+CI checkout and setup actions are pinned to retrieved commit SHAs; checkout credentials are not persisted. npm dependency scripts are disabled, direct versions are exact and lockfile registry/integrity checks must pass. A tracked-source preflight screens common credential shapes and restricted backup/key filenames without printing matching values. This is not a history-wide scanner, DAST, SCA beyond npm audit, comprehensive secret scanner, or container vulnerability assessment. Review and pin production image digests through approved registry evidence; add independently maintained vulnerability scanning, scheduled dependency review and remediation before release.
