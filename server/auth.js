@@ -23,7 +23,7 @@ function config(){
   error.code="AUTH_CONFIG_INVALID";
   throw error;
  }
- if(url.username||url.password||url.hash){
+ if(url.username||url.password||url.hash||url.search){
   const error=new Error("Authentication JWKS URL contains prohibited URL components");
   error.code="AUTH_CONFIG_INVALID";
   throw error;
