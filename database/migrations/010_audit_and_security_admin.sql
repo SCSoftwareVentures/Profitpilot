@@ -25,7 +25,8 @@ AS $function$
 $function$;
 ALTER FUNCTION private.audit_event_digest(uuid,uuid,uuid,text,text,uuid,text,uuid,jsonb,timestamptz,bigint,bytea)
  OWNER TO profitpilot_context_owner;
-GRANT SELECT ON public.audit_events,public.permission_catalog TO profitpilot_context_owner;
+GRANT SELECT,INSERT ON public.audit_events TO profitpilot_context_owner;
+GRANT SELECT ON public.permission_catalog TO profitpilot_context_owner;
 GRANT SELECT,INSERT,UPDATE,DELETE ON public.tenant_membership_permission_overrides TO profitpilot_context_owner;
 
 DO $backfill$
