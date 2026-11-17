@@ -443,3 +443,29 @@ The owner confirms the intended outcome is sale of the entire ProfitPilot projec
 The AUD 30,000–50,000 figure is an initial reference target only and is not a ceiling, appraisal, guaranteed valuation or buyer commitment. No predetermined upper valuation limit is set; the objective is to maximise evidence-backed strategic value. The former AUD 500 initial and AUD 100 monthly project caps are withdrawn as planning constraints. Actual paid spend, subscriptions, contractors, external services or other financial commitments still require explicit owner approval.
 
 This changes the commercial objective and removes the former budget caps; it does not waive technical correctness, privacy/security safeguards, IP diligence, evidence discipline or the owner's authority over external actions. No merge, deployment, real-data intake, buyer outreach, sale or transfer of ownership is authorised.
+
+
+## 26. Six differentiators — staged engineering prototypes (17 November 2026)
+
+All six approved differentiators now have code-level prototype slices in staged draft review branches. They remain separate review units, not a fully integrated product release:
+
+- **Job Readiness Engine — PR #29:** versioned readiness template and explicit satisfied/missing/conflicting/unverified states; synthetic/in-memory. Exact-head CI run #43989552815 (run #874) passed.
+- **Promise Ledger — PR #30:** separate customer promises/internal tasks, acknowledgement evidence and append-only lifecycle versions; synthetic/in-memory. Exact-head CI run #43990016565 (run #920) passed.
+- **Profit Leak Radar — PR #32:** deterministic, evidence-gated exception candidates and unknown states; synthetic fixtures. Exact-head CI run #43990492148 (run #950) passed.
+- **Verified Value Ledger — PR #33:** separate value lifecycle states, credits/refunds and reporting-basis grouping; synthetic/in-memory. Exact-head CI run #43991009508 (run #973) passed.
+- **SwitchProof Migration — PR #34:** CSV source profiling, explicit mapping, source lineage, duplicate/validation holds and row reconciliation; preview only, no target writes. Earlier exact feature head passed run #43992553047 (run #979); latest documentation-reconciled head has CI runs #43993230246 and #43993238829 in progress at the time of this entry.
+- **Field Knowledge Memory — PR #35:** typed permission-aware records, source/permission/evidence provenance, append-only versions, site/owner visibility and stale/expired/conflict assessment; synthetic/in-memory. Exact-head CI run #43993086614 (run #984) passed.
+
+These CI results are branch-specific software evidence only. They do not prove complete integration, persistence, production authorization, customer validation, financial correctness or commercial value. The feature branches are staged and draft/unmerged; the release branch has not been updated.
+
+### Required next work
+
+1. Reconcile the staged PR dependency graph and produce one exact-head integration candidate before any release-branch merge.
+2. Replace in-memory demo stores with shared tenant-scoped persistence, authenticated APIs, database-enforced authorization, audit events and conflict-safe concurrency.
+3. Integrate the six workflows into the iPhone-first product and a single reproducible synthetic buyer demonstration.
+4. Complete the financial acceptance matrix and source-completeness controls; payroll ingestion remains disabled.
+5. Complete private file lifecycle and production operational controls.
+6. Obtain independent security, Australian privacy/legal and qualified accounting/payroll/tax review.
+7. Complete G0–G4 validation, retain G5 approval for production/real-data use, and finish IP/licence and buyer-handover diligence.
+
+No merge, deployment, real-data intake, customer pilot, payment activity or external buyer outreach is authorised by these prototype milestones.
