@@ -355,6 +355,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal((await secondWithdraw.json()).status,"withdrawn");
     const privacyManage=await request(`/v1/tenants/${tenantA}/privacy/requests/manage`,{subject:"ci-api-owner"});
     assert.equal(privacyManage.status,200,"owners must be able to review tenant privacy requests");
+    {
     const queue=await privacyManage.json();
     assert.equal(queue.items.length,2,"privacy managers may review metadata across their tenant");
     assert.equal(queue.scope,"metadata_only");
@@ -379,6 +380,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const meta=await auditMetadata.json();
     assert.equal(meta.scope,"audit_metadata_only");
     assert.ok(meta.items.every(x=>!Object.hasOwn(x,"reason")&&!Object.hasOwn(x,"metadata")));
+    }
     const verifyPrivacy=await request(`/v1/tenants/${tenantA}/privacy/requests/${privacyItem.id}/decision`,{subject:"ci-api-owner",method:"POST",body:{action:"verify_identity",reason:"Identity evidence reviewed"}});
     assert.equal(verifyPrivacy.status,200);
     const beginPrivacy=await request(`/v1/tenants/${tenantA}/privacy/requests/${privacyItem.id}/decision`,{subject:"ci-api-owner",method:"POST",body:{action:"begin_review",reason:"Identity evidence not independently verified"}});
