@@ -109,7 +109,7 @@ export function allocatePayroll({pool,direct,approved,nonSite,excluded}={}){
     if(!x||typeof x!=="object"||Array.isArray(x)){sitesValid=false;continue;}
     const amount=decimalCents(x.amount);
     const key=typeof x.site==="string"?x.site.trim():"";
-    if(amount===null||!key){sitesValid=false;continue;}
+    if(amount===null||amount<0n||!key){sitesValid=false;continue;}
     siteCents[key]=(siteCents[key]||0n)+amount;
   }
   const valid=validInputs&&p>=0n&&d>=0n&&a>=0n&&n>=0n&&e>=0n&&residual>=0n&&sitesValid&&Object.values(siteCents).every(v=>v>=0n);
