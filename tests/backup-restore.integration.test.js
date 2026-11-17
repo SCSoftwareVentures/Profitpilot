@@ -43,6 +43,9 @@ test("synthetic logical backup restores all source rows and preserves tenant bou
    await assert.rejects(()=>client.query("DELETE FROM public.audit_events"),/permission denied/i);
   }finally{try{await client.query("ROLLBACK");}finally{client.release();}}
   assert.equal((await runtime.query("SELECT id FROM public.contracts")).rowCount,0,"restored pooled connection must clear signed context");
+  for(const id of [tenant,"44444444-4444-4444-8444-444444444444"]){
+   assert.equal((await restored.query("SELECT private.verify_audit_chain($1) AS ok",[id])).rows[0].ok,true,"restored audit chain integrity");
+  }
   // Snapshot predates disposal: authoritative source ledger is consulted after restore.
   const batch="f831ab34-efb8-48b4-9979-434711943ea2";
   assert.equal((await restored.query("SELECT id FROM public.import_batches WHERE tenant_id=$1 AND id=$2",[tenant,batch])).rowCount,1);
