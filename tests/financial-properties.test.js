@@ -56,8 +56,8 @@ test("PROP-003/012 — aggregate totals are invariant to input row permutation",
 });
 
 test("PROP-005/013 — unknown amounts remain invalid and negative credits retain their sign",()=>{
-  assert.equal(Number.isNaN(money(null)),true);
-  assert.equal(Number.isNaN(money(0.1)),true);
+  assert.equal(money(null),null);
+  assert.equal(money(0.1),null);
   assert.equal(money("-110.00"),"-110.00");
   const credit=aggregateMetrics([{currency:"AUD",taxBasis:"gst_exclusive",periodStart:"2026-11-01",periodEnd:"2026-11-30",revenue:"100.00",cost:"110.00"}]);
   assert.equal(credit.contribution,"-10.00");
