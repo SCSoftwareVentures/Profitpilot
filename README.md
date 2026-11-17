@@ -87,7 +87,7 @@ The API/database are implementation scaffolds, not a deployed service. The brows
 
 ## Acquisition readiness
 
-The owner's commercial objective is to explore a possible AUD 30,000–50,000 sale. This is a target, not an appraisal or a guaranteed market value. The acquisition-readiness workstream is documented in [ACQUISITION_READINESS_PLAN.md](docs/ACQUISITION_READINESS_PLAN.md). The plan prioritises a complete demonstrable product, financial acceptance evidence, security/privacy assurance, IP ownership and licence diligence, reproducible engineering handover and credible customer evidence.
+The owner's objective is to sell the entire ProfitPilot project rather than launch and operate it personally. AUD 30,000–50,000 was an initial reference target, not a ceiling or valuation; the objective is to maximise evidence-backed strategic value without a predetermined upper limit. The former AUD 500 initial and AUD 100 monthly budget caps have been withdrawn as planning constraints. Actual paid commitments still require explicit owner approval. The acquisition-readiness workstream is documented in [ACQUISITION_READINESS_PLAN.md](docs/ACQUISITION_READINESS_PLAN.md).
 
 ## Product and release boundaries
 
@@ -96,7 +96,7 @@ The owner's commercial objective is to explore a possible AUD 30,000–50,000 sa
 - Unknown is not zero; incomplete source coverage must not produce a definitive contribution or margin.
 - AI may assist extraction and explanation but must not authorise calculations, approvals, payments, disputes or ratings.
 - Repository visibility is public. Use synthetic fixtures only; never commit customer, employee, payroll, invoice, identity, credential or confidential commercial data.
-- No merge, deployment, real-data intake, customer pilot, payment activity or external buyer outreach is authorised by this repository status.
+- No merge, deployment, real-data intake, customer pilot, payment activity or external buyer outreach is authorised by this repository status. The intended deliverable is a buyer-ready, reproducible and demonstrable software asset with a documented handover path, not an owner-operated live SaaS launch.
 
 ## Governance and release boundary
 
