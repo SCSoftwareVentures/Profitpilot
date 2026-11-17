@@ -9,9 +9,7 @@
 
 ProfitPilot has been developed with security and privacy controls as architectural requirements rather than deferred polish. The current repository includes JWT/JWKS authentication scaffolding, server-side tenant membership and permission checks, PostgreSQL row-level security (RLS), signed transaction-scoped tenant context, role-based permissions, session revocation primitives, a tamper-evident tenant audit chain and a privacy-request workflow.
 
-The most important recent improvement is database-enforced privacy-request subject isolation. Ordinary members can read only their own privacy requests, while authorised tenant owners and administrators can review tenant requests. A member cannot insert a request for another member or update another member's request through the runtime database role. The latest verified CI run for this control set is run [#1046](https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44002838128), which passed Node.js verification, unit tests, PostgreSQL migrations/RLS, authenticated API integration tests, production API image build and container health check.
-
-A subsequent hardening change prevents an administrator from marking a privacy request fulfilled while no real export, correction, restriction or deletion executor exists. That change and the new inventory documentation are awaiting a fresh CI result as of this revision. Do not describe them as CI-verified until the corresponding run succeeds.
+The most important recent improvement is database-enforced privacy-request subject isolation. Ordinary members can read only their own privacy requests, while authorised tenant owners and administrators can review tenant requests. A member cannot insert a request for another member or update another member's request through the runtime database role. The privacy subject-isolation milestone passed run [#1046](https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44002838128). The subsequent fail-closed change, regression test and buyer-pack commit passed complete CI run [#1058](https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44004207499), including Node.js verification, unit tests, PostgreSQL migrations/RLS, authenticated API integration tests, production API image build and container health check. The regression test confirms that an attempt to mark a request fulfilled returns HTTP 409 while no actual fulfilment executor exists.
 
 **Current maturity:** a partially implemented engineering foundation, not a production-ready service. No production deployment, live customer dataset, independent penetration test, security certification, completed privacy impact assessment or verified data-subject deletion lifecycle is established by the repository evidence reviewed for this document.
 
@@ -41,7 +39,7 @@ A subsequent hardening change prevents an administrator from marking a privacy r
 - Members can submit and view their own privacy requests.
 - Authorised privacy administrators can review requests, verify identity, place/release legal holds, reject requests with a reason, and withdraw eligible requests through a constrained function.
 - Database policies enforce subject-level read/insert/update boundaries.
-- The API is being hardened to refuse a false “fulfilled” status until actual fulfilment operations exist.
+- The API refuses a false “fulfilled” status while actual fulfilment operations do not exist; the HTTP 409 behaviour is covered by CI run #1058.
 - There is no implemented automated export, correction, restriction or deletion executor, and no verified backup-expiry/deletion propagation process.
 
 ## 2. Architecture overview
@@ -76,7 +74,7 @@ No approved retention schedule or complete lifecycle implementation currently ex
 
 ## 4. Verification evidence
 
-The latest confirmed passing CI run at the time of the previous security milestone is [run #1046](https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44002838128). It completed successfully and included:
+The latest confirmed passing CI run for the current buyer-pack commit is [run #1058](https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44004207499). It completed successfully and included:
 - Node.js 22 syntax checks and unit tests;
 - PostgreSQL schema and migration execution;
 - tenant RLS verification under the restricted runtime role;
@@ -84,7 +82,7 @@ The latest confirmed passing CI run at the time of the previous security milesto
 - production API container image build;
 - running-container database health check.
 
-Run #1046 predates the later change that rejects unsupported privacy fulfilment and the current buyer-pack documents. Those later changes require their own passing CI evidence.
+Run #1058 includes the fail-closed privacy fulfilment change, its regression test, the preliminary privacy inventory and the buyer-pack documentation.
 
 CI is not a penetration test. It does not establish production security, exhaustive isolation coverage, legal compliance, availability, secure backups or resistance to a determined attacker.
 
