@@ -20,7 +20,7 @@ export function registerAttachmentQuarantineRoutes(app,membership){
  },express.raw({type:permitted,limit:MAX_ATTACHMENT_BYTES,inflate:false}),async(req,res,next)=>{try{
   if(!(req.body instanceof Buffer)||typeof req.attachmentType!=="string"||!attachmentShape(req.attachmentType,req.body))return res.status(422).json({error:"Invalid attachment signature or size"});
   const {key,keyId}=independentAttachmentKey(process.env);
-  const meta={tenantId:req.membership.tenantId.toLowerCase(),batchId:req.params.batchId.toLowerCase(),userId:req.membership.userId.toLowerCase(),id:randomUUID(),type:req.attachmentType,keyId,size:req.body.length};
+  const meta={tenantId:req.membership.tenantId.toLowerCase(),batchId:req.params.batchId.toLowerCase(),userId:req.membership.userId.toLowerCase(),id:randomUUID(),type:req.attachmentType,keyId,size:Buffer.byteLength(req.body)};
   const sealed=sealAttachment(req.body,meta,key);
   const result=await withPrivacyStepUp(req.membership,req.identity,meta.batchId,attachmentWriteAction(meta,sealed),async(c,proof)=>{
    const r=await c.query("SELECT private.store_quarantined_attachment($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) AS result",[meta.tenantId,meta.batchId,meta.id,meta.type,meta.keyId,meta.size,sealed.nonce,sealed.tag,sealed.ciphertext,req.identity.authTime,proof]);

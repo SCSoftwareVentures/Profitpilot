@@ -11,7 +11,7 @@ function secret(key){
 }
 export function attachmentShape(type,body){
  if(!(body instanceof Buffer)||typeof type!=="string")return false;
- if(body.length<8||body.length>MAX_ATTACHMENT_BYTES||!TYPES.includes(type))return false;
+ if(Buffer.byteLength(body)<8||Buffer.byteLength(body)>MAX_ATTACHMENT_BYTES||!TYPES.includes(type))return false;
  if(type==="application/pdf")return /^%PDF-1\.[0-7]/.test(body.subarray(0,8).toString("ascii"));
  if(type==="image/png")return body.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
  return body[0]===255&&body[1]===216&&body[2]===255;
@@ -23,7 +23,7 @@ function context(meta){
  return Buffer.from(["profitpilot-quarantine-v1",tenantId,batchId,userId,id,type,keyId,String(size)].join("\n"),"utf8");
 }
 export function sealAttachment(body,meta,key){
- if(!(body instanceof Buffer)||!meta||typeof meta!=="object"||Array.isArray(meta)||!attachmentShape(meta.type,body)||meta.size!==body.length)throw Error("Unsupported or oversized attachment");
+ if(!(body instanceof Buffer)||!meta||typeof meta!=="object"||Array.isArray(meta)||!attachmentShape(meta.type,body)||meta.size!==Buffer.byteLength(body))throw Error("Unsupported or oversized attachment");
  const aad=context(meta),material=secret(key),nonce=randomBytes(12);
  try{
   const cipher=createCipheriv("aes-256-gcm",material,nonce,{authTagLength:16});cipher.setAAD(aad);
