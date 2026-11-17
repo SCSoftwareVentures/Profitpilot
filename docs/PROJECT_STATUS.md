@@ -216,3 +216,12 @@ The complete product is still not ready for pilot or production. Payroll ingesti
 ### Current PR #28 head — 17 November 2026
 
 Exact head `5988ba408eae176cf5c69def1a9b5f4106e954c1` passed GitHub Actions run **#43984181421 (run #684)**. Both Node.js 22 and PostgreSQL 16 jobs succeeded, including migrations through 014, tenant/FK and restricted-role RLS checks, authenticated API reviewer/audit tests, production image build, trusted/untrusted TLS verification and production-mode database health. Product and production readiness remain NOT COMPLETE; all financial acceptance and external release gates remain open.
+
+
+## Owner strategic direction update — 17 November 2026
+
+The owner has confirmed that ProfitPilot is being developed for sale as an entire software project; the owner does not intend to launch and operate it as a standalone service. The build objective is therefore a complete, coherent, buyer-ready and reproducible asset, with a polished synthetic demonstration, credible engineering evidence, documented limitations, IP/licence diligence and a practical transfer/handover package.
+
+The AUD 30,000–50,000 figure is an initial reference target only, not a ceiling, guaranteed valuation or market appraisal. There is no predetermined upper valuation limit; maximise evidence-backed strategic value. The previous AUD 500 initial and AUD 100 recurring monthly caps are withdrawn as project-planning constraints. This does not authorise actual purchases, subscriptions, contractor engagements or other paid commitments; those still require explicit owner approval.
+
+A live owner-operated production launch, live customer pilot or recurring revenue is not a prerequisite for the intended sale. Buyer confidence, reproducible setup, working synthetic demonstration, financial correctness, security architecture, transferability and credible market/buyer evidence remain priorities. No merge, deployment, real-data intake, buyer outreach, sale or transfer of ownership is authorised by this direction.
