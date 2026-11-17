@@ -159,7 +159,7 @@ export function registerPayrollRoutes(app,membership){
     const found=await client.query(
      "SELECT p.id,p.total_amount,p.currency,b.status AS batch_status FROM payroll_pools p "+
      "JOIN import_batches b ON b.id=p.batch_id AND b.tenant_id=p.tenant_id "+
-     "WHERE p.id=$1 AND p.tenant_id=$2 FOR UPDATE OF p",
+     "WHERE p.id=$1 AND p.tenant_id=$2 FOR UPDATE OF b",
      [req.params.poolId,req.membership.tenantId]);
     if(!found.rowCount)return error(404,"Payroll pool not found");
     const pool=found.rows[0];
