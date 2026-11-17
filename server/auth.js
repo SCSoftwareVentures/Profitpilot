@@ -1,5 +1,5 @@
 import {createRemoteJWKSet, jwtVerify} from "jose";
-import {withTenant} from "./db.js";
+import {withTenant,registerAndCheckAuthSession} from "./db.js";
 
 let jwks;
 let jwksUrl;
@@ -43,30 +43,34 @@ function remoteKeys(url){
 export function authRequired(){
  return async(req,res,next)=>{
   let c;
-  try{
-   c=config();
-  }catch(error){
-   return res.status(503).json({error:"Authentication service is not configured"});
-  }
-  const token=req.headers.authorization?.match(/^Bearer\s+([^\s]+)$/i)?.[1];
+  try{c=config();}catch{return res.status(503).json({error:"Authentication service is not configured"});}
+  const token=req.headers.authorization?.match(/^Bearer\\s+([^\\s]+)$/i)?.[1];
   if(!token)return res.status(401).json({error:"Authentication required"});
   if(token.length>8192)return res.status(401).json({error:"Invalid access token"});
+  let payload;
   try{
-   const {payload}=await jwtVerify(token,remoteKeys(c.url),{
+   const verified=await jwtVerify(token,remoteKeys(c.url),{
     issuer:c.issuer,
     audience:c.audience,
     algorithms:["RS256","ES256"],
-    requiredClaims:["exp","iat","sub"],
+    requiredClaims:["exp","iat","sub","jti"],
     clockTolerance:5
    });
+   payload=verified.payload;
    const now=Date.now()/1000;
    if(typeof payload.iat!=="number"||!Number.isFinite(payload.iat)||payload.iat>now+5||now-payload.iat>900)return res.status(401).json({error:"Invalid or expired access token"});
+   if(typeof payload.exp!=="number"||!Number.isFinite(payload.exp)||typeof payload.jti!=="string"||payload.jti.length<16||payload.jti.length>128)return res.status(401).json({error:"Invalid access token"});
    if(typeof payload.sub!=="string"||!payload.sub.trim())return res.status(401).json({error:"Invalid access token"});
-   req.identity={subject:payload.sub,email:typeof payload.email==="string"?payload.email:null,authTime:Number.isInteger(payload.auth_time)?payload.auth_time:null,acr:typeof payload.acr==="string"?payload.acr:null};
-   return next();
+  }catch{return res.status(401).json({error:"Invalid or expired access token"});}
+  let revoked;
+  try{
+   revoked=await registerAndCheckAuthSession({jti:payload.jti,subject:payload.sub,issuedAt:payload.iat,expiresAt:payload.exp});
   }catch{
-   return res.status(401).json({error:"Invalid or expired access token"});
+   return res.status(503).json({error:"Session security service unavailable"});
   }
+  if(revoked)return res.status(401).json({error:"Session revoked or unavailable"});
+  req.identity={subject:payload.sub,email:typeof payload.email==="string"?payload.email:null,jti:payload.jti,authTime:Number.isInteger(payload.auth_time)?payload.auth_time:null,acr:typeof payload.acr==="string"?payload.acr:null};
+  return next();
  };
 }
 
