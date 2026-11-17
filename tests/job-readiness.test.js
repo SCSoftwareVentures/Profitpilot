@@ -24,6 +24,21 @@ test("complete evidenced proposal is ready and retains template version",()=>{
   assert.equal(result.blockingCount,0);
 });
 
+test("absent checks remain explicitly missing and block readiness",()=>{
+  const result=evaluateJobReadiness(COMMERCIAL_CLEANING_READINESS_TEMPLATE,{checks:{}});
+  assert.equal(result.readinessStatus,"not_ready");
+  assert.equal(result.checkResults.find(x=>x.id==="customer").status,"missing");
+  assert.equal(result.checkResults.find(x=>x.id==="customer").issue,null);
+  assert.equal(result.completenessPercent,0);
+});
+
+test("conflicting checks require an explanation and templates require a required check",()=>{
+  const result=evaluateJobReadiness(COMMERCIAL_CLEANING_READINESS_TEMPLATE,{checks:{scope:{status:"conflicting"}}});
+  assert.equal(result.checkResults.find(x=>x.id==="scope").issue,"conflict_reason_required");
+  const optionalOnly={id:"optional-only",version:"1",requirements:[{id:"note",label:"Optional note",valueType:"text",required:false,evidenceRequired:false,allowNotApplicable:true}]};
+  assert.throws(()=>evaluateJobReadiness(optionalOnly,{checks:{}}),/At least one required readiness check/);
+});
+
 test("missing, conflicting and unverified required checks block readiness",()=>{
   const checks={...satisfied,scope:{status:"conflicting",reason:"Customer scope email differs"},service_date:{status:"unverified"},access:{status:"missing"}};
   const result=evaluateJobReadiness(COMMERCIAL_CLEANING_READINESS_TEMPLATE,{checks});
