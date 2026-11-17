@@ -171,7 +171,17 @@ The **Promise Ledger** now also has an initial in-memory domain state machine an
 - Fulfilment requires evidence; missed status cannot be recorded before the due timestamp.
 - Disputes/cancellations require reasons; terminal states cannot be rewritten.
 
-The Promise Ledger is not yet persisted, searchable, connected to authenticated customer identities, or integrated with notification channels. Evidence references and actor types are recorded assertions, not independent verification. The remaining four differentiators are not represented as implemented merely because they are specified below.
+The Promise Ledger is not yet persisted, searchable, connected to authenticated customer identities, or integrated with notification channels. Evidence references and actor types are recorded assertions, not independent verification.
+
+The **Profit Leak Radar** has a deterministic, evidence-gated prototype for contract/approved-variation/invoice variance, payroll allocation residuals and invoice-row exceptions. Monetary findings remain candidates or unknowns; incomplete or mismatched source coverage is never treated as zero. It is not a complete profit calculation or a verified savings/recovery engine.
+
+The **Verified Value Ledger** has an initial staged implementation and synthetic dashboard on its own review branch. Its exact current feature status and integration state must be checked against that branch before any combined release claim. It is not a payment settlement or bank-reconciliation service.
+
+The **SwitchProof Migration** has a CSV-only, preview-only profiler and mapping engine with row lineage, mapping fingerprints, strict field validation, duplicate holds and row-count reconciliation. It has no real-data upload, target writes, identity merge or migration commit.
+
+The **Field Knowledge Memory** now has an in-memory prototype with typed knowledge classes, source/reviewer provenance, private/site/team visibility, append-only review versions and fail-closed retrieval when access context is missing. Its access context is supplied to a pure function and is not authenticated; this is not a production security boundary.
+
+These four slices are prototypes with different levels of maturity and integration. Their presence in source code does not mean they are complete, persisted, fully integrated or production-ready.
 
 ## 4. Shared platform foundations
 
