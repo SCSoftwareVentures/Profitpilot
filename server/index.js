@@ -124,9 +124,10 @@ app.get("/v1/tenants/:tenantId/privacy/requests/manage",membership,requirePermis
 }catch(e){next(e);}});
 app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/decision",membership,requirePermission("privacy.requests.manage"),requireStepUp(),async(req,res,next)=>{try{
  const {action,reason,resolutionSummary}=req.body||{};
- if(!["verify_identity","begin_review","place_legal_hold","release_legal_hold","fulfil","reject"].includes(action)||typeof reason!=="string"||reason.trim().length<3||reason.length>1000)
+ if(action==="fulfil")return res.status(409).json({error:"Privacy request fulfilment is not implemented. Complete and verify the requested action before recording fulfilment."});
+ if(!["verify_identity","begin_review","place_legal_hold","release_legal_hold","reject"].includes(action)||typeof reason!=="string"||reason.trim().length<3||reason.length>1000)
   return res.status(400).json({error:"A supported review action and reason are required"});
- if(["fulfil","reject"].includes(action)&&(typeof resolutionSummary!=="string"||resolutionSummary.trim().length<3||resolutionSummary.length>2000))
+ if(action==="reject"&&(typeof resolutionSummary!=="string"||resolutionSummary.trim().length<3||resolutionSummary.length>2000))
   return res.status(400).json({error:"A resolution summary is required for a completed decision"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const current=await client.query("SELECT id,status FROM privacy_requests WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.requestId,req.membership.tenantId]);
@@ -136,14 +137,13 @@ app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/decision",membership
    begin_review:{requested:"under_review",identity_verification:"under_review"},
    place_legal_hold:{under_review:"legal_hold"},
    release_legal_hold:{legal_hold:"under_review"},
-   fulfil:{under_review:"fulfilled"},
    reject:{requested:"rejected",identity_verification:"rejected",under_review:"rejected"}
   };
   const nextStatus=transitions[action]?.[current.rows[0].status];
   if(!nextStatus)return {status:409,error:"This action is not valid for the request's current status"};
   const holdReason=action==="place_legal_hold"?reason.trim():null;
-  const summary=["fulfil","reject"].includes(action)?resolutionSummary.trim():null;
-  const updated=await client.query("UPDATE privacy_requests SET status=$3,legal_hold_reason=$4,resolution_summary=COALESCE($5,resolution_summary),assigned_to=COALESCE(assigned_to,$6),updated_at=clock_timestamp(),resolved_at=CASE WHEN $3 IN ('fulfilled','rejected') THEN clock_timestamp() ELSE NULL END WHERE id=$1 AND tenant_id=$2 RETURNING id,request_type,status,updated_at,resolved_at,resolution_summary,legal_hold_reason",[req.params.requestId,req.membership.tenantId,nextStatus,holdReason,summary,req.membership.userId]);
+  const summary=action==="reject"?resolutionSummary.trim():null;
+  const updated=await client.query("UPDATE privacy_requests SET status=$3,legal_hold_reason=$4,resolution_summary=COALESCE($5,resolution_summary),assigned_to=COALESCE(assigned_to,$6),updated_at=clock_timestamp(),resolved_at=CASE WHEN $3='rejected' THEN clock_timestamp() ELSE NULL END WHERE id=$1 AND tenant_id=$2 RETURNING id,request_type,status,updated_at,resolved_at,resolution_summary,legal_hold_reason",[req.params.requestId,req.membership.tenantId,nextStatus,holdReason,summary,req.membership.userId]);
   await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'privacy_request_status_changed','privacy_request',$3,$4,$5)",[req.membership.tenantId,req.membership.userId,req.params.requestId,reason.trim(),JSON.stringify({action,fromStatus:current.rows[0].status,toStatus:nextStatus})]);
   return {status:200,item:updated.rows[0]};
  });
