@@ -47,7 +47,7 @@ export function authRequired(){
   }catch(error){
    return res.status(503).json({error:"Authentication service is not configured"});
   }
-  const token=req.headers.authorization?.match(/^Bearer\\s+([^\\s]+)$/i)?.[1];
+  const token=req.headers.authorization?.match(/^Bearer\s+([^\s]+)$/i)?.[1];
   if(!token)return res.status(401).json({error:"Authentication required"});
   if(token.length>8192)return res.status(401).json({error:"Invalid access token"});
   try{
