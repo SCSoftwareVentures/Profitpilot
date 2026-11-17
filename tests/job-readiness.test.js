@@ -87,5 +87,5 @@ test("template rejects missing versions, empty requirements and duplicate IDs",(
 
 test("readiness result expressly disclaims safety, profitability and compliance certification",()=>{
   const result=evaluateJobReadiness(COMMERCIAL_CLEANING_READINESS_TEMPLATE,{checks:satisfied});
-  assert.match(result.interpretation,/not a guarantee of safety, profitability, legal compliance/);
+  assert.match(result.interpretation,/Not a guarantee of safety, profitability, legal compliance/);
 });
