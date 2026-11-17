@@ -49,6 +49,7 @@ test("money accepts exact cent values and preserves negative values",()=>{
 test("money rejects non-string, non-canonical and out-of-range inputs",()=>{
   for(const value of ["not-money","1e3","01.00","1.234","1000000000000.00",1.25,Infinity]) assert.equal(money(value),null);
 });
+test("invalid payroll monetary outputs use null rather than NaN",()=>{const result=allocatePayroll({pool:"not-money",direct:[],approved:[],nonSite:"0.00",excluded:"0.00"});assert.equal(result.reconciles,false);assert.equal(result.pool,null);assert.equal(result.unallocated,null);});
 test("payroll allocation sums decimal amounts without binary floating drift",()=>{
   const result=allocatePayroll({pool:"0.30",direct:[{site:"A",amount:"0.10"},{site:"A",amount:"0.20"}],approved:[],nonSite:"0.00",excluded:"0.00"});
   assert.equal(result.reconciles,true);
