@@ -52,7 +52,8 @@ export function profileMigration({manifest,mappings,requiredTargets,rows}={}){
     const amount=cents(row[mapping.get("amount")]);
     if(amount===null)exceptions.push({rowNumber:index+1,code:"invalid_amount"});
     else{parsedTotal+=amount;validAmountRows++;}
-    if(!isIsoDate(row[mapping.get("date")]))exceptions.push({rowNumber:index+1,code:"invalid_date"});\n    else if(row[mapping.get("date")]<manifest.periodStart||row[mapping.get("date")]>manifest.periodEnd)exceptions.push({rowNumber:index+1,code:"date_outside_manifest_period"});
+    if(!isIsoDate(row[mapping.get("date")]))exceptions.push({rowNumber:index+1,code:"invalid_date"});
+    else if(row[mapping.get("date")]<manifest.periodStart||row[mapping.get("date")]>manifest.periodEnd)exceptions.push({rowNumber:index+1,code:"date_outside_manifest_period"});
     if(row[mapping.get("currency")]!==manifest.currency)exceptions.push({rowNumber:index+1,code:"currency_mismatch"});
   }
   const countMatches=rows.length===manifest.expectedRowCount;
