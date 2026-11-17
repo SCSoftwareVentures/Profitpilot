@@ -1,5 +1,5 @@
 import pg from "pg";
-import {createHmac,randomBytes} from "node:crypto";
+import {createHmac,randomBytes,randomUUID} from "node:crypto";
 const {Pool}=pg;
 const production=process.env.NODE_ENV==="production";
 const databaseSslEnabled=process.env.DATABASE_SSL==="true";
@@ -68,4 +68,14 @@ export async function revokeAuthSession(jti,subject,reason="self_service_revocat
    const proof=createHmac("sha256",Buffer.from(process.env.TENANT_CONTEXT_HMAC_SECRET,"hex")).update(payload).digest("hex");
    return fn(client,proof);
   });
+ }
+
+ // Only trusted server code can attest an exact audit event in its signed transaction.
+ export async function appendAudit(client,member,action,objectType,objectId,reason,metadata={}){
+  const {rows:[context]}=await client.query("SELECT current_setting('app.tenant_nonce',true) AS nonce");
+  const body=JSON.stringify({id:randomUUID(),tenantId:member.tenantId.toLowerCase(),actorId:member.userId.toLowerCase(),action,objectType,objectId,reason,metadata});
+  if(Buffer.byteLength(body,"utf8")>65536)throw new Error("Audit event exceeds bounded evidence size");
+  const proof=createHmac("sha256",Buffer.from(process.env.TENANT_CONTEXT_HMAC_SECRET,"hex"))
+   .update(["profitpilot-audit-write-v1",context.nonce,body].join("\n")).digest("hex");
+  await client.query("SELECT private.append_verified_audit($1,$2)",[body,proof]);
  }

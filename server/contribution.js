@@ -1,5 +1,5 @@
 // Versioned, conservative management contribution report. No financial advice.
-import {withTenant} from "./db.js";
+import {withTenant,appendAudit} from "./db.js";
 import {requirePermission} from "./auth.js";
 import {isIsoDate} from "../src/engine.js";
 import {reconcileSharedOverhead} from "../src/shared-overhead.js";
@@ -191,8 +191,7 @@ export function registerContributionRoutes(app,membership){
    const result=buildContribution(q.rows[0]);if(result.error)return result;
    const saved=await client.query("INSERT INTO calculation_runs(tenant_id,contract_id,site_id,period_start,period_end,formula_version,inputs,outputs,completeness,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'incomplete',$9) RETURNING id,created_at",
     [req.membership.tenantId,contractId,siteId,periodStart,periodEnd,VERSION,JSON.stringify(result.inputs),JSON.stringify(result.outputs),req.membership.userId]);
-   await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'calculation_created','calculation_run',$3,'Versioned partial management contribution evidence snapshot',$4)",
-    [req.membership.tenantId,req.membership.userId,saved.rows[0].id,JSON.stringify({formulaVersion:VERSION,periodStart,periodEnd})]);
+   await appendAudit(client,req.membership,"calculation_created","calculation_run",saved.rows[0].id,"Versioned partial management contribution evidence snapshot",{formulaVersion:VERSION,periodStart,periodEnd});
    return {id:saved.rows[0].id,createdAt:saved.rows[0].created_at,formulaVersion:VERSION,completeness:"incomplete",outputs:result.outputs};
   });
   if(result.error)return res.status(422).json({error:result.error});

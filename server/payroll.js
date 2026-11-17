@@ -1,7 +1,7 @@
 // Human-controlled payroll source reconciliation and allocation workflow.
 // Only synthetic evidence until production identity, privacy and legal gates are met.
 import {randomUUID} from "node:crypto";
-import {withTenant} from "./db.js";
+import {withTenant,appendAudit} from "./db.js";
 import {requirePermission,requireStepUp} from "./auth.js";
 import {validatePayrollRows} from "../src/engine.js";
 
@@ -21,9 +21,7 @@ function money(value){
  return (x/100n).toString()+"."+(x%100n).toString().padStart(2,"0");
 }
 async function audit(client,member,action,type,id,reason,metadata={}){
- await client.query(
-  "INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,$3,$4,$5,$6,$7)",
-  [member.tenantId,member.userId,action,type,id,reason,JSON.stringify(metadata)]);
+ await appendAudit(client,member,action,type,id,reason,metadata);
 }
 function respond(res,result,success=200){
  if(result.error)return res.status(result.status).json({error:result.error});

@@ -5,7 +5,7 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import {randomUUID,createHash} from "node:crypto";
-import {withTenant,health,listAuthSessions,revokeAuthSession,withPrivacyStepUp} from "./db.js";
+import {withTenant,health,listAuthSessions,revokeAuthSession,withPrivacyStepUp,appendAudit} from "./db.js";
 import {authRequired,requirePermission,requireStepUp} from "./auth.js";
 import {parseCsv,validateInvoiceRows,validatePayrollRows,isIsoDate} from "../src/engine.js";
 import {registerPayrollRoutes} from "./payroll.js";
@@ -70,7 +70,7 @@ app.post("/v1/tenants/:tenantId/security/permissions/overrides",membership,requi
   const permission=await client.query("SELECT 1 FROM permission_catalog WHERE permission_key=$1",[permissionKey]);
   if(!permission.rowCount)return {status:400,error:"Unknown permission"};
   await client.query("SELECT private.set_member_permission_override($1,$2,$3,$4,$5,$6)",[req.membership.tenantId,req.membership.userId,userId,permissionKey,effect,reason.trim()]);
-  await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'member_permission_override_set','tenant_membership_permission_override',$3,$4,$5)",[req.membership.tenantId,req.membership.userId,userId,reason.trim(),JSON.stringify({permissionKey,effect})]);
+  await appendAudit(client,req.membership,"member_permission_override_set","tenant_membership_permission_override",userId,reason.trim(),{permissionKey,effect});
   return {status:201,override:{userId,permissionKey,effect,reason:reason.trim()}};
  });
  if(result.error)return res.status(result.status).json({error:result.error});
@@ -86,7 +86,7 @@ app.delete("/v1/tenants/:tenantId/security/permissions/overrides/:userId/:permis
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const removed=await client.query("SELECT private.remove_member_permission_override($1,$2,$3,$4) AS removed",[req.membership.tenantId,req.membership.userId,userId,permissionKey]);
   if(!removed.rows[0].removed)return {status:404,error:"Permission override not found"};
-  await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'member_permission_override_removed','tenant_membership_permission_override',$3,$4,$5)",[req.membership.tenantId,req.membership.userId,userId,reason.trim(),JSON.stringify({permissionKey})]);
+  await appendAudit(client,req.membership,"member_permission_override_removed","tenant_membership_permission_override",userId,reason.trim(),{permissionKey,effect});
   return {status:200};
  });
  if(result.error)return res.status(result.status).json({error:result.error});
@@ -121,7 +121,7 @@ app.post("/v1/tenants/:tenantId/privacy/requests",membership,requirePermission("
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const created=await client.query("INSERT INTO privacy_requests(tenant_id,subject_user_id,submitted_by,request_type,details) VALUES($1,$2,$2,$3,$4) RETURNING id,request_type,status,created_at",[req.membership.tenantId,req.membership.userId,requestType,details.trim()]);
   const item=created.rows[0];
-  await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'privacy_request_submitted','privacy_request',$3,'Member submitted a privacy request',$4)",[req.membership.tenantId,req.membership.userId,item.id,JSON.stringify({requestType})]);
+  await appendAudit(client,req.membership,"privacy_request_submitted","privacy_request",item.id,'Member submitted a privacy request',{requestType});
   return item;
  });
  res.status(201).json(result);
@@ -398,7 +398,7 @@ app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requirePer
     if(proposing){
      const draft={id:randomUUID(),method:"shared-proposal-0.1.0",proposedBy:member.userId,sourceAmount:m.source_amount,contractId:m.contract_id,anchorSiteId:m.site_id,serviceStart:m.service_start,serviceEnd:m.service_end,taxBasis:m.tax_basis,shares:allocation.shares,basis:sharedOverheadBasis.trim()};
      await client.query("UPDATE match_reviews SET evidence=evidence||jsonb_build_object('sharedOverheadProposal',$1::jsonb) WHERE tenant_id=$2 AND id=$3",[JSON.stringify(draft),member.tenantId,m.id]);
-     await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'shared_overhead_proposed','match_review',$3,$4,$5)",[member.tenantId,member.userId,m.id,reason.trim(),JSON.stringify({proposalId:draft.id,shares:draft.shares,basis:draft.basis})]);
+     await appendAudit(client,member,"shared_overhead_proposed","match_review",m.id,reason.trim(),{proposalId:draft.id,shares:draft.shares,basis:draft.basis});
      return {proposal:draft,decision:"proposal_saved"};
     }
     expenseReview.sharedOverhead={method:"exact-site-shares-0.1.0",sourceAmount:m.source_amount,shares:allocation.shares,basisReviewed:true,proposalId:proposal.id};
@@ -407,7 +407,7 @@ app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requirePer
   }
   const updated=await client.query("UPDATE match_reviews SET decision=$1,reviewer_id=$2,reviewed_at=now(),evidence=CASE WHEN $5::jsonb IS NULL THEN evidence ELSE (CASE WHEN jsonb_typeof(evidence)='object' THEN evidence ELSE '{}'::jsonb END) || jsonb_build_object('deliveryExpenseReview',$5::jsonb) END WHERE id=$3 AND tenant_id=$4 AND decision IN ('candidate','held') RETURNING id,decision,reviewed_at",[decision,member.userId,req.params.matchId,member.tenantId,expenseReview?JSON.stringify(expenseReview):null]);
   if(!updated.rowCount)return null;
-  await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'invoice_match_decision','match_review',$3,$4,$5)",[member.tenantId,member.userId,req.params.matchId,reason.trim(),JSON.stringify({decision,...(expenseReview?{deliveryExpenseReview:expenseReview}:{}),...(costCategory==="shared_overhead"&&decision==="confirmed"?{sharedOverheadProposalId:proposal.id}:{})})]);
+  await appendAudit(client,member,"invoice_match_decision","match_review",req.params.matchId,reason.trim(),   {decision,...(expenseReview?{deliveryExpenseReview:expenseReview}:{}),...(costCategory==="shared_overhead"&&decision==="confirmed"?{sharedOverheadProposalId:proposal.id}:{})});
   return updated.rows[0];
  });
  if(!result)return res.status(404).json({error:"Review candidate not found or already finalised"});

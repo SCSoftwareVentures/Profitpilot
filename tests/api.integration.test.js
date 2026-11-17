@@ -334,6 +334,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(auditView.status,200,"tenant owners must be able to inspect security audit events");
     const auditBody=await auditView.json();
     assert.equal(auditBody.integrity.is_valid,true,"the tenant audit hash chain must verify");
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-owner",c=>c.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason) VALUES($1,$2,'privacy_account_export_released','privacy_request',$3,'Forged event')",[tenantA,userA,tenantA])),/permission denied/i);
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-owner",c=>c.query("SELECT private.append_verified_audit($1,$2)",[JSON.stringify({tenantId:tenantA,actorId:userA,action:"invoice_batch_prepared"}),"0".repeat(64)])),/audit attestation/i);
     for(const actor of ["ci-api-analyst","ci-api-owner"]){
      await assert.rejects(()=>withTenant(tenantA,actor,c=>c.query("SELECT reason,metadata FROM audit_events")),/permission denied/i);
      await assert.rejects(()=>withTenant(tenantA,actor,c=>c.query("SELECT * FROM private.verify_audit_chain($1)",[tenantB])),/permission denied/i);
