@@ -16,9 +16,13 @@ import {registerSourceReconciliationRoutes} from "./source-reconciliation.js";
 import {importPayloadAllowed} from "../src/import-privacy.js";
 import {parseFinancialCsv} from "../src/secure-csv.js";
 import {accountRateLimit} from "./request-guard.js";
+import {createSecurityTelemetry,securityTelemetryMiddleware} from "./security-telemetry.js";
 import {registerAttachmentQuarantineRoutes} from "./attachment-quarantine.js";
 
 const app=express();
+const securityTelemetry=createSecurityTelemetry();
+if(process.env.NODE_ENV!=="test")setInterval(()=>securityTelemetry.flush(),60_000).unref();
+app.use(securityTelemetryMiddleware(securityTelemetry));
 app.disable("x-powered-by");
 app.use(helmet());
 // Apply even to parser errors, authentication failures and preflight responses.
