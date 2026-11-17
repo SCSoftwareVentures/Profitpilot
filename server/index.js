@@ -13,7 +13,10 @@ app.disable("x-powered-by");
 app.use(helmet());
 app.use(cors({origin:(process.env.CORS_ORIGIN||"").split(",").map(x=>x.trim()).filter(Boolean),credentials:false,methods:["GET","POST","DELETE"]}));
 app.use(express.json({limit:"100kb"}));
-app.use(rateLimit({windowMs:60_000,limit:100,standardHeaders:true,legacyHeaders:false}));
+// Only the dedicated synthetic PostgreSQL integration harness gets an expanded test window.
+// Production, CI container smoke tests, and non-integration environments retain 100/min.
+const globalRpmLimit=(process.env.NODE_ENV==="test"&&Boolean(process.env.TEST_ADMIN_DATABASE_URL))?500:100;
+app.use(rateLimit({windowMs:60_000,limit:globalRpmLimit,standardHeaders:true,legacyHeaders:false}));
 app.get("/health",async(req,res)=>{try{await health();res.json({status:"ok",database:"connected"});}catch{res.status(503).json({status:"unavailable"});}});
 app.use("/v1",(req,res,next)=>{res.set("Cache-Control","no-store");next();});
 app.use("/v1",authRequired());
