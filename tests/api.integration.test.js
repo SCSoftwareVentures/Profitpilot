@@ -278,9 +278,11 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal((await holdPrivacy.json()).status,"legal_hold");
     const releasePrivacy=await request(`/v1/tenants/${tenantA}/privacy/requests/${privacyItem.id}/decision`,{subject:"ci-api-owner",method:"POST",body:{action:"release_legal_hold",reason:"Dispute preservation requirement has ended"}});
     assert.equal(releasePrivacy.status,200);
-    const fulfilPrivacy=await request(`/v1/tenants/${tenantA}/privacy/requests/${privacyItem.id}/decision`,{subject:"ci-api-owner",method:"POST",body:{action:"fulfil",reason:"Access export prepared and reviewed",resolutionSummary:"Secure access response prepared for verified requester."}});
-    assert.equal(fulfilPrivacy.status,200);
-    assert.equal((await fulfilPrivacy.json()).status,"fulfilled");
+    const fulfilPrivacy=await request(`/v1/tenants/${tenantA}/privacy/requests/${privacyItem.id}/decision`,{subject:"ci-api-owner",method:"POST",body:{action:"fulfil",reason:"Attempt to close request without an implemented export executor",resolutionSummary:"This must not be accepted as proof of fulfilment."}});
+    assert.equal(fulfilPrivacy.status,409,"the API must not claim fulfilment when export and deletion execution are not implemented");
+    const stillUnderReview=await request(`/v1/tenants/${tenantA}/privacy/requests/manage`,{subject:"ci-api-owner"});
+    assert.equal(stillUnderReview.status,200);
+    assert.equal(stillUnderReview.items[0].status,"under_review","a rejected fulfilment attempt must leave the request open for genuine completion");
     const privacyAudit=await request(`/v1/tenants/${tenantA}/security/audit?limit=100`,{subject:"ci-api-owner"});
     assert.equal((await privacyAudit.json()).integrity.is_valid,true,"privacy request events must remain verifiable in the audit chain");
     const privacyOtherTenant=await request(`/v1/tenants/${tenantB}/privacy/requests/manage`,{subject:"ci-api-tenant-b-only"});
