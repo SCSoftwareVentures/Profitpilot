@@ -125,6 +125,7 @@ app.get("/v1/tenants/:tenantId/privacy/requests/manage",membership,requirePermis
 app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/decision",membership,requirePermission("privacy.requests.manage"),requireStepUp(),async(req,res,next)=>{try{
  const {action,reason,resolutionSummary}=req.body||{};
  if(action==="fulfil")return res.status(409).json({error:"Privacy request fulfilment is not implemented. Complete and verify the requested action before recording fulfilment."});
+ if(action==="begin_review")return res.status(409).json({error:"Identity verification has not been implemented. Review cannot begin until verification is completed and auditable."});
  if(!["verify_identity","begin_review","place_legal_hold","release_legal_hold","reject"].includes(action)||typeof reason!=="string"||reason.trim().length<3||reason.length>1000)
   return res.status(400).json({error:"A supported review action and reason are required"});
  if(action==="reject"&&(typeof resolutionSummary!=="string"||resolutionSummary.trim().length<3||resolutionSummary.length>2000))
