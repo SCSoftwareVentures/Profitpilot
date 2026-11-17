@@ -646,9 +646,25 @@ paths:
       - $ref: '#/components/parameters/TenantId'
     get:
       summary: Read tenant permission catalogue and member overrides
+      description: Requires fresh verified step-up authentication and tenant-specific administrative permission. Direct database reads of individual overrides are denied to the runtime role. The response returns at most 500 overrides, with overridesTruncated indicating whether more records exist.
       responses:
-        "200": { description: Permission catalogue and tenant-scoped overrides }
-        "403": { description: Security permission not granted }
+        "200":
+          description: Permission catalogue and tenant-scoped overrides
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [catalogue, overrides, overridesTruncated]
+                properties:
+                  catalogue:
+                    type: array
+                    items: { type: object }
+                  overrides:
+                    type: array
+                    maxItems: 500
+                    items: { type: object }
+                  overridesTruncated: { type: boolean }
+        "403": { description: Security permission not granted or fresh step-up authentication required }
   /tenants/{tenantId}/security/permissions/overrides:
     parameters:
       - $ref: '#/components/parameters/TenantId'
