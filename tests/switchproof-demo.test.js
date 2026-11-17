@@ -7,7 +7,7 @@ test("SwitchProof demo is responsive, local-only and clearly synthetic",()=>{
   assert.match(html,/SWITCHPROOF.*SYNTHETIC DEMO/);
   assert.match(html,/processes text locally in your browser/);
   assert.match(html,/Do not paste real customer/);
-  assert.match(html,/\.\/\.\.\/src\/switchproof\.js/);
+  assert.ok(html.includes('from "../src/switchproof.js"'));
   assert.doesNotMatch(html,/\bfetch\s*\(|XMLHttpRequest|localStorage|sessionStorage/);
 });
 test("SwitchProof demo invalidates stale previews after source edits",()=>{
