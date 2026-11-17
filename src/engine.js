@@ -130,7 +130,7 @@ export function matchInvoice(row,contract){
 export function summariseContracts(contracts){
   return contracts.map(c=>{
     const revenue=decimalCents(c.revenue),cost=decimalCents(c.cost);
-    if(revenue===null||cost===null)return {...c,revenue:NaN,cost:NaN,contribution:NaN,margin:null};
+    if(revenue===null||cost===null)return {...c,revenue:null,cost:null,contribution:null,margin:null};
     const contribution=revenue-cost;
     const margin=revenue?ratioCents(contribution*10000n,revenue):null;
     return {...c,revenue:fromCents(revenue),cost:fromCents(cost),contribution:fromCents(contribution),margin:margin===null?null:fromCents(margin)};
@@ -138,20 +138,19 @@ export function summariseContracts(contracts){
 }
 export function aggregateMetrics(contracts){
   const rows=summariseContracts(contracts);
-  const hasBasis=contracts.some(c=>c.currency!==undefined||c.taxBasis!==undefined||c.periodStart!==undefined||c.periodEnd!==undefined);
-  if(hasBasis){
-    const dimensions=["currency","taxBasis","periodStart","periodEnd"];
-    const inconsistent=dimensions.some(key=>{
-      const values=contracts.map(c=>c[key]);
-      return values.some(v=>v===undefined||v===null||v==="")||new Set(values).size!==1;
-    });
-    if(inconsistent)return {revenue:null,cost:null,contribution:null,margin:null,contracts:rows,complete:false,errors:["Cannot aggregate contracts across missing or mixed currency, tax basis or reporting periods"]};
-  }
+  // Reporting dimensions are mandatory even when every row omits them. Never
+  // infer that missing currency, tax basis or period values are comparable.
+  const dimensions=["currency","taxBasis","periodStart","periodEnd"];
+  const inconsistent=dimensions.some(key=>{
+    const values=contracts.map(c=>c[key]);
+    return values.some(v=>v===undefined||v===null||v==="")||new Set(values).size!==1;
+  });
+  if(inconsistent)return {revenue:null,cost:null,contribution:null,margin:null,contracts:rows,complete:false,errors:["Cannot aggregate contracts across missing or mixed currency, tax basis or reporting periods"]};
   const revenue=sumCents(rows.map(r=>r.revenue)),cost=sumCents(rows.map(r=>r.cost));
-  if(revenue===null||cost===null)return {revenue:NaN,cost:NaN,contribution:NaN,margin:null,contracts:rows};
+  if(revenue===null||cost===null)return {revenue:null,cost:null,contribution:null,margin:null,contracts:rows,complete:false,errors:["Cannot aggregate missing or invalid canonical monetary inputs"]};
   const contribution=revenue-cost;
   const margin=revenue?ratioCents(contribution*10000n,revenue):null;
-  return {revenue:fromCents(revenue),cost:fromCents(cost),contribution:fromCents(contribution),margin:margin===null?null:fromCents(margin),contracts:rows};
+  return {revenue:fromCents(revenue),cost:fromCents(cost),contribution:fromCents(contribution),margin:margin===null?null:fromCents(margin),contracts:rows,complete:true,errors:[]};
 }
 
 
