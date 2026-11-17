@@ -226,3 +226,10 @@ Migration 014 adds a database-side decision guard and same-transaction audit tri
 The API sets the reason transaction-locally and no longer inserts a duplicate audit event. PostgreSQL integration tests cover successful API decision/audit creation, direct-SQL reviewer impersonation denial, evidence mutation denial, final-decision immutability and missing-reason denial. CI applies migration 014 after migration 013. **Exact-head CI for migration 014 is pending until the latest branch-push workflow completes; the earlier CI pass does not verify this migration.**
 
 This is a database-enforced prototype control, not independent security assurance. Payroll ingestion remains disabled, and the outstanding production controls and release gates above remain mandatory.
+
+ 
+## Migration 014 exact-head CI result — 17 November 2026
+
+GitHub Actions run **#667** passed on exact PR head `6b98299006d9aa620f494ec4fe52d095e82947c4`. The PostgreSQL 16 job applied migration 014, passed authenticated API integration tests covering direct-SQL analyst denial, reviewer authorization, reviewer identity binding, evidence immutability, final-decision immutability and atomic audit creation, and completed the verified TLS trust/rejection and production-mode API health checks. Node.js 22 passed 56 tests with 0 failures (3 database-dependent tests skipped in the Node-only job and covered in the PostgreSQL job).
+
+This verifies the migration and integration behaviour in ephemeral CI only. It does not replace independent penetration testing or validate production identity, hosting, secrets, storage, backups, operational response or legal/privacy controls.
