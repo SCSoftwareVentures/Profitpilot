@@ -7,6 +7,7 @@ import rateLimit from "express-rate-limit";
 import {randomUUID,createHash} from "node:crypto";
 import {withTenant,health,assertRuntimeDatabaseRole,listAuthSessions,revokeAuthSession,revokeAllAuthSessions,withPrivacyStepUp,withFinancialStepUp,sourceReadProof,stageSourceRows,appendAudit} from "./db.js";
 import {assertProductionConfig} from "./production-config.js";
+import {readProductionReleaseApproval,releaseStillApproved} from "./release-approval.js";
 import {authRequired,requirePermission,requireStepUp} from "./auth.js";
 import {parseCsv,validateInvoiceRows,validatePayrollRows,isIsoDate} from "../src/engine.js";
 import {registerPayrollRoutes} from "./payroll.js";
@@ -21,6 +22,7 @@ import {createSecurityTelemetry,securityTelemetryMiddleware} from "./security-te
 import {registerAttachmentQuarantineRoutes} from "./attachment-quarantine.js";
 
 assertProductionConfig();
+const releaseApproval=readProductionReleaseApproval();
 const app=express();
 const securityTelemetry=createSecurityTelemetry();
 if(process.env.NODE_ENV!=="test")setInterval(()=>securityTelemetry.flush(),60_000).unref();
@@ -35,7 +37,7 @@ app.use(cors({origin:(process.env.CORS_ORIGIN||"").split(",").map(x=>x.trim()).f
 const globalRpmLimit=(process.env.NODE_ENV==="test"&&Boolean(process.env.TEST_ADMIN_DATABASE_URL))?500:100;
 app.use(rateLimit({windowMs:60_000,limit:globalRpmLimit,standardHeaders:true,legacyHeaders:false}));
 app.use(express.json({limit:"100kb",inflate:false}));
-app.get("/health",async(req,res)=>{try{await health();res.json({status:"ok",database:"connected"});}catch{res.status(503).json({status:"unavailable"});}});
+app.get("/health",async(req,res)=>{try{if(!releaseStillApproved(releaseApproval))return res.status(503).json({status:"unavailable"});await health();res.json({status:"ok",database:"connected"});}catch{res.status(503).json({status:"unavailable"});}});
 // Opt-in synthetic workspace only; never served in production.
 if(process.env.NODE_ENV!=="production"&&process.env.ENABLE_SYNTHETIC_PAYROLL_UI==="true"){
  for(const [route,file] of Object.entries({"/dev/payroll":"../app/payroll.html","/dev/payroll.js":"../app/payroll.js","/dev/payroll.css":"../app/payroll.css","/dev/payroll-client.js":"../src/payroll-client.js"})){
@@ -43,6 +45,7 @@ if(process.env.NODE_ENV!=="production"&&process.env.ENABLE_SYNTHETIC_PAYROLL_UI=
  }
 }
 app.use("/v1",(req,res,next)=>{res.set("Cache-Control","no-store");next();});
+app.use("/v1",(req,res,next)=>releaseStillApproved(releaseApproval)?next():res.status(503).json({error:"Service unavailable"}));
 app.use("/v1",authRequired());
 app.use("/v1",accountRateLimit({limit:globalRpmLimit===500?500:60}));
 

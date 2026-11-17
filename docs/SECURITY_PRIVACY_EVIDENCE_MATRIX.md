@@ -63,3 +63,5 @@ Migration 047 adds operator-only audit prefix capture, restore validation of aud
 Migration 048 further narrows application SQL rights and adds restrictive financial/subject-writing RLS authority. This is defence in depth, not proof that every financial route or direct read is exhaustively minimised. High-risk financial write action proofs remain to be reviewed at the database boundary.
 
 Migration 049 closes the API-only MFA gap for the selected high-risk financial mutation paths via transaction-bound action/resource proofs checked by database triggers. CI must include both legitimate routes and missing/cross-resource proof rejection.
+
+Migrations 050–053 add signed raw source read and staging boundaries, per-tenant transaction session revalidation, and dual-control provisioning with restore receipts. The production release gate requires separate operator signatures and current evidence, not merely passing CI. Live hosting, provider, legal/retention decisions and independent assessments remain mandatory before production.

@@ -199,7 +199,7 @@ jobs:
           echo "Production startup rejects disabled TLS and accepts verified-TLS configuration"
 
       - name: Build production API image
-        run: docker build --pull -t profitpilot-api:ci .
+        run: docker build --pull --build-arg PROFITPILOT_BUILD_REVISION="$GITHUB_SHA" -t profitpilot-api:ci .
 
       - name: Verify production image runs as non-root
         run: |

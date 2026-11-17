@@ -16,3 +16,8 @@ coverage/
 *.p12
 *.pfx
 /privacy-checkpoint*.json
+
+/BUILD_REVISION
+/release-approval.json
+/release-evidence.json
+/release-signature*.txt
