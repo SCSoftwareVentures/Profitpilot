@@ -9,6 +9,7 @@ on:
       - main
       - integration/pr25-pr26-validation
       - feature/job-readiness-engine
+      - feature/promise-ledger
   workflow_dispatch:
 
 permissions:
