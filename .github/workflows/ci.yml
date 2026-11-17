@@ -183,3 +183,31 @@ jobs:
           docker rm -f profitpilot-api-ci
           exit 1
 
+
+  security-gate:
+    name: Security CI release gate
+    runs-on: ubuntu-latest
+    needs: [verify, database]
+    if: ${{ always() }}
+    permissions:
+      contents: read
+    steps:
+      - name: Require successful application and database security checks
+        env:
+          VERIFY_RESULT: ${{ needs.verify.result }}
+          DATABASE_RESULT: ${{ needs.database.result }}
+          TESTED_SHA: ${{ github.sha }}
+        run: |
+          set -eu
+          echo "Security verification commit: $TESTED_SHA"
+          echo "Node/application verification: $VERIFY_RESULT"
+          echo "PostgreSQL/API/RLS/TLS verification: $DATABASE_RESULT"
+          test "$VERIFY_RESULT" = success
+          test "$DATABASE_RESULT" = success
+          {
+            echo "## ProfitPilot security CI gate"
+            echo "- Commit: \`$TESTED_SHA\`"
+            echo "- Node.js application checks: $VERIFY_RESULT"
+            echo "- PostgreSQL, tenant RLS, authenticated API, TLS and container checks: $DATABASE_RESULT"
+            echo "- Scope: automated repository CI only; not penetration testing or production certification"
+          } >> "$GITHUB_STEP_SUMMARY"
