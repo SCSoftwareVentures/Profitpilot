@@ -310,6 +310,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("UPDATE private.privacy_export_approvals SET scope='account-v1' WHERE request_id=$1",[privacyItem.id]);
     assert.equal((await request(exportBase+"/export",{subject:"ci-api-analyst",method:"POST"})).status,409,"old approval cannot authorize expanded scope");
     assert.equal((await request(exportBase+"/approve-export",{subject:"ci-api-owner",method:"POST"})).status,200,"expanded scope needs independent reapproval");
+    await new Promise(resolve=>setTimeout(resolve,1100));
     const releases=await Promise.all([request(exportBase+"/export",{subject:"ci-api-analyst",method:"POST"}),request(exportBase+"/export",{subject:"ci-api-analyst",method:"POST"})]);
     assert.deepEqual(releases.map(x=>x.status).sort(),[200,409],"concurrent release consumes approval exactly once");
     const downloaded=releases.find(x=>x.status===200);
@@ -385,9 +386,17 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("INSERT INTO private.privacy_retention_holds(tenant_id,subject_user_id,authority_reference) VALUES($1,$2,'CI subject-wide legal hold')",[tenantA,userB]);
     assert.equal((await directRedaction("execute_request_redaction")).status,409,"subject hold blocks even previously approved deletion");
     await admin.query("DELETE FROM private.privacy_retention_holds WHERE tenant_id=$1 AND subject_user_id=$2",[tenantA,userB]);
+    assert.equal((await directRedaction("execute_request_redaction")).status,409,"released hold cannot resurrect old approval");
+    assert.equal((await directRedaction("approve_request_redaction",{tenantId:tenantA,userId:userE},"ci-api-owner")).status,200,"new approval required after hold release");
+    await new Promise(resolve=>setTimeout(resolve,1100));
     await admin.query("UPDATE private.privacy_retention_policies SET enabled=false WHERE tenant_id=$1",[tenantA]);
     assert.equal((await directRedaction("execute_request_redaction")).status,409,"policy disabled after approval blocks execution");
     await admin.query("UPDATE private.privacy_retention_policies SET enabled=true WHERE tenant_id=$1",[tenantA]);
+    assert.equal((await directRedaction("execute_request_redaction")).status,409,"re-enabled policy cannot resurrect old approval");
+    assert.equal((await directRedaction("approve_request_redaction",{tenantId:tenantA,userId:userE},"ci-api-owner")).status,200,"new policy revision requires fresh approval");
+    const approvedEpoch=(await admin.query("SELECT floor(extract(epoch FROM approved_at))::bigint AS epoch FROM private.privacy_redaction_approvals WHERE request_id=$1",[deletionId])).rows[0].epoch;
+    assert.equal((await directRedaction("execute_request_redaction",readerMembership,"ci-api-reader",Number(approvedEpoch))).status,409,"same-second prior authentication cannot authorize deletion");
+    await new Promise(resolve=>setTimeout(resolve,1100));
     const before=await admin.query("SELECT details FROM privacy_requests WHERE id=$1",[secondPrivacyItem.id]);
     assert.match(before.rows[0].details,/personal information/);
     const redacted=await request(deletionBase+"/execute-redaction",{subject:"ci-api-reader",method:"POST",body:redactionBody});
