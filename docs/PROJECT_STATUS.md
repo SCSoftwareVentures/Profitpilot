@@ -227,3 +227,12 @@ AUD 30,000–50,000 is an initial reference target only, not a ceiling, minimum,
 The previous AUD 500 initial and AUD 100 recurring monthly project caps are withdrawn as planning constraints. Product scope and engineering priorities must not be constrained by those caps. Actual purchases, subscriptions, contractor engagements, external services or other financial commitments still require explicit owner approval.
 
 A live owner-operated production launch, real customer pilot or recurring revenue is not a prerequisite for the intended sale. Continue repository-level implementation and synthetic/test-environment development toward a complete buyer-ready asset. G5 and other release approvals remain necessary for production deployment or real sensitive-data handling, not for the explicitly authorised synthetic/test-only engineering work. No merge, deployment, real-data intake, buyer outreach, sale or transfer of ownership is authorised by this direction.
+
+
+## Six differentiator engineering progress — 17 November 2026
+
+The owner-authorised synthetic/test build now includes initial domain foundations and browser demonstration panels for all six approved differentiators: Job Readiness Engine, Promise Ledger, Profit Leak Radar, Verified Value Ledger, SwitchProof Migration and Field Knowledge Memory. Each domain has a dedicated Node test file. The implementation is staged and deliberately does not claim complete production functionality.
+
+Current safeguards include evidence-required readiness checks, human-only decisions, append-only-style promise events, explicit source references and timestamps, withholding of candidate financial exposure under incomplete coverage, separate value lifecycle totals with no silent credit netting, pre-migration control-total checks, and tenant/visibility/review-date rules for operational knowledge.
+
+The latest recorded full CI attempt before the final source corrections failed due literal escaped newline characters in two new modules and one test file. Those syntax defects have been corrected. The exact latest branch head has a new CI run pending; do not mark this work as CI-passed until that run completes successfully. No production persistence, real-data processing or deployment is implied.
