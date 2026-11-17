@@ -141,6 +141,8 @@ export function summariseContracts(contracts){
   });
 }
 export function aggregateMetrics(contracts){
+  if(!Array.isArray(contracts)||contracts.length===0||contracts.some(c=>!c||typeof c!=="object"||Array.isArray(c)))
+    return {revenue:null,cost:null,contribution:null,margin:null,contracts:[],aggregationValid:false,completeness:"unverified",errors:["At least one valid contract row is required for aggregation"]};
   const rows=summariseContracts(contracts);
   // Reporting dimensions are mandatory even when every row omits them. Never
   // infer that missing currency, tax basis or period values are comparable.
