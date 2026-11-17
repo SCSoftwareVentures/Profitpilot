@@ -3,6 +3,7 @@ import express from "express";
 import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
+import {createSecurityMonitor} from "./security-monitor.js";
 import {sharedLimiter,startRateLimitRetention} from "./shared-rate-limit.js";
 import {randomUUID,createHash} from "node:crypto";
 import {withTenant,health} from "./db.js";
@@ -13,6 +14,8 @@ import {parseCsv,validateInvoiceRows,isIsoDate,money} from "../src/engine.js";
 
 const app=express();
 app.disable("x-powered-by");
+const securityMonitor=createSecurityMonitor();
+app.use(securityMonitor.middleware);
 // Set privacy headers even for rejected or throttled requests.
 app.use("/v1",(req,res,next)=>{res.set("Cache-Control","no-store");res.set("Pragma","no-cache");next();});
 app.use(helmet());
@@ -168,6 +171,6 @@ app.get("/v1/tenants/:tenantId/calculations/:runId",membership,async(req,res,nex
 
 app.use((err,req,res,next)=>{const id=randomUUID();const status=err.code==="23505"?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
-if(process.env.NODE_ENV==="production")startRateLimitRetention();
+if(process.env.NODE_ENV==="production"){startRateLimitRetention();securityMonitor.start();}
 if(process.env.NODE_ENV!=="test")app.listen(port,()=>process.stdout.write("ProfitPilot API listening on "+port+"\n"));
 export default app;
