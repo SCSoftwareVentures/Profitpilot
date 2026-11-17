@@ -49,8 +49,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
       .setIssuer(issuer).setAudience(audience).setSubject(subject)
       .setIssuedAt().setExpirationTime("5m").setJti(randomBytes(16).toString("hex")).sign(privateKey);
   }
-  async function customToken(subject,{issuedAt=Math.floor(Date.now()/1000),expiresAt=Math.floor(Date.now()/1000)+300,includeIssuedAt=true,includeExpiry=true,authTime,acr}={}){
-    const claims={email:subject+"@example.invalid"};if(authTime!==undefined)claims.auth_time=authTime;if(acr!==undefined)claims.acr=acr;
+  async function customToken(subject,{issuedAt=Math.floor(Date.now()/1000),expiresAt=Math.floor(Date.now()/1000)+300,includeIssuedAt=true,includeExpiry=true,authTime,acr,amr}={}){
+    const claims={email:subject+"@example.invalid"};if(authTime!==undefined)claims.auth_time=authTime;if(acr!==undefined)claims.acr=acr;if(amr!==undefined)claims.amr=amr;
     let jwt=new SignJWT(claims).setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(issuer).setAudience(audience).setSubject(subject);
     if(includeIssuedAt)jwt=jwt.setIssuedAt(issuedAt);
     if(includeExpiry)jwt=jwt.setExpirationTime(expiresAt);
@@ -224,6 +224,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(readerDecision.status,403,"read-only members must not finalise match-review decisions");
     const staleStepUp=await fetch(base+`/v1/tenants/${tenantA}/matches/${matchId}/decision`,{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+await customToken("ci-api-reviewer",{authTime:Math.floor(Date.now()/1000)-600,acr:"urn:profitpilot:step-up"})},body:JSON.stringify({decision:"confirmed",reason:"CI stale step-up test"})});
     assert.equal(staleStepUp.status,403,"sensitive decisions must reject stale step-up authentication");
+    const forgedAssuranceWithoutMfa=await fetch(base+`/v1/tenants/${tenantA}/matches/${matchId}/decision`,{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+await customToken("ci-api-reviewer",{authTime:Math.floor(Date.now()/1000),acr:"urn:profitpilot:step-up",amr:["pwd"]})},body:JSON.stringify({decision:"confirmed",reason:"CI missing MFA method evidence"})});
+    assert.equal(forgedAssuranceWithoutMfa.status,403,"matching assurance without explicit MFA method evidence must not authorise privileged decisions");
     const missingStepUp=await fetch(base+`/v1/tenants/${tenantA}/matches/${matchId}/decision`,{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+await customToken("ci-api-reviewer")},body:JSON.stringify({decision:"confirmed",reason:"CI missing step-up test"})});
     assert.equal(missingStepUp.status,403,"sensitive decisions must reject tokens without step-up claims");
     const reviewerDecision=await request(`/v1/tenants/${tenantA}/matches/${matchId}/decision`,{subject:"ci-api-reviewer",method:"POST",body:{}});
