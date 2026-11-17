@@ -45,7 +45,7 @@ test("PROP-003/012 — aggregate totals are invariant to input row permutation",
   const rows=Array.from({length:100},(_,i)=>{
     const revenue=BigInt(next()%100000000)+1n;
     const cost=BigInt(next()%(Number(revenue)+1));
-    return {revenue:decimal(revenue),cost:decimal(cost)};
+    return {currency:"AUD",taxBasis:"gst_exclusive",periodStart:"2026-11-01",periodEnd:"2026-11-30",revenue:decimal(revenue),cost:decimal(cost)};
   });
   const forward=aggregateMetrics(rows);
   const reverse=aggregateMetrics([...rows].reverse());
@@ -59,7 +59,7 @@ test("PROP-005/013 — unknown amounts remain invalid and negative credits retai
   assert.equal(Number.isNaN(money(null)),true);
   assert.equal(Number.isNaN(money(0.1)),true);
   assert.equal(money("-110.00"),"-110.00");
-  const credit=aggregateMetrics([{revenue:"100.00",cost:"110.00"}]);
+  const credit=aggregateMetrics([{currency:"AUD",taxBasis:"gst_exclusive",periodStart:"2026-11-01",periodEnd:"2026-11-30",revenue:"100.00",cost:"110.00"}]);
   assert.equal(credit.contribution,"-10.00");
 });
 
