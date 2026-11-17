@@ -130,6 +130,7 @@ jobs:
           node --test tests/import-retention.integration.test.js
           node --test tests/api.integration.test.js
           node --test tests/tenant-isolation-catalog.integration.test.js
+          node --test tests/route-tenant-isolation.integration.test.js
 
       - name: Exercise real PostgreSQL backup and recovery privacy gate
         env:
