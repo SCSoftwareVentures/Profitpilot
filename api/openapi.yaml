@@ -88,6 +88,40 @@ paths:
         "403": { description: Not authorised or step-up authentication required }
         "404": { description: Request not found in this tenant }
         "409": { description: Invalid state transition or fulfilment unavailable because no privacy execution workflow is implemented }
+  /tenants/{tenantId}/privacy/requests/{requestId}/approve-export:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Independently approve a restricted account-data export
+      description: Requires manager MFA, reviewed access/export request and recent requester account confirmation. Approval expires after 15 minutes; no data is returned.
+      responses:
+        "200": { description: One-use approval recorded }
+        "403": { description: Permission or fresh MFA required }
+        "404": { description: Request not found }
+        "409": { description: Ineligible request or existing active approval }
+  /tenants/{tenantId}/privacy/requests/{requestId}/export:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Download a restricted JSON account export
+      description: Requester only, recent MFA and valid one-use approval required. No cache or persisted file. This partial export does not complete the privacy request.
+      responses:
+        "200":
+          description: Allowlisted JSON attachment
+          content:
+            application/json:
+              schema: { type: object }
+        "403": { description: Permission or fresh MFA required }
+        "404": { description: Request not found or not owned by caller }
+        "409": { description: Approval invalid, consumed, expired, blocked by request state or export exceeds limits }
   /tenants/{tenantId}/privacy/requests/{requestId}/withdraw:
     parameters:
       - $ref: '#/components/parameters/TenantId'

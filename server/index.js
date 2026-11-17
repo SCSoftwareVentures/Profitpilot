@@ -148,6 +148,29 @@ app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/decision",membership
  if(result.error)return res.status(result.status).json({error:result.error});
  res.status(result.status).json(result.item);
 }catch(e){next(e);}});
+// Both operations require independent, request-bound step-up evidence at the database.
+app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/approve-export",membership,requirePermission("privacy.requests.manage"),requireStepUp(),async(req,res,next)=>{try{
+ const id=req.params.requestId;
+ if(!privacyRequestIdValid(id))return res.status(400).json({error:"Invalid request ID"});
+ const result=await withPrivacyStepUp(req.membership,req.identity,id,"approve_account_export",async(client,proof)=>{
+  const r=await client.query("SELECT private.approve_account_export($1,$2,$3,$4) AS result",[req.membership.tenantId,id,req.identity.authTime,proof]);
+  return r.rows[0].result;
+ });
+ if(result.error)return res.status(result.status).json({error:result.error});
+ res.status(result.status).json(result.item);
+}catch(e){next(e);}});
+app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/export",membership,requirePermission("privacy.requests.read"),requireStepUp(),async(req,res,next)=>{try{
+ const id=req.params.requestId;
+ if(!privacyRequestIdValid(id))return res.status(400).json({error:"Invalid request ID"});
+ const result=await withPrivacyStepUp(req.membership,req.identity,id,"release_account_export",async(client,proof)=>{
+  const r=await client.query("SELECT private.release_account_export($1,$2,$3,$4) AS result",[req.membership.tenantId,id,req.identity.authTime,proof]);
+  return r.rows[0].result;
+ });
+ if(result.error)return res.status(result.status).json({error:result.error});
+ res.set({"Cache-Control":"no-store, private","Pragma":"no-cache","Content-Disposition":"attachment; filename=\"profitpilot-account-export.json\"","X-Content-Type-Options":"nosniff"});
+ // No persisted file, public URL, email attachment, or server-side copy.
+ res.status(200).type("application/json").send(JSON.stringify(result.item));
+}catch(e){next(e);}});
 app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/withdraw",membership,requirePermission("privacy.requests.submit"),async(req,res,next)=>{try{
  const {reason}=req.body||{};
  if(typeof reason!=="string"||reason.trim().length<3||reason.length>1000)return res.status(400).json({error:"A withdrawal reason is required"});
