@@ -184,6 +184,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const primaryKeyId=process.env.TENANT_CONTEXT_HMAC_KEY_ID||"primary";
     const secondarySecret=randomBytes(32).toString("hex");
     await admin.query("INSERT INTO private.tenant_context_keys(key_id,secret,active) VALUES ('rotation-next',decode($1,'hex'),true)",[secondarySecret]);
+    await assert.rejects(()=>admin.query("INSERT INTO private.tenant_context_keys(key_id,secret,active) VALUES ('rotation-duplicate',decode($1,'hex'),true)",[primarySecret]),/duplicate key/i,"existing signing material must not be registered under another identifier");
+    await assert.rejects(()=>admin.query("UPDATE private.tenant_context_keys SET secret=decode($1,'hex') WHERE key_id=$2",[secondarySecret,primaryKeyId]),/only transition once/i,"active signing material cannot be replaced in place");
     const primaryDuringOverlap=await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT id FROM contracts"));
     assert.equal(primaryDuringOverlap.rowCount,1,"the original key must remain valid during the overlap window");
     process.env.TENANT_CONTEXT_HMAC_SECRET=secondarySecret;
@@ -191,6 +193,11 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const secondaryDuringOverlap=await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT id FROM contracts"));
     assert.equal(secondaryDuringOverlap.rowCount,1,"the replacement key must work before revoking the original");
     await admin.query("UPDATE private.tenant_context_keys SET active=false WHERE key_id=$1",[primaryKeyId]);
+    const tombstone=(await admin.query("SELECT active,secret IS NULL AS secret_removed,revoked_at IS NOT NULL AS recorded FROM private.tenant_context_keys WHERE key_id=$1",[primaryKeyId])).rows[0];
+    assert.deepEqual(tombstone,{active:false,secret_removed:true,recorded:true});
+    await assert.rejects(()=>admin.query("UPDATE private.tenant_context_keys SET active=true WHERE key_id=$1",[primaryKeyId]),/only transition once/i);
+    await assert.rejects(()=>admin.query("DELETE FROM private.tenant_context_keys WHERE key_id=$1",[primaryKeyId]),/tombstones/i);
+    await assert.rejects(()=>admin.query("INSERT INTO private.tenant_context_keys(key_id,secret,active) VALUES ('rotation-retired',decode($1,'hex'),true)",[primarySecret]),/duplicate key/i);
     process.env.TENANT_CONTEXT_HMAC_SECRET=primarySecret;
     process.env.TENANT_CONTEXT_HMAC_KEY_ID=primaryKeyId;
     const revokedPrimary=await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT id FROM contracts"));

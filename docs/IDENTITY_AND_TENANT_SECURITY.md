@@ -96,3 +96,6 @@ These are access-token validation controls only. They do not implement MFA, phis
 ## MFA step-up evidence (security branch)
 
 Privileged step-up now requires a trusted identity provider's signed JWT to contain both the configured exact `acr` value and an `amr` array including `mfa`, together with a recent, non-future `auth_time`. A matching ACR alone is insufficient. The identity provider must be configured and independently tested to issue these claims **only after real MFA**; ProfitPilot does not itself enrol authenticators, deliver MFA challenges, verify factors, or independently prove the user's identity. Token claims from a misconfigured or compromised issuer cannot establish MFA. Privacy review remains blocked pending an auditable identity-verification implementation. Do not enable production privileged workflows until end-to-end provider verification and recovery procedures have been validated.
+
+## Current signing key lifecycle control
+Migration 034 and the accompanying `TENANT_KEY_ROTATION_RUNBOOK.md` support one-way key retirement and prevent key material/identifier reuse within the same database. The existing synthetic overlap test exercises the retired-key boundary. Live operator rotation and isolated restore recovery remain deployment gates.
