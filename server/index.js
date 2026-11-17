@@ -327,8 +327,8 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requirePer
  }catch(e){next(e);}});
 
 app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requirePermission("matching.decide"),requireStepUp(),async(req,res,next)=>{try{
- const {decision,reason,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,expectedDirection,siteOverheadReviewed,sharedOverheadShares,sharedOverheadBasis,sharedOverheadReviewed}=req.body||{};
- if(!["confirmed","rejected","held"].includes(decision)||typeof reason!=="string"||reason.trim().length<3||reason.length>2000)return res.status(400).json({error:"Decision and reason are required"});
+ const {decision,reason,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,expectedDirection,siteOverheadReviewed,sharedOverheadShares,sharedOverheadBasis,sharedOverheadReviewed,sharedOverheadProposalId}=req.body||{};
+ if(!["confirmed","rejected","held","propose_shared_overhead"].includes(decision)||typeof reason!=="string"||reason.trim().length<3||reason.length>2000)return res.status(400).json({error:"Decision and reason are required"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const member=req.membership;
   const candidate=await client.query("SELECT mr.id,mr.contract_id,mr.site_id,mr.service_period_start::text AS service_start,mr.service_period_end::text AS service_end,mr.confidence,mr.evidence,il.amount::text AS source_amount,i.direction,i.currency,i.tax_basis FROM match_reviews mr JOIN invoice_lines il ON il.id=mr.invoice_line_id AND il.tenant_id=mr.tenant_id JOIN invoices i ON i.id=il.invoice_id AND i.tenant_id=il.tenant_id WHERE mr.id=$1 AND mr.tenant_id=$2 AND mr.decision IN ('candidate','held') FOR UPDATE OF mr,il,i",[req.params.matchId,member.tenantId]);
@@ -338,10 +338,14 @@ app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requirePer
   const canonical=m.evidence?.canonicalInvoice;
   if(canonical?.method==="canonical-invoice-0.1.0"&&decision==="confirmed"&&(canonical.preparedBy===member.userId||canonical.importedBy===member.userId))return {error:"Independent match confirmer required",status:403};
   let expenseReview=null;
-  const sharedFields=[sharedOverheadShares,sharedOverheadBasis,sharedOverheadReviewed];
-  if(sharedFields.some(v=>v!==undefined)&&(m.direction!=="supplier"||decision!=="confirmed"||costCategory!=="shared_overhead"))return {error:"Shared allocation fields require shared supplier confirmation",status:422};
+  const proposing=decision==="propose_shared_overhead";
+  const proposal=m.evidence?.sharedOverheadProposal;
+  const sharedFields=[sharedOverheadShares,sharedOverheadBasis,sharedOverheadReviewed,sharedOverheadProposalId];
+  if(sharedFields.some(v=>v!==undefined)&&(m.direction!=="supplier"||(!proposing&&decision!=="confirmed")||costCategory!=="shared_overhead"))return {error:"Shared allocation fields require a shared supplier proposal or confirmation",status:422};
+  if(proposing&&(m.direction!=="supplier"||costCategory!=="shared_overhead"||expectedDirection!=="supplier"))return {error:"Shared supplier proposal required",status:422};
+  if(proposal&&decision==="confirmed"&&costCategory!=="shared_overhead")return {error:"A shared proposal cannot be reclassified; reject it instead",status:409};
   if(m.direction!=="supplier"&&[costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,siteOverheadReviewed].some(v=>v!==undefined))return {error:"Expense review requires a supplier invoice match",status:422};
-  if(m.direction==="supplier"&&decision==="confirmed"){
+  if(m.direction==="supplier"&&(decision==="confirmed"||proposing)){
    if(!["supplier","subcontractor","other_delivery","site_overhead","shared_overhead"].includes(costCategory)||payrollOverlapReviewed!==true||duplicateExpenseReviewed!==true||(costCategory==="site_overhead"&&siteOverheadReviewed!==true))
     return {error:"Confirm expense category, payroll-overlap review and duplicate-expense review",status:422};
    if(!m.contract_id||!m.site_id||!m.service_start||!m.service_end||m.service_end<m.service_start||!["HIGH","MEDIUM"].includes(m.confidence)||m.currency!=="AUD"||!["gst_exclusive","no_gst"].includes(m.tax_basis))
@@ -350,18 +354,33 @@ app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requirePer
    if(!pair.rowCount)return {error:"Supplier match contract and site must belong to one business",status:422};
    expenseReview={costCategory,payrollOverlapReviewed:true,duplicateExpenseReviewed:true,...(costCategory==="site_overhead"?{siteOverheadReviewed:true}:{})};
    if(costCategory==="shared_overhead"){
-    if(canonical?.method!=="canonical-invoice-0.1.0"||!canonical.preparedBy||!canonical.importedBy||canonical.preparedBy===canonical.importedBy||expectedDirection!=="supplier"||sharedOverheadReviewed!==true||typeof sharedOverheadBasis!=="string"||sharedOverheadBasis.trim().length<3||sharedOverheadBasis.length>1000)return {error:"Independent canonical source and explicit shared allocation basis required",status:422};
-    const allocation=reconcileSharedOverhead(m.source_amount,sharedOverheadShares,{anchorSiteId:m.site_id});
+    if(canonical?.method!=="canonical-invoice-0.1.0"||!canonical.preparedBy||!canonical.importedBy||canonical.preparedBy===canonical.importedBy||expectedDirection!=="supplier"||sharedOverheadReviewed!==true)return {error:"Independent canonical source and explicit shared allocation review required",status:422};
+    if(proposing){
+     if(canonical.preparedBy!==member.userId)return {error:"Only the independent source preparer may propose this allocation",status:403};
+     if(proposal)return {error:"A proposal already exists; inspect or reject it",status:409};
+     if(sharedOverheadProposalId!==undefined||typeof sharedOverheadBasis!=="string"||sharedOverheadBasis.trim().length<3||sharedOverheadBasis.length>1000)return {error:"Document the proposed allocation basis",status:422};
+    }else{
+     if(!proposal||typeof sharedOverheadProposalId!=="string"||proposal.id!==sharedOverheadProposalId||sharedOverheadShares!==undefined||sharedOverheadBasis!==undefined)return {error:"Load and approve the exact saved proposal; do not resubmit shares",status:422};
+     if(proposal.proposedBy===member.userId||proposal.proposedBy!==canonical.preparedBy)return {error:"Independent proposal confirmer required",status:403};
+     if(proposal.method!=="shared-proposal-0.1.0"||proposal.sourceAmount!==m.source_amount||proposal.contractId!==m.contract_id||proposal.anchorSiteId!==m.site_id||proposal.serviceStart!==m.service_start||proposal.serviceEnd!==m.service_end||proposal.taxBasis!==m.tax_basis)return {error:"Source evidence changed after proposal",status:409};
+    }
+    const allocation=reconcileSharedOverhead(m.source_amount,proposing?sharedOverheadShares:proposal.shares,{anchorSiteId:m.site_id});
     if(allocation.error)return {error:allocation.error,status:422};
     const sites=await client.query("SELECT s.id FROM sites s JOIN contracts c ON c.tenant_id=s.tenant_id AND c.business_id=s.business_id WHERE s.tenant_id=$1 AND c.id=$2 AND s.id=ANY($3::uuid[]) AND c.status='active' AND s.status='active' ORDER BY s.id FOR SHARE OF s,c",[member.tenantId,m.contract_id,allocation.shares.map(l=>l.siteId)]);
     if(sites.rowCount!==allocation.shares.length)return {error:"All shared allocation sites must belong to the same active contract business",status:422};
-    expenseReview.sharedOverhead={method:"exact-site-shares-0.1.0",sourceAmount:m.source_amount,shares:allocation.shares,basisReviewed:true};
+    if(proposing){
+     const draft={id:randomUUID(),method:"shared-proposal-0.1.0",proposedBy:member.userId,sourceAmount:m.source_amount,contractId:m.contract_id,anchorSiteId:m.site_id,serviceStart:m.service_start,serviceEnd:m.service_end,taxBasis:m.tax_basis,shares:allocation.shares,basis:sharedOverheadBasis.trim()};
+     await client.query("UPDATE match_reviews SET evidence=evidence||jsonb_build_object('sharedOverheadProposal',$1::jsonb) WHERE tenant_id=$2 AND id=$3",[JSON.stringify(draft),member.tenantId,m.id]);
+     await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'shared_overhead_proposed','match_review',$3,$4,$5)",[member.tenantId,member.userId,m.id,reason.trim(),JSON.stringify({proposalId:draft.id,shares:draft.shares,basis:draft.basis})]);
+     return {proposal:draft,decision:"proposal_saved"};
+    }
+    expenseReview.sharedOverhead={method:"exact-site-shares-0.1.0",sourceAmount:m.source_amount,shares:allocation.shares,basisReviewed:true,proposalId:proposal.id};
     // Keep the allocation rationale in the protected audit chain, not report evidence.
    }
   }
   const updated=await client.query("UPDATE match_reviews SET decision=$1,reviewer_id=$2,reviewed_at=now(),evidence=CASE WHEN $5::jsonb IS NULL THEN evidence ELSE (CASE WHEN jsonb_typeof(evidence)='object' THEN evidence ELSE '{}'::jsonb END) || jsonb_build_object('deliveryExpenseReview',$5::jsonb) END WHERE id=$3 AND tenant_id=$4 AND decision IN ('candidate','held') RETURNING id,decision,reviewed_at",[decision,member.userId,req.params.matchId,member.tenantId,expenseReview?JSON.stringify(expenseReview):null]);
   if(!updated.rowCount)return null;
-  await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'invoice_match_decision','match_review',$3,$4,$5)",[member.tenantId,member.userId,req.params.matchId,reason.trim(),JSON.stringify({decision,...(expenseReview?{deliveryExpenseReview:expenseReview}:{}),...(costCategory==="shared_overhead"&&decision==="confirmed"?{sharedOverheadBasis:sharedOverheadBasis.trim()}:{})})]);
+  await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'invoice_match_decision','match_review',$3,$4,$5)",[member.tenantId,member.userId,req.params.matchId,reason.trim(),JSON.stringify({decision,...(expenseReview?{deliveryExpenseReview:expenseReview}:{}),...(costCategory==="shared_overhead"&&decision==="confirmed"?{sharedOverheadProposalId:proposal.id}:{})})]);
   return updated.rows[0];
  });
  if(!result)return res.status(404).json({error:"Review candidate not found or already finalised"});

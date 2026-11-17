@@ -78,15 +78,22 @@ export function createPayrollClient({getAccessToken,fetchImpl=globalThis.fetch}=
    if(new Set(r.items.map(i=>i.matchId)).size!==r.items.length)throw new PayrollRequestError(422);
    return r;
   },
-  decideInvoiceMatch(tenant,matchId,{decision,expectedDirection,reason,acknowledged,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,siteOverheadReviewed,sharedOverheadShares,sharedOverheadBasis,sharedOverheadReviewed,signal}={}){
-   if(acknowledged!==true||!["confirmed","held","rejected"].includes(decision)||!["customer","supplier"].includes(expectedDirection))throw new TypeError("Explicit match review required");
+  decideInvoiceMatch(tenant,matchId,{decision,expectedDirection,reason,acknowledged,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,siteOverheadReviewed,sharedOverheadShares,sharedOverheadBasis,sharedOverheadReviewed,sharedOverheadProposalId,signal}={}){
+   if(acknowledged!==true||!["confirmed","held","rejected","propose_shared_overhead"].includes(decision)||!["customer","supplier"].includes(expectedDirection))throw new TypeError("Explicit match review required");
    const body={decision,expectedDirection,reason:text(reason,3,2000)};
-   if(decision==="confirmed"&&expectedDirection==="supplier"){
+   if(decision==="propose_shared_overhead"&&(expectedDirection!=="supplier"||costCategory!=="shared_overhead"))throw new TypeError("Shared supplier proposal required");
+   if((decision==="confirmed"||decision==="propose_shared_overhead")&&expectedDirection==="supplier"){
     if(!["supplier","subcontractor","other_delivery","site_overhead","shared_overhead"].includes(costCategory)||payrollOverlapReviewed!==true||duplicateExpenseReviewed!==true||(costCategory==="site_overhead"&&siteOverheadReviewed!==true))throw new TypeError("Explicit supplier checks required");
     Object.assign(body,{costCategory,payrollOverlapReviewed:true,duplicateExpenseReviewed:true,...(costCategory==="site_overhead"?{siteOverheadReviewed:true}:{})});
     if(costCategory==="shared_overhead"){
-     if(sharedOverheadReviewed!==true||!Array.isArray(sharedOverheadShares)||sharedOverheadShares.length<2||sharedOverheadShares.length>50)throw new TypeError("Explicit shared overhead review and site shares required");
-     Object.assign(body,{sharedOverheadReviewed:true,sharedOverheadBasis:text(sharedOverheadBasis,3,1000),sharedOverheadShares:sharedOverheadShares.map(l=>{if(!l||typeof l.amount!=="string"||! /^-?(0|[1-9]\d{0,11})\.\d{2}$/.test(l.amount))throw new TypeError("Exact signed cents required");return {siteId:id(l.siteId),amount:l.amount};})});
+     if(sharedOverheadReviewed!==true)throw new TypeError("Explicit shared overhead review required");
+     if(decision==="propose_shared_overhead"){
+      if(!Array.isArray(sharedOverheadShares)||sharedOverheadShares.length<2||sharedOverheadShares.length>50)throw new TypeError("Two to fifty site shares required");
+      Object.assign(body,{sharedOverheadReviewed:true,sharedOverheadBasis:text(sharedOverheadBasis,3,1000),sharedOverheadShares:sharedOverheadShares.map(l=>{if(!l||typeof l.amount!=="string"||! /^-?(0|[1-9]\d{0,11})\.\d{2}$/.test(l.amount))throw new TypeError("Exact signed cents required");return {siteId:id(l.siteId),amount:l.amount};})});
+     }else{
+      if(sharedOverheadShares!==undefined||sharedOverheadBasis!==undefined)throw new TypeError("Approve saved proposal without changing shares");
+      Object.assign(body,{sharedOverheadReviewed:true,sharedOverheadProposalId:id(sharedOverheadProposalId)});
+     }
     }
    }
    return request(root(tenant)+"/matches/"+id(matchId)+"/decision",{body,fresh:true,signal});

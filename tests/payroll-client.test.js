@@ -112,3 +112,16 @@ test("invoice candidate list fails closed for wrong batch, duplicate IDs and unk
  for(const reply of [{...result,batchId:site},{...result,items:[item,item]},{...result,items:[{...item,direction:"unknown"}]}])await assert.rejects(fixture(reply).client.invoiceCandidates(tenant,batch),e=>e.status===422);
  const f=fixture(result);assert.deepEqual(await f.client.invoiceCandidates(tenant,batch),result);assert.deepEqual(f.tokens,[true]);
 });
+
+test("shared overhead proposal creation and approval send distinct immutable inputs",async()=>{
+ const {client,calls,tokens}=fixture();
+ const common={expectedDirection:"supplier",reason:"Independent review",acknowledged:true,costCategory:"shared_overhead",payrollOverlapReviewed:true,duplicateExpenseReviewed:true,sharedOverheadReviewed:true};
+ const shares=[{siteId:site,amount:"1.00"},{siteId:pool,amount:"2.00"}];
+ await client.decideInvoiceMatch(tenant,run,{...common,decision:"propose_shared_overhead",sharedOverheadShares:shares,sharedOverheadBasis:"Reviewed basis"});
+ assert.throws(()=>client.decideInvoiceMatch(tenant,run,{...common,decision:"confirmed",sharedOverheadShares:shares,sharedOverheadProposalId:batch}),TypeError);
+ await client.decideInvoiceMatch(tenant,run,{...common,decision:"confirmed",sharedOverheadProposalId:batch});
+ assert.deepEqual(tokens,[true,true]);
+ assert.equal(JSON.parse(calls[0].opts.body).sharedOverheadShares.length,2);
+ assert.equal(JSON.parse(calls[1].opts.body).sharedOverheadProposalId,batch);
+ assert.equal(JSON.parse(calls[1].opts.body).sharedOverheadShares,undefined);
+});

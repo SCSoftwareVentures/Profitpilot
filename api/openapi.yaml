@@ -437,11 +437,12 @@ paths:
               type: object
               required: [decision, reason]
               properties:
-                decision: { type: string, enum: [confirmed, rejected, held] }
+                decision: { type: string, enum: [confirmed, rejected, held, propose_shared_overhead] }
                 reason: { type: string, minLength: 3, maxLength: 2000 }
                 expectedDirection: { type: string, enum: [customer, supplier], description: Optional direction guard for selected match. }
                 costCategory: { type: string, enum: [supplier, subcontractor, other_delivery, site_overhead, shared_overhead] }
                 sharedOverheadReviewed: { type: boolean }
+                sharedOverheadProposalId: { type: string, format: uuid, description: Required for final shared overhead confirmation; no replacement shares allowed. }
                 sharedOverheadBasis: { type: string, minLength: 3, maxLength: 1000 }
                 sharedOverheadShares:
                   type: array
