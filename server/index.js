@@ -3,6 +3,7 @@ import express from "express";
 import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
+import {sharedLimiter} from "./shared-rate-limit.js";
 import {randomUUID,createHash} from "node:crypto";
 import {withTenant,health} from "./db.js";
 import {validateProductionSecrets} from "./production-config.js";
@@ -14,12 +15,12 @@ const app=express();
 app.disable("x-powered-by");
 app.use(helmet());
 app.use(cors({origin:(process.env.CORS_ORIGIN||"").split(",").map(x=>x.trim()).filter(Boolean),credentials:false,methods:["GET","POST"]}));
-app.use(rateLimit({windowMs:60_000,limit:100,standardHeaders:true,legacyHeaders:false}));
+app.use(process.env.NODE_ENV==="production"?sharedLimiter({windowMs:60_000,limit:100,scope:"global"}):rateLimit({windowMs:60_000,limit:100,standardHeaders:true,legacyHeaders:false}));
 app.use(express.json({limit:"100kb"}));
 // Additional write throttling limits abuse of evidence ingestion and review endpoints.
 // This in-process store is suitable for a single API instance only; production
 // horizontal scaling requires a shared external rate-limit store.
-const mutationLimiter=rateLimit({windowMs:60_000,limit:60,standardHeaders:true,legacyHeaders:false,message:{error:"Too many write requests; retry later"}});
+const mutationLimiter=process.env.NODE_ENV==="production"?sharedLimiter({windowMs:60_000,limit:60,scope:"write"}):rateLimit({windowMs:60_000,limit:60,standardHeaders:true,legacyHeaders:false,message:{error:"Too many write requests; retry later"}});
 app.use("/v1/tenants/:tenantId",(req,res,next)=>req.method==="POST"?mutationLimiter(req,res,next):next());
 app.get("/health",async(req,res)=>{try{await health();res.json({status:"ok",database:"connected"});}catch{res.status(503).json({status:"unavailable"});}});
 // Never allow authenticated tenant responses to be cached by browsers or shared proxies.
