@@ -62,3 +62,5 @@ Account-v2 extends account-v1 with actor-attributed import, mapping, matching, c
 Migration 018 adds private account closure and approval records (user/request/tenant IDs, times, approval scope and policy revision). Local account status, membership and sessions are revoked; optionally the primary profile email is removed from active storage under explicit policy. No old email is copied to the closure marker. Authentication subject and legal history remain pseudonymous identifiers, not anonymous data. Provider, backup and source-record eradication are separate.
 
 Migration 021 adds session cleanup receipts with user ID, cutoff, count, authority reference and timestamps. Eligible expired revoked token identifiers are removed from active storage; closure markers prevent reactivation. Historic legal/financial records and external systems remain outside this cleanup.
+
+Migration 022 records restricted provider erasure grants and operator-recorded verification of provider absence. These records retain local subject mapping and authorization references; they do not establish erasure of provider logs, backups, storage, processors or unrelated business records.

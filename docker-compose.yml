@@ -34,6 +34,7 @@ services:
       - ./database/migrations/019_privacy_restore_safeguards.sql:/docker-entrypoint-initdb.d/021-privacy-restore.sql:ro
       - ./database/migrations/020_multi_tenant_account_closure.sql:/docker-entrypoint-initdb.d/022-multi-tenant-closure.sql:ro
       - ./database/migrations/021_closed_session_retention.sql:/docker-entrypoint-initdb.d/023-closed-session-retention.sql:ro
+      - ./database/migrations/022_provider_erasure_authorization.sql:/docker-entrypoint-initdb.d/024-provider-erasure.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s

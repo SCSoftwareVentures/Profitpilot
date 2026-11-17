@@ -132,6 +132,30 @@ test("account closure, token revocation, email erasure and restore safeguards",{
   assert.equal(cleaned.removed,1);
   assert.equal((await admin.query("SELECT count(*)::int AS n FROM private.auth_sessions WHERE subject='closure-user' AND jti='synthetic-expired-session'")).rows[0].n,0);
   assert.ok((await admin.query("SELECT count(*)::int AS n FROM private.auth_sessions WHERE subject='closure-user'")).rows[0].n>0,"recent sessions retained");
+  // Synthetic provider identity mapping; no network or provider deletion is performed.
+  const providerUser="98989898-1111-4111-8111-111111111111",providerSubject="99999999-1111-4111-8111-111111111111";
+  const providerIssuer="https://abcdefghijklmnopqrst.supabase.co/auth/v1";
+  await admin.query("INSERT INTO users(id,auth_subject,email) VALUES($1,$2,'provider-ci@example.invalid')",[providerUser,providerSubject]);
+  await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role) VALUES($1,$2,'analyst')",[tenant,providerUser]);
+  const providerRequest=await reviewed(providerSubject,"closure-successor");
+  assert.equal((await req(providerRequest.p+"/approve-closure","closure-successor",{eraseEmail:false})).status,200);
+  await new Promise(r=>setTimeout(r,1100));
+  assert.equal((await req(providerRequest.p+"/execute-closure",providerSubject,{eraseEmail:false})).status,200);
+  const grant=()=>admin.query("SELECT private.authorize_provider_erasure($1,$2,$3,'CI consent reference','CI independent approval reference') AS id",[providerUser,providerIssuer,providerSubject]);
+  await assert.rejects(grant,/Retention authorization/);
+  await admin.query("UPDATE private.privacy_retention_policies SET allow_provider_account_erasure=true WHERE tenant_id=$1",[tenant]);
+  await assert.rejects(()=>admin.query("SELECT private.authorize_provider_erasure($1,$2,$3,'CI consent','CI approval')",[providerUser,providerIssuer,multi]),/Exact provider mapping/);
+  await assert.rejects(()=>withTenant(tenant,"closure-successor",c=>c.query("SELECT private.authorize_provider_erasure($1,$2,$3,'CI consent','CI approval')",[providerUser,providerIssuer,providerSubject])),/permission denied/i);
+  const firstGrant=(await grant()).rows[0].id;
+  await assert.rejects(()=>admin.query("SELECT private.provider_erasure_target($1,'https://wrong.example/auth/v1')",[firstGrant]),/mismatched/);
+  await admin.query("INSERT INTO private.privacy_retention_holds(tenant_id,subject_user_id,authority_reference) VALUES($1,$2,'CI provider hold')",[tenant,providerUser]);
+  await assert.rejects(()=>admin.query("SELECT private.provider_erasure_target($1,$2)",[firstGrant,providerIssuer]),/hold/);
+  await admin.query("DELETE FROM private.privacy_retention_holds WHERE tenant_id=$1 AND subject_user_id=$2",[tenant,providerUser]);
+  await assert.rejects(()=>admin.query("SELECT private.provider_erasure_target($1,$2)",[firstGrant,providerIssuer]),/invalid/);
+  const secondGrant=(await grant()).rows[0].id;
+  const target=(await admin.query("SELECT private.provider_erasure_target($1,$2) AS target",[secondGrant,providerIssuer])).rows[0].target;
+  assert.equal(target.subject,providerSubject);
+  // Do not fabricate a provider receipt in CI: actual provider absence is not established.
   const state=(await admin.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;
   assert.ok(state.markers.some(m=>m.kind==="session_cleanup"&&m.userId===user));
   assert.deepEqual(state.violations,[]);
