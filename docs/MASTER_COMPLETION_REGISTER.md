@@ -30,7 +30,9 @@ The owner wishes to preserve the option to sell or license ProfitPilot and has i
 
 The acquisition-readiness workstream is defined in [ACQUISITION_READINESS_PLAN.md](ACQUISITION_READINESS_PLAN.md). Its priorities are product completeness, financial acceptance, independent assurance, IP ownership and licence diligence, reproducible engineering handover and credible customer evidence.
 
-The correct completion measure is evidence, not the volume of documentation or commits. Automated CI is limited to the exact commit and tests actually executed; it is not independent assurance, finance/tax approval, legal/privacy clearance, customer validation or commercial proof.
+The correct completion measure is evidence, not the volume of documentation or commits.
+
+The owner has authorised continued repository-level engineering hardening and synthetic prototype development. This is not a signed G5 release GO and does not authorise production customer-data features, live-data intake, protected-branch merge, deployment, customer pilot or payment activity. Automated CI is limited to the exact commit and tests actually executed; it is not independent assurance, finance/tax approval, legal/privacy clearance, customer validation or commercial proof.
 
 ## 2. What is complete within the current preparation scope
 
