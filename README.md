@@ -85,3 +85,6 @@ Software implementation remains blocked until G0–G4 and competitive preconditi
 No merge, deployment, live customer-data intake or payment activity is authorised by the documents.
  
 **Current hardening review:** Draft PR #28 (`hardening/financial-security-followup`) targets the combined PR #27 branch, not `main`. The implementation and TLS verification head `30f0c9fa8937eea5fed537162750a5b7caafeb40` passed CI run #43983253747 (Node.js 22 and PostgreSQL 16). The current branch has a subsequent OpenAPI/error-schema documentation correction at `c031d73b89961c520df68ad33a82db388694d847`; exact-head CI for that latest documentation update is pending. This remains a prototype hardening PR, not release approval.
+
+ 
+**Latest hardening verification:** Draft PR #28 targets the combined PR #27 integration branch. Exact head `6b98299006d9aa620f494ec4fe52d095e82947c4` passed CI run #43983962328: Node.js 22 and PostgreSQL 16 passed, including migrations through 014, reviewer-authority/audit integration tests, trusted/untrusted TLS certificate tests and production-mode database health. The product is still a prototype; full financial acceptance, private storage, independent reviews and release gates remain open. No merge or production launch is authorised.
