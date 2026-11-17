@@ -96,21 +96,25 @@ export function validateInvoiceRows(rows){
     return {rowNumber:r.__rowNumber||i+2,record:r,errors,status:errors.length?"held":"pending_review"};
   });
 }
-export function allocatePayroll({pool,direct=[],approved=[],nonSite="0.00",excluded="0.00"}){
-  const p=decimalCents(pool),d=sumCents(direct.map(x=>x.amount??"0.00")),a=sumCents(approved.map(x=>x.amount??"0.00")),n=decimalCents(nonSite),e=decimalCents(excluded);
+export function allocatePayroll({pool,direct=[],approved=[],nonSite="0.00",excluded="0.00"}={}){
+  const directRows=Array.isArray(direct)?direct:null;
+  const approvedRows=Array.isArray(approved)?approved:null;
+  const rowAmounts=rows=>rows===null?null:sumCents(rows.map(x=>x&&typeof x==="object"&&!Array.isArray(x)?(x.amount??"0.00"):null));
+  const p=decimalCents(pool),d=rowAmounts(directRows),a=rowAmounts(approvedRows),n=decimalCents(nonSite),e=decimalCents(excluded);
   const validInputs=[p,d,a,n,e].every(x=>x!==null);
   const residual=validInputs?p-d-a-n-e:null;
   const siteCents=Object.create(null);
-  let sitesValid=true;
-  for(const x of [...direct,...approved]){
+  let sitesValid=directRows!==null&&approvedRows!==null;
+  for(const x of [...(directRows||[]),...(approvedRows||[])]){
+    if(!x||typeof x!=="object"||Array.isArray(x)){sitesValid=false;continue;}
     const amount=decimalCents(x.amount??"0.00");
-    if(amount===null){sitesValid=false;continue;}
-    const key=String(x.site??"");
+    const key=typeof x.site==="string"?x.site.trim():"";
+    if(amount===null||!key){sitesValid=false;continue;}
     siteCents[key]=(siteCents[key]||0n)+amount;
   }
   const valid=validInputs&&p>=0n&&d>=0n&&a>=0n&&n>=0n&&e>=0n&&residual>=0n&&sitesValid&&Object.values(siteCents).every(v=>v>=0n);
   const safe=v=>v===null?NaN:fromCents(v);
-  return {pool:safe(p),direct:safe(d),approvedAllocated:safe(a),nonSite:safe(n),excluded:safe(e),unallocated:safe(residual),siteTotals:Object.fromEntries(Object.entries(siteCents).map(([k,v])=>[k,fromCents(v)])),reconciles:valid&&d+a+n+e+residual===p,errors:valid?[]:["Invalid monetary input, negative bucket or allocation exceeds eligible payroll pool"]};
+  return {pool:safe(p),direct:safe(d),approvedAllocated:safe(a),nonSite:safe(n),excluded:safe(e),unallocated:safe(residual),siteTotals:Object.fromEntries(Object.entries(siteCents).map(([k,v])=>[k,fromCents(v)])),reconciles:valid&&d+a+n+e+residual===p,errors:valid?[]:["Invalid monetary input, missing site identity, negative bucket or allocation exceeds eligible payroll pool"]};
 }
 export function matchInvoice(row,contract){
   const customer=typeof row.customer_id==="string"&&row.customer_id.length>0&&row.customer_id===contract.customerId;
