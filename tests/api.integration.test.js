@@ -371,6 +371,22 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const invalidStartRow=await request(`/v1/tenants/${tenantA}/imports/${invoiceBatch}/rows`,{subject:"ci-api-analyst",method:"POST",body:{startRowNumber:0,rows:[{invoice_id:"INV-3"}]}});
     assert.equal(invalidStartRow.status,400);
 
+    // Privacy boundary: fail the whole chunk, never store or echo prohibited values.
+    const privateFixture="9".repeat(9);
+    const rejectedPrivate=await request(`/v1/tenants/${tenantA}/imports/${invoiceBatch}/rows`,{
+      subject:"ci-api-analyst",method:"POST",body:{startRowNumber:3,rows:[{invoice_id:"INV-3",site:"Site A",date:"2026-02-12",amount:"10.00"},{invoice_id:"INV-4",site:"Site A",amount:"10.00",tfn:privateFixture}]}
+    });
+    assert.equal(rejectedPrivate.status,422);
+    assert.ok(!(await rejectedPrivate.text()).includes(privateFixture));
+    const privateValue=await request(`/v1/tenants/${tenantA}/imports/${invoiceBatch}/rows`,{subject:"ci-api-analyst",method:"POST",body:{startRowNumber:3,rows:[{invoice_id:"INV-3",site:privateFixture,amount:"10.00"}]}});
+    assert.equal(privateValue.status,422);
+    assert.equal((await admin.query("SELECT count(*)::int AS count FROM raw_import_rows WHERE batch_id=$1 AND row_number>=3",[invoiceBatch])).rows[0].count,0,"unsafe chunk must not persist any rows");
+    const privateMetadata=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-analyst",method:"POST",body:{...importBody,sourceType:"customer_invoice",fileName:"TFN-"+privateFixture+".csv",sha256:"9".repeat(64)}});
+    assert.equal(privateMetadata.status,422);
+    assert.equal((await admin.query("SELECT count(*)::int AS count FROM import_batches WHERE tenant_id=$1 AND file_sha256=$2",[tenantA,"9".repeat(64)])).rows[0].count,0);
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES ($1,$2,3,$3)",[tenantA,invoiceBatch,JSON.stringify({invoice_id:"INV-3",bank_account:privateFixture})])),/privacy boundary/i);
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES ($1,$2,3,'{}'::jsonb)",[tenantA,createdBody.batch.id])),/not enabled/i);
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("UPDATE import_batches SET file_name='changed.csv' WHERE id=$1",[invoiceBatch])),/immutable/i);
     const readerWrite=await request(`/v1/tenants/${tenantA}/imports`,{
       subject:"ci-api-reader",method:"POST",
       body:{...importBody,sha256:"c".repeat(64)}
