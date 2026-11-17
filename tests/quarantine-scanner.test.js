@@ -66,6 +66,7 @@ test("scanner database role enforces lease ownership, holds, expiry and permanen
  const tenant="33333333-3333-4333-8333-333333333333",actor="55555555-5555-4555-8555-555555555555",batch=randomUUID();
  const keyId="ci-scan-key",secret=randomBytes(32).toString("hex");
  const e=sealQuarantine(Buffer.from("synthetic scan fixture"),tenant,batch,{id:keyId,secret});
+ const validManifest=JSON.stringify([{invoice_id:"CI-1",site:"Test site",date:"2026-02-28",amount:"1.00"}]);
  const scanner=await admin.connect();
  const app=new pg.Pool({connectionString:process.env.TEST_APP_DATABASE_URL});
  try{
@@ -77,11 +78,12 @@ test("scanner database role enforces lease ownership, holds, expiry and permanen
   await assert.rejects(()=>app.query("SELECT private.claim_quarantine_scan()"),/permission denied/i);
   const claim=(await scanner.query("SELECT * FROM private.claim_quarantine_scan()")).rows[0];
   await assert.rejects(()=>scanner.query("SELECT private.finish_quarantine_scan($1,$2,$3,'clean')",[tenant,batch,claim.lease_id]),/permission denied/i);
-  await assert.rejects(()=>scanner.query("SELECT private.finish_quarantine_scan_with_content($1,$2,$3,'infected','validated')",[tenant,batch,claim.lease_id]),/Invalid malware and content verdict/);
+  await assert.rejects(()=>scanner.query("SELECT private.finish_quarantine_scan_with_content($1,$2,$3,'infected','validated')",[tenant,batch,claim.lease_id]),/permission denied/i);
+  await assert.rejects(()=>scanner.query("SELECT private.finish_quarantine_manifest($1,$2,$3,'infected','validated',$4)",[tenant,batch,claim.lease_id,validManifest]),/Invalid validated row manifest/);
   assert.equal(claim.batch_id,batch);
-  assert.equal((await scanner.query("SELECT private.finish_quarantine_scan_with_content($1,$2,$3,'clean','validated') AS ok",[tenant,batch,randomUUID()])).rows[0].ok,false);
-  assert.equal((await scanner.query("SELECT private.finish_quarantine_scan_with_content($1,$2,$3,'infected','not_checked') AS ok",[tenant,batch,claim.lease_id])).rows[0].ok,true);
-  assert.equal((await scanner.query("SELECT private.finish_quarantine_scan_with_content($1,$2,$3,'clean','validated') AS ok",[tenant,batch,claim.lease_id])).rows[0].ok,false);
+  assert.equal((await scanner.query("SELECT private.finish_quarantine_manifest($1,$2,$3,'clean','validated',$4) AS ok",[tenant,batch,randomUUID(),validManifest])).rows[0].ok,false);
+  assert.equal((await scanner.query("SELECT private.finish_quarantine_manifest($1,$2,$3,'infected','not_checked',NULL) AS ok",[tenant,batch,claim.lease_id])).rows[0].ok,true);
+  assert.equal((await scanner.query("SELECT private.finish_quarantine_manifest($1,$2,$3,'clean','validated',$4) AS ok",[tenant,batch,claim.lease_id,validManifest])).rows[0].ok,false);
   await admin.query("UPDATE private.quarantined_files SET created_at=clock_timestamp()-interval '25 hours' WHERE batch_id=$1",[batch]);
   await admin.query("SELECT private.set_import_disposal_hold($1,$2,true,'CI_SCAN_HOLD')",[tenant,batch]);
   await scanner.query("SELECT private.expire_quarantine_bytes()");
@@ -97,7 +99,7 @@ test("scanner database role enforces lease ownership, holds, expiry and permanen
    await admin.query("INSERT INTO private.quarantined_files(tenant_id,batch_id,file_sha256,byte_count,key_id,nonce,auth_tag,ciphertext,uploaded_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)",[tenant,id,envelope.sha,envelope.ciphertext.length,keyId,envelope.nonce,envelope.tag,envelope.ciphertext,actor]);
    const claimed=(await scanner.query("SELECT * FROM private.claim_quarantine_scan()")).rows[0];
    assert.equal(claimed.batch_id,id);
-   assert.equal((await scanner.query("SELECT private.finish_quarantine_scan_with_content($1,$2,$3,'clean',$4) AS ok",[tenant,id,claimed.lease_id,contentState])).rows[0].ok,true);
+   assert.equal((await scanner.query("SELECT private.finish_quarantine_manifest($1,$2,$3,'clean',$4,$5) AS ok",[tenant,id,claimed.lease_id,contentState,contentState==="validated"?validManifest:null])).rows[0].ok,true);
    assert.deepEqual((await admin.query("SELECT scan_state,content_state FROM private.quarantined_files WHERE batch_id=$1",[id])).rows[0],{scan_state:"clean",content_state:contentState});
    assert.deepEqual((await admin.query("SELECT event_type FROM private.quarantine_lifecycle_events WHERE batch_id=$1 ORDER BY id",[id])).rows.map(x=>x.event_type),["claimed","clean","content_"+contentState]);
    await assert.rejects(()=>admin.query("INSERT INTO public.raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,'{}')",[tenant,id]),/not approved/i);
