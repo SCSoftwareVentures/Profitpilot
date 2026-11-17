@@ -23,3 +23,23 @@ export async function withTenant(tenantId,subject,fn){
  finally{client.release();}
 }
 export async function health(){const r=await pool.query("SELECT 1 AS ok");return r.rows[0].ok===1;}
+
+export async function registerAndCheckAuthSession({jti,subject,issuedAt,expiresAt}){
+ const client=await pool.connect();
+ try{
+  await client.query("BEGIN");
+  await client.query("SELECT private.register_auth_session($1,$2,to_timestamp($3),to_timestamp($4))",[jti,subject,issuedAt,expiresAt]);
+  const result=await client.query("SELECT private.is_auth_session_revoked($1,$2) AS revoked",[jti,subject]);
+  await client.query("COMMIT");
+  return result.rows[0].revoked===true;
+ }catch(error){await client.query("ROLLBACK");throw error;}
+ finally{client.release();}
+}
+export async function listAuthSessions(subject){
+ const result=await pool.query("SELECT jti,issued_at,expires_at,last_seen_at,revoked_at FROM private.list_auth_sessions($1)",[subject]);
+ return result.rows;
+}
+export async function revokeAuthSession(jti,subject,reason="self_service_revocation"){
+ const result=await pool.query("SELECT private.revoke_auth_session($1,$2,$3) AS revoked",[jti,subject,reason]);
+ return result.rows[0].revoked===true;
+}
