@@ -114,7 +114,7 @@ export function requireStepUp(){
   const maxAge=Number(process.env.AUTH_STEP_UP_MAX_AGE_SECONDS??300);
   const authTime=req.identity?.authTime;
   const now=Math.floor(Date.now()/1000);
-  const fresh=Number.isInteger(authTime)&&authTime<=now+5&&now-authTime<=maxAge;
+  const fresh=Number.isSafeInteger(authTime)&&authTime>=0&&authTime<=now&&now-authTime<=maxAge;
   const acr=req.identity?.acr;
   if(!requiredAcr||!Number.isInteger(maxAge)||maxAge<30||maxAge>900||!fresh||acr!==requiredAcr){
    return res.status(403).json({error:"Recent step-up authentication required"});
