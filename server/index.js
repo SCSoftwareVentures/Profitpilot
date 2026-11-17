@@ -245,7 +245,7 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requirePermiss
 
 app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requirePermission("imports.validate"),async(req,res,next)=>{try{
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const batch=await client.query("SELECT id,status,source_type,source_period_start,source_period_end FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.batchId,req.membership.tenantId]);
+  const batch=await client.query("SELECT id,status,source_type,source_period_start::text AS source_period_start,source_period_end::text AS source_period_end FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.batchId,req.membership.tenantId]);
   if(!batch.rowCount)return {status:404,error:"Import batch not found"};
   if(!["uploaded","review","validating"].includes(batch.rows[0].status))return {status:409,error:"Import batch is not open for validation"};
   const payroll=batch.rows[0].source_type==="payroll";
