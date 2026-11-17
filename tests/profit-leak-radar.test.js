@@ -23,6 +23,7 @@ test("contract-to-invoice difference is a candidate with exact decimal arithmeti
 test("matching contract, approved variations and invoice totals produce no variance alert",()=>{
   const result=detectProfitLeaks({...complete,invoices:{...complete.invoices,amount:"1100.00"}});
   assert.equal(result.alerts.some(x=>x.type==="contract_invoice_variance"),false);
+  assert.equal(result.status,"no_candidate_alerts");
 });
 
 test("unlike currencies, tax bases or periods never produce a quantified variance",()=>{
