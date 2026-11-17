@@ -41,7 +41,9 @@ export function summariseValueEvents(events=[]){
   const groups=new Map();
   for(const event of events){
     if(!event||typeof event!=="object"||!ID.test(event.valueId||"")||!TYPES.includes(event.type))throw new TypeError("Value event history contains an invalid event.");
-    const scopeRef=clean(event.scopeRef,128);\n    if(!ID.test(scopeRef))throw new TypeError("Value event scope reference is missing or invalid.");\n    const key=[scopeRef,event.currency,event.taxBasis,event.periodStart,event.periodEnd].join("|");
+    const scopeRef=clean(event.scopeRef,128);
+    if(!ID.test(scopeRef))throw new TypeError("Value event scope reference is missing or invalid.");
+    const key=[scopeRef,event.currency,event.taxBasis,event.periodStart,event.periodEnd].join("|");
     if(!/^[A-Z]{3}$/.test(event.currency||"")||!TAX_BASES.has(event.taxBasis)||!isIsoDate(event.periodStart)||!isIsoDate(event.periodEnd)||event.periodEnd<event.periodStart)throw new TypeError("Value event dimensions are missing or invalid.");
     const amount=cents(event.amount);if(amount===null||amount<=0n)throw new TypeError("Value event amount is invalid.");
     if(!groups.has(key))groups.set(key,{currency:event.currency,taxBasis:event.taxBasis,period:{start:event.periodStart,end:event.periodEnd},totals:Object.fromEntries(TYPES.map(type=>[type,0n])),eventCount:0});
