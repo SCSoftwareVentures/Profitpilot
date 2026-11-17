@@ -76,7 +76,7 @@ export function profileMigration({manifest,mappings,requiredTargets,rows}={}){
     period:{start:manifest.periodStart,end:manifest.periodEnd},
     sourceControlTotal:control===null?null:format(control),
     parsedTotal:validAmountRows===rows.length?format(parsedTotal):null,
-    controlTotalMatches,
+    controlTotalMatches:controlMatches,
     status:blockingCount===0?"ready_for_human_review":"blocked",
     migrationAccepted:false,
     automatedMerge:false,
