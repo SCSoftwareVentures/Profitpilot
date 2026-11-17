@@ -38,7 +38,7 @@ test("value summaries preserve each commercial state and do not net credits or r
 
 test("unlike currencies, tax bases and periods are kept in separate summary groups",()=>{
   const a=appendValueEvent({event:base});
-  const b=appendValueEvent({event:event({eventId:"event-002",scopeRef:"contract-site-C102",currency:"NZD",sourceRef:"quote-002",occurredAt:"2026-11-17T09:01:00+11:00",evidenceRefs:["quote-002"]})});
+  const b=appendValueEvent({event:event({valueId:"value-002",eventId:"event-002",scopeRef:"contract-site-C102",currency:"NZD",sourceRef:"quote-002",occurredAt:"2026-11-17T09:01:00+11:00",evidenceRefs:["quote-002"]})});
   const summaries=summariseValueEvents([...a.events,...b.events]);
   assert.equal(summaries.length,2);
   assert.deepEqual(summaries.map(x=>x.currency).sort(),["AUD","NZD"]);
