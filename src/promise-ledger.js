@@ -1,3 +1,4 @@
+import {isIsoDate} from "./engine.js";
 const ID=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const TRANSITIONS={
   proposed:new Set(["communicated","cancelled"]),
@@ -12,7 +13,7 @@ const TRANSITIONS={
 const EVIDENCE_REQUIRED=new Set(["communicated","accepted","changed","fulfilled","missed","disputed"]);
 const HAS_TIMEZONE=/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?(?:Z|[+-]\d{2}:\d{2})$/;
 const clean=(value,max)=>typeof value==="string"?value.trim().slice(0,max):"";
-const validTime=value=>typeof value==="string"&&HAS_TIMEZONE.test(value)&&Number.isFinite(Date.parse(value));
+const validTime=value=>typeof value==="string"&&HAS_TIMEZONE.test(value)&&isIsoDate(value.slice(0,10))&&Number.isFinite(Date.parse(value));
 
 function validateHistory(events,promiseId){
   const seen=new Set();
@@ -23,7 +24,7 @@ function validateHistory(events,promiseId){
        !ID.test(item.actorId||"")||!ID.test(item.sourceRef||"")||
        !TRANSITIONS[item.type]||!validTime(item.occurredAt)||
        typeof item.reason!=="string"||item.reason.trim().length<3||
-       !Array.isArray(item.evidenceRefs)){
+       !Array.isArray(item.evidenceRefs)||!item.evidenceRefs.some(x=>typeof x==="string"&&ID.test(x.trim()))){
       throw new TypeError("Existing promise history contains an invalid event.");
     }
     if(!previousState&&item.type!=="proposed")throw new TypeError("Existing promise history must begin with a proposed event.");
