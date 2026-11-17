@@ -15,6 +15,7 @@ import {registerInvoiceRoutes} from "./invoices.js";
 import {registerSourceReconciliationRoutes} from "./source-reconciliation.js";
 import {importPayloadAllowed} from "../src/import-privacy.js";
 import {parseFinancialCsv} from "../src/secure-csv.js";
+import {accountRateLimit} from "./request-guard.js";
 
 const app=express();
 app.disable("x-powered-by");
@@ -36,6 +37,7 @@ if(process.env.NODE_ENV!=="production"&&process.env.ENABLE_SYNTHETIC_PAYROLL_UI=
 }
 app.use("/v1",(req,res,next)=>{res.set("Cache-Control","no-store");next();});
 app.use("/v1",authRequired());
+app.use("/v1",accountRateLimit({limit:globalRpmLimit===500?500:60}));
 
 async function membership(req,res,next){
  const tenantId=req.params.tenantId;
@@ -444,5 +446,11 @@ registerPayrollRoutes(app,membership);
 
 app.use((err,req,res,next)=>{const id=randomUUID();const status=err.code==="23505"?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);const safeCode=typeof err.code==="string"&&/^[A-Z0-9_]{1,32}$/.test(err.code)?err.code:undefined;process.stderr.write(JSON.stringify({event:"request_error",reference:id,status,method:req.method,errorCode:safeCode,timestamp:new Date().toISOString()})+"\n");const publicErrors={400:"Invalid request",401:"Authentication required",403:"Request denied",404:"Resource not found",409:"Conflicting record; refresh and review the current state",413:"Request too large",415:"Unsupported media type",422:"Request could not be processed",429:"Too many requests"};res.status(status).json({error:publicErrors[status]||"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
-if(process.env.NODE_ENV!=="test")app.listen(port,()=>process.stdout.write("ProfitPilot API listening on "+port+"\n"));
+if(process.env.NODE_ENV!=="test"){
+ const server=app.listen(port,()=>process.stdout.write("ProfitPilot API listening on "+port+"\n"));
+ server.headersTimeout=10_000;
+ server.requestTimeout=15_000;
+ server.keepAliveTimeout=5_000;
+ server.maxHeadersCount=64;
+}
 export default app;

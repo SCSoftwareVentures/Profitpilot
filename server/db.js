@@ -17,7 +17,7 @@ if(databaseSslEnabled){
  if(process.env.NODE_TLS_REJECT_UNAUTHORIZED==="0")throw new Error("Global TLS certificate verification must not be disabled");
 }
 const ssl=databaseSslEnabled?{rejectUnauthorized:true}:false;
-export const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl,max:10,idleTimeoutMillis:30000,connectionTimeoutMillis:5000});
+export const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl,max:10,idleTimeoutMillis:30000,connectionTimeoutMillis:5000,statement_timeout:10000,lock_timeout:3000,idle_in_transaction_session_timeout:10000});
 export async function withTenant(tenantId,subject,fn,{repeatableRead=false}={}){
  if(typeof subject!=="string"||!subject)throw new Error("Verified identity subject is required for tenant context");
  const secret=process.env.TENANT_CONTEXT_HMAC_SECRET||"";
