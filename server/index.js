@@ -47,7 +47,7 @@ app.post("/v1/tenants/:tenantId/security/permissions/overrides",membership,requi
     !["grant","deny"].includes(effect)||typeof reason!=="string"||reason.trim().length<3||reason.length>1000)
   return res.status(400).json({error:"Valid member, non-security permission, effect and reason are required"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const target=await client.query("SELECT 1 FROM tenant_memberships tm JOIN users u ON u.id=tm.user_id WHERE tm.tenant_id=$1 AND tm.user_id=$2 AND tm.status='active' AND u.status='active'",[req.membership.tenantId,userId]);
+  const target=await client.query("SELECT 1 FROM tenant_memberships WHERE tenant_id=$1 AND user_id=$2 AND status='active'",[req.membership.tenantId,userId]);
   if(!target.rowCount)return {status:404,error:"Active tenant member not found"};
   const permission=await client.query("SELECT 1 FROM permission_catalog WHERE permission_key=$1",[permissionKey]);
   if(!permission.rowCount)return {status:400,error:"Unknown permission"};
