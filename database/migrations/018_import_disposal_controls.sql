@@ -42,6 +42,7 @@ BEGIN
  IF p_active IS NULL OR NOT private.disposal_reference_valid(p_ref) THEN RAISE EXCEPTION 'Invalid hold authority'; END IF;
  PERFORM 1 FROM public.import_batches WHERE tenant_id=p_tenant AND id=p_batch FOR UPDATE;
  IF NOT FOUND THEN RAISE EXCEPTION 'Batch not found'; END IF;
+ IF NOT p_active AND NOT EXISTS(SELECT 1 FROM private.import_disposal_controls WHERE tenant_id=p_tenant AND batch_id=p_batch AND hold_active) THEN RAISE EXCEPTION 'No active hold to release'; END IF;
  INSERT INTO private.import_disposal_controls(tenant_id,batch_id,hold_active)
  VALUES(p_tenant,p_batch,p_active)
  ON CONFLICT(tenant_id,batch_id) DO UPDATE SET hold_active=EXCLUDED.hold_active,approval_ref=NULL,retention_until=NULL;
@@ -95,7 +96,6 @@ BEGIN
  IF EXISTS(SELECT 1 FROM private.import_disposal_tombstones WHERE tenant_id=NEW.tenant_id AND (batch_id=NEW.id OR file_sha256=NEW.file_sha256)) THEN
   RAISE EXCEPTION 'Import source was previously disposed' USING ERRCODE='23514';
  END IF;
- IF TG_OP='UPDATE' AND current_user='profitpilot_app' THEN NULL; END IF;
  RETURN NEW;
 END $$;
 CREATE TRIGGER import_disposed_guard BEFORE INSERT OR UPDATE ON public.import_batches
@@ -112,6 +112,27 @@ BEGIN
 END $$;
 CREATE TRIGGER import_batch_delete_guard BEFORE DELETE ON public.import_batches
  FOR EACH ROW EXECUTE FUNCTION private.guard_import_batch_delete();
+
+CREATE FUNCTION private.guard_raw_import_delete()
+RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $
+BEGIN
+ IF NOT EXISTS(SELECT 1 FROM private.import_disposal_tombstones WHERE tenant_id=OLD.tenant_id AND batch_id=OLD.batch_id) THEN RAISE EXCEPTION 'Raw import disposal requires a recorded tombstone'; END IF;
+ IF EXISTS(SELECT 1 FROM private.import_disposal_controls WHERE tenant_id=OLD.tenant_id AND batch_id=OLD.batch_id AND hold_active) THEN RAISE EXCEPTION 'Active legal hold blocks disposal'; END IF;
+ RETURN OLD;
+END $;
+CREATE TRIGGER raw_import_delete_guard BEFORE DELETE ON public.raw_import_rows
+ FOR EACH ROW EXECUTE FUNCTION private.guard_raw_import_delete();
+
+CREATE FUNCTION private.guard_import_terminal_state()
+RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $
+BEGIN
+ IF current_user='profitpilot_app' AND (OLD.status IN ('accepted','rejected','failed') OR NEW.status IN ('accepted','rejected','failed')) AND OLD.status IS DISTINCT FROM NEW.status THEN
+  RAISE EXCEPTION 'Terminal import states require administrator review' USING ERRCODE='42501';
+ END IF;
+ RETURN NEW;
+END $;
+CREATE TRIGGER import_terminal_state_guard BEFORE UPDATE ON public.import_batches
+ FOR EACH ROW EXECUTE FUNCTION private.guard_import_terminal_state();
 
 CREATE FUNCTION private.execute_import_disposal(p_tenant uuid,p_batch uuid)
 RETURNS integer LANGUAGE plpgsql SET search_path=pg_catalog AS $$
@@ -154,5 +175,5 @@ BEGIN
  RETURN removed;
 END $$;
 
-REVOKE ALL ON FUNCTION private.disposal_reference_valid(text),private.set_import_disposal_hold(uuid,uuid,boolean,text),private.approve_import_disposal(uuid,uuid,timestamptz,text),private.assert_disposable_import(uuid,uuid),private.guard_disposed_import(),private.guard_import_batch_delete(),private.execute_import_disposal(uuid,uuid),private.replay_import_disposal(uuid,uuid,text,text,timestamptz) FROM PUBLIC,profitpilot_app;
+REVOKE ALL ON FUNCTION private.disposal_reference_valid(text),private.set_import_disposal_hold(uuid,uuid,boolean,text),private.approve_import_disposal(uuid,uuid,timestamptz,text),private.assert_disposable_import(uuid,uuid),private.guard_disposed_import(),private.guard_import_batch_delete(),private.guard_raw_import_delete(),private.guard_import_terminal_state(),private.execute_import_disposal(uuid,uuid),private.replay_import_disposal(uuid,uuid,text,text,timestamptz) FROM PUBLIC,profitpilot_app;
 COMMIT;
