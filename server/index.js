@@ -5,6 +5,8 @@ import cors from "cors";
 import rateLimit from "express-rate-limit";
 import {randomUUID,createHash} from "node:crypto";
 import {withTenant,health} from "./db.js";
+import {validateProductionSecrets} from "./production-config.js";
+validateProductionSecrets();
 import {authRequired,requireRole} from "./auth.js";
 import {parseCsv,validateInvoiceRows,isIsoDate,money} from "../src/engine.js";
 
