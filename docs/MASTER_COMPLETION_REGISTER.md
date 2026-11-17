@@ -21,7 +21,7 @@ ProfitPilot is not yet a complete customer-facing application, a verified accoun
 | PR #26 | Historical product blueprint source branch | Its documentation was integrated into PR #27 |
 | PR #27 | Combined integration candidate | Draft/unmerged integration base for current hardening |
 | PR #28 | `hardening/financial-security-followup`, based on PR #27 | Active hardening review; draft and unmerged |
-| Latest previously verified PR #28 head | `08f071be14eb01cac12c1f7de2595e75365367a8`, CI run #43985247441 / run #710 | Node.js 22 and PostgreSQL 16 jobs passed; later dashboard/aggregation changes require their own exact-head CI |
+| Latest verified PR #28 head | `12d790ba8f825ae3328f85de2e754273c9d02103`, CI run #43987897077 / run #767 | Node.js 22 and PostgreSQL 16 jobs passed on the exact head; see section 25 for scope |
 | Production | No production deployment or configured customer environment established | No customer data, pilot or payment activity authorised |
 
 ### Acquisition objective
@@ -403,3 +403,34 @@ PR #28 remains draft and unmerged, based on PR #27's integration branch. The pro
 GitHub Actions run **#43984181421 (run #684)** passed on exact PR head `5988ba408eae176cf5c69def1a9b5f4106e954c1`. Node.js 22 and PostgreSQL 16 jobs both succeeded. The PostgreSQL job applied migrations 002–014, passed the 20-table tenant/FK audit, restricted-role RLS and authenticated API integration including migration-014 reviewer/audit controls, built the production image, verified trusted-CA TLS, rejected an untrusted CA and passed production-mode API health. The Node-only job reported 56 passed, 0 failed and 3 DB-dependent skips (covered by PostgreSQL integration).
 
 This closes the exact-head CI verification item for PR #28. It does not close the product completion register: full financial acceptance, private file lifecycle, production operations, independent assurance, customer validation G0–G4 and signed G5 GO remain outstanding. PR #28 remains draft and unmerged.
+
+
+## 25. Acquisition-readiness and dashboard hardening — 17 November 2026
+
+### Exact-head CI evidence
+
+PR #28 (`hardening/financial-security-followup`) exact head `12d790ba8f825ae3328f85de2e754273c9d02103` passed GitHub Actions run **#43987897077 (run #767)**.
+
+- **Node.js 22:** 70 tests, 67 passed, 0 failed, 3 database-dependent tests skipped in this job.
+- **PostgreSQL 16:** migration application through 014, 20-table tenant/FK catalogue audit, restricted-role RLS, authenticated API integration tests, production API image build, trusted-CA TLS acceptance, untrusted-CA TLS rejection and production-mode database health all passed.
+
+The three Node job skips are database-dependent tests exercised in the PostgreSQL job. This is automated evidence for the exact commit and configured workflow only.
+
+### Implemented since the previous exact-head pass
+
+- Extracted synthetic dashboard contracts into a dedicated immutable fixture with explicit AUD currency, GST-exclusive basis and November 2026 reporting period.
+- Corrected dashboard arithmetic/rendering to use the engine's exact decimal-string contract.
+- Added a shared presentation formatter that groups decimal strings without converting money to JavaScript Number.
+- Separated `aggregationValid` (arithmetic/basis compatibility for supplied rows) from `completeness: "unverified"` (source completeness not established).
+- Rejected empty and malformed aggregation collections rather than treating them as zero-value business results.
+- Changed invalid money/payroll result sentinels from `NaN` to explicit `null`.
+- Added browser-dashboard module syntax/import checks, keyboard focus styling, a labelled CSV input, active navigation semantics and export metadata that states source completeness is unverified.
+- Added an acquisition-readiness plan covering product completion, financial acceptance, security/privacy, IP/licence diligence, reproducible handover, buyer data room and transaction structures. The owner's AUD 30,000–50,000 target is explicitly not a valuation.
+
+### Evidence boundary and remaining gates
+
+The dashboard remains a synthetic, browser-local demonstration and does not connect to the API, authenticate users, persist customer data or provide secure server-side file intake. Payroll ingestion remains disabled. The aggregation helper's `aggregationValid` flag is not a source-completeness or financial-acceptance result.
+
+The complete DEC/TAX/PAY/PAYLED/INV/CON/VAR/IMP acceptance plan, qualified accounting/payroll/tax policy approvals, private file lifecycle, production identity/MFA and managed secrets, distributed rate limiting, backup/restore, monitoring, incident response, independent penetration testing, Australian privacy/legal review and G0–G4 customer/commercial evidence remain outstanding. G5 remains DEFERRED / NOT AUTHORISED; G6 remains NOT STARTED.
+
+The owner has authorised continued repository-level engineering hardening and synthetic prototype development only. No merge, production deployment, real customer or employee data intake, customer pilot, payment activity or external buyer outreach is authorised.
