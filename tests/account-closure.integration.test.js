@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createServer} from "node:http";
-import {randomBytes} from "node:crypto";
+import {randomBytes,randomUUID} from "node:crypto";
 import {generateKeyPair,exportJWK,SignJWT} from "jose";
 import pg from "pg";
 import {signCheckpoint,verifyCheckpoint,checkpointDigest} from "../scripts/privacy-restore-checkpoint.js";
@@ -54,7 +54,7 @@ test("account closure, token revocation, email erasure and restore safeguards",{
   await admin.query("INSERT INTO users(id,auth_subject,email) VALUES($1,'unbound-ci','unbound@example.invalid')",[unbound]);
   assert.equal((await req("/v1/me","unbound-ci")).status,401,"no trust on first login");
   // Narrow reviewed profile correction, without touching provider identity or broader data.
-  const correctionUser="97979797-1111-4111-8111-111111111111";
+  const correctionUser=randomUUID();
   await admin.query("INSERT INTO users(id,auth_subject,email,auth_issuer) VALUES($1,'correction-ci','old@example.invalid',$2)",[correctionUser,issuer]);
   await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role) VALUES($1,$2,'analyst')",[tenant,correctionUser]);
   const correction=await req(root,"correction-ci",{requestType:"correction",details:"Correct my local profile email only"});
