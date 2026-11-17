@@ -15,6 +15,13 @@ function cleanState(state){
  const seen=new Set();
  return state.markers.map(m=>{
   // Global account security markers intentionally have no tenant or provider identifier.
+  if(m?.kind==="access_change_applied"){
+   if(!uuid.test(m.id)||!uuid.test(m.tenantId)||!uuid.test(m.userId)||typeof m.at!=="string"||!/^\d+(\.\d+)?$/.test(m.at)||!hex.test(m.evidence||"")||!["owner","admin","analyst","reviewer","read_only"].includes(m.role)||!["active","revoked"].includes(m.status))throw Error("Invalid access change marker");
+   const index=m.kind+":"+m.id;
+   if(seen.has(index))throw Error("Duplicate privacy marker");
+   seen.add(index);
+   return {kind:m.kind,id:m.id,tenantId:m.tenantId,userId:m.userId,at:m.at,evidence:m.evidence,role:m.role,status:m.status};
+  }
   if(m?.kind==="signing_key_retired"){
    if(typeof m.id!=="string"||!hex.test(m.id)||typeof m.fingerprint!=="string"||!hex.test(m.fingerprint)||typeof m.at!=="string"||!/^\d+(\.\d+)?$/.test(m.at))throw Error("Invalid retired signing key marker");
    const index=m.kind+":"+m.id;

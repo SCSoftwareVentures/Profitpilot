@@ -133,6 +133,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/050_source_payload_read_isolation.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/051_verified_source_staging.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/052_transaction_session_continuity.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/053_dual_control_access_provisioning.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:

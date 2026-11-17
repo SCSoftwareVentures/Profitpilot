@@ -65,6 +65,7 @@ services:
       - ./database/migrations/050_source_payload_read_isolation.sql:/docker-entrypoint-initdb.d/052-source-payload-read-isolation.sql:ro
       - ./database/migrations/051_verified_source_staging.sql:/docker-entrypoint-initdb.d/053-verified-source-staging.sql:ro
       - ./database/migrations/052_transaction_session_continuity.sql:/docker-entrypoint-initdb.d/054-transaction-session-continuity.sql:ro
+      - ./database/migrations/053_dual_control_access_provisioning.sql:/docker-entrypoint-initdb.d/055-dual-control-access-provisioning.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s

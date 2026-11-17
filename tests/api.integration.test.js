@@ -254,6 +254,42 @@ test("authenticated API enforces tenant membership, role permissions and import 
       assert.equal((await useToken(await customToken("ci-api-analyst",{typ}))).status,200);
      }
     }finally{delete process.env.AUTH_REQUIRE_ACCESS_TOKEN_TYPE;}
+    // Dual-control provisioning uses two distinct, restricted SQL login identities.
+    const provisionTenant="deadbeef-3333-4333-8333-333333333333",provisionOwner="deadbeef-4444-4444-8444-444444444444",provisionMember="deadbeef-5555-4555-8555-555555555555";
+    const createAccess=JSON.stringify({action:"create_tenant",tenantId:provisionTenant,userId:provisionOwner,tenantName:"Synthetic access CI",role:"owner",subject:"ci-access-owner",issuer,email:"ci-access-owner@example.invalid"});
+    await admin.query("CREATE ROLE ci_access_proposer LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE; CREATE ROLE ci_access_approver LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE; GRANT profitpilot_access_proposer TO ci_access_proposer; GRANT profitpilot_access_approver TO ci_access_approver");
+    const accessClient=await admin.connect();
+    async function prepareAccess(body){
+     await accessClient.query("SET SESSION AUTHORIZATION ci_access_proposer");
+     try{return (await accessClient.query("SELECT private.prepare_access_change($1,$2) AS id",[body,"1".repeat(64)])).rows[0].id;}
+     finally{await accessClient.query("RESET SESSION AUTHORIZATION");}
+    }
+    async function approveAccess(id,body){
+     await accessClient.query("SET SESSION AUTHORIZATION ci_access_approver");
+     try{return (await accessClient.query("SELECT private.execute_access_change($1,$2,$3) AS result",[id,body,"2".repeat(64)])).rows[0].result;}
+     finally{await accessClient.query("RESET SESSION AUTHORIZATION");}
+    }
+    try{
+     const id=await prepareAccess(createAccess);
+     await assert.rejects(()=>appPool.query("SELECT private.execute_access_change($1,$2,$3)",[id,createAccess,"2".repeat(64)]),/permission denied/i);
+     await assert.rejects(()=>approveAccess(id,createAccess.replace("Synthetic access CI","Changed tenant")),/changed access intent/i);
+     assert.equal((await approveAccess(id,createAccess)).role,"owner");
+     await assert.rejects(()=>approveAccess(id,createAccess),/consumed/i);
+     const grantBody=JSON.stringify({action:"grant",tenantId:provisionTenant,userId:provisionMember,role:"read_only",subject:"ci-access-member",issuer,email:"ci-access-member@example.invalid"});
+     assert.equal((await approveAccess(await prepareAccess(grantBody),grantBody)).role,"read_only");
+     const ownerRevoke=JSON.stringify({action:"revoke",tenantId:provisionTenant,userId:provisionOwner});
+     await assert.rejects(()=>prepareAccess(ownerRevoke).then(id=>approveAccess(id,ownerRevoke)),/last active owner/i);
+     const roleBody=JSON.stringify({action:"role",tenantId:provisionTenant,userId:provisionMember,role:"analyst"});
+     assert.equal((await approveAccess(await prepareAccess(roleBody),roleBody)).role,"analyst");
+     const revokeBody=JSON.stringify({action:"revoke",tenantId:provisionTenant,userId:provisionMember});
+     assert.equal((await approveAccess(await prepareAccess(revokeBody),revokeBody)).status,"revoked");
+     assert.equal((await request("/v1/tenants/"+provisionTenant+"/contracts",{subject:"ci-access-member"})).status,403);
+     await assert.rejects(()=>appPool.query("SELECT * FROM private.access_change_intents"),/permission denied/i);
+     const restored=(await admin.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;
+     assert.equal(restored.markers.filter(m=>m.kind==="access_change_applied"&&m.tenantId===provisionTenant).length,4);
+     assert.deepEqual(restored.violations,[]);
+    }finally{await accessClient.query("RESET SESSION AUTHORIZATION");accessClient.release();}
+    await admin.query("DROP ROLE ci_access_proposer; DROP ROLE ci_access_approver");
     const noToken=await request("/v1/me");
     assert.equal(noToken.status,401,"requests without a bearer token must be rejected");
     const noExpiry=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+await customToken("ci-api-analyst",{includeExpiry:false})}});

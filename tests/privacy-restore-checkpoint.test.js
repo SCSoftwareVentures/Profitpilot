@@ -106,3 +106,12 @@ test("audit prefixes and retired signing keys are independently bound into recov
  assert.throws(()=>signCheckpoint({markers:[{...retired,fingerprint:"raw-secret"}],violations:[]},{key,deploymentId,now}),/Invalid retired signing key/);
  assert.equal(verifyCheckpoint(signed,{markers:[anchor,retired,{...anchor,id:uuid(15),position:"10",eventHash:"ef".repeat(32)}],violations:[]},options).verified,true);
 });
+
+test("independent access-change receipts detect missing or altered role grants",()=>{
+ const marker={kind:"access_change_applied",id:uuid(16),tenantId:uuid(17),userId:uuid(18),at:"1794873600.1",evidence:"ff".repeat(32),role:"read_only",status:"active"};
+ const st={markers:[marker],violations:[]},signed=signCheckpoint(st,{key,deploymentId,now});
+ const options={...opt,expectedDigest:checkpointDigest(signed)};
+ assert.equal(verifyCheckpoint(signed,st,options).requiredMarkers,1);
+ assert.throws(()=>verifyCheckpoint(signed,{markers:[],violations:[]},options),/missing or has changed/);
+ assert.throws(()=>verifyCheckpoint(signed,{markers:[{...marker,role:"owner"}],violations:[]},options),/missing or has changed/);
+});
