@@ -36,6 +36,7 @@ services:
       - ./database/migrations/021_quarantine_scanner_lifecycle.sql:/docker-entrypoint-initdb.d/023-quarantine-scanner-lifecycle.sql:ro
       - ./database/migrations/022_quarantine_content_validation.sql:/docker-entrypoint-initdb.d/024-quarantine-content-validation.sql:ro
       - ./database/migrations/023_identity_session_revocation.sql:/docker-entrypoint-initdb.d/025-identity-session-revocation.sql:ro
+      - ./database/migrations/024_audit_chain_integrity.sql:/docker-entrypoint-initdb.d/026-audit-chain-integrity.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
