@@ -12,7 +12,7 @@ function syntheticOnly(req,res,next){
 }
 export function registerAttachmentQuarantineRoutes(app,membership){
  const base="/v1/tenants/:tenantId/imports/:batchId/quarantine";
- app.post(base,syntheticOnly,membership,requirePermission("imports.rows.write"),requireStepUp(),(req,res,next)=>{
+ app.post(base,membership,syntheticOnly,requirePermission("imports.rows.write"),requireStepUp(),(req,res,next)=>{
   if(!uuid.test(req.params.batchId))return res.status(400).json({error:"Invalid batch ID"});
   const type=req.is(permitted);if(!type)return res.status(415).json({error:"Unsupported attachment media"});
   try{independentAttachmentKey(process.env);}catch{return res.status(503).json({error:"Attachment encryption unavailable"});}
@@ -29,7 +29,7 @@ export function registerAttachmentQuarantineRoutes(app,membership){
   if(result.error)return res.status(result.status).json({error:result.error});
   res.status(201).json(result.item);
  }catch(e){next(e);}finally{if(Buffer.isBuffer(req.body))req.body.fill(0);}});
- app.post(base+"/:attachmentId/discard",syntheticOnly,membership,requirePermission("imports.rows.write"),requireStepUp(),async(req,res,next)=>{try{
+ app.post(base+"/:attachmentId/discard",membership,syntheticOnly,requirePermission("imports.rows.write"),requireStepUp(),async(req,res,next)=>{try{
   const {batchId,attachmentId}=req.params;
   if(!uuid.test(batchId)||!uuid.test(attachmentId)||req.body?.discardQuarantineOnly!==true)return res.status(400).json({error:"Explicit quarantine discard required"});
   const result=await withPrivacyStepUp(req.membership,req.identity,batchId,"discard_quarantined_attachment:"+attachmentId.toLowerCase(),async(c,proof)=>{

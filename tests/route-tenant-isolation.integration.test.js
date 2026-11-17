@@ -95,7 +95,7 @@ test("every tenant-scoped API route denies cross-business accounts before reques
    assert.ok(methods.length>0,"route without registered HTTP method: "+route.path);
    for(const method of methods){
     const params={requestId:userA,batchId:userA,matchId:userA,runId:userA,
-      poolId:userA,allocationId:userA,rowNumber:"1",
+      poolId:userA,allocationId:userA,attachmentId:userA,rowNumber:"1",
      userId:userA,permissionKey:"imports.create"};
     const resolvePath=tenantId=>route.path.replace(/:([a-zA-Z]\w*)/g,(match,key)=>{
      if(key==="tenantId")return tenantId;
