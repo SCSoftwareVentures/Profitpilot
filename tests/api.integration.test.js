@@ -100,14 +100,14 @@ test("authenticated API enforces tenant membership, role permissions and import 
     // register import metadata or write rows, even with a valid token.
     const readerContracts=await request(`/v1/tenants/${tenantA}/contracts`,{subject:"ci-api-reader"});
     assert.equal(readerContracts.status,200,"read-only tenant members retain permitted reads");
-    const readerWrite=await request(`/v1/tenants/${tenantA}/imports`,{
+    const readerWriteCrossTenantMatrix=await request(`/v1/tenants/${tenantA}/imports`,{
       subject:"ci-api-reader",method:"POST",body:{
         sourceType:"customer_invoice",fileName:"reader-denied.csv",
         sha256:"a".repeat(64),permissionReference:"synthetic test",
         periodStart:"2026-01-01",periodEnd:"2026-01-31"
       }
     });
-    assert.equal(readerWrite.status,403,"read-only tenant members cannot register imports");
+    assert.equal(readerWriteCrossTenantMatrix.status,403,"read-only tenant members cannot register imports");
 
     const own=await request(`/v1/tenants/${tenantA}/contracts`,{subject:"ci-api-analyst"});
     assert.equal(own.status,200);
