@@ -367,6 +367,20 @@ test("authenticated API enforces tenant membership, role permissions and import 
     }
     const ownerGrant=await request(`/v1/tenants/${tenantA}/security/permissions/overrides`,{subject:"ci-api-owner",method:"POST",body:{userId:userD,permissionKey:"imports.create",effect:"grant",reason:"Temporary delegated import authority"}});
     assert.equal(ownerGrant.status,201,"an owner may create a step-up-protected member permission override");
+    for(const actor of ["ci-api-owner","ci-api-reviewer"]){
+     await assert.rejects(()=>withTenant(tenantA,actor,c=>c.query("SELECT reason,granted_by FROM public.tenant_membership_permission_overrides")),/permission denied/i);
+     await assert.rejects(()=>withTenant(tenantA,actor,c=>c.query("SELECT private.read_permission_overrides($1,$2,$3)",[tenantA,Math.floor(Date.now()/1000),"0".repeat(64)])),/step-up proof/i);
+    }
+    const selfPermission=await withTenant(tenantA,"ci-api-reviewer",c=>c.query("SELECT private.has_scoped_permission($1,'imports.create') AS own,private.has_scoped_permission($2,'imports.create') AS foreign",[tenantA,tenantB]));
+    assert.equal(selfPermission.rows[0].own,true);
+    assert.equal(selfPermission.rows[0].foreign,false);
+    const protectedPermissionView=await request(`/v1/tenants/${tenantA}/security/permissions`,{subject:"ci-api-owner"});
+    assert.equal(protectedPermissionView.status,200);
+    const protectedPermissionBody=await protectedPermissionView.json();
+    assert.equal(protectedPermissionBody.overridesTruncated,false);
+    assert.ok(protectedPermissionBody.overrides.some(x=>x.user_id===userD&&x.reason==="Temporary delegated import authority"));
+    const deniedPermissionView=await request(`/v1/tenants/${tenantA}/security/permissions`,{subject:"ci-api-reviewer"});
+    assert.equal(deniedPermissionView.status,403);
     const grantedImport=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-reviewer",method:"POST",body:{...importBody,sha256:"1".repeat(64)}});
     assert.equal(grantedImport.status,201,"a member grant must take effect on subsequent API requests");
     const ownerDeny=await request(`/v1/tenants/${tenantA}/security/permissions/overrides`,{subject:"ci-api-owner",method:"POST",body:{userId:userD,permissionKey:"imports.create",effect:"deny",reason:"Remove temporary import authority"}});

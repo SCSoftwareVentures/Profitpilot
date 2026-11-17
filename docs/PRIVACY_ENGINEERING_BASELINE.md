@@ -160,3 +160,6 @@ Migration 038 requires exact mutation evidence (target, effect, permission and r
 
 ## Transaction-bound session operations
 Migration 039 removes runtime execution of direct admission, listing and revocation helpers. The authenticated server attests the exact action, provider identity, token claims and target to the current database transaction and backend, using a domain-separated HMAC. Every operation rechecks exact token binding and expiry with current account status. Session lists are limited to 100 with a truncation indicator. This prevents direct runtime SQL-only cross-account session calls, not compromise of the signing secret, privileged operators, external refresh tokens or operations already in flight.
+
+## Permission-administration read isolation (migration 039)
+Direct runtime SELECT access to permission overrides (including other members' reasons and granting identities) is revoked. Ordinary authorization uses an actor- and tenant-scoped boolean function; detailed administrator reads require signed fresh step-up evidence and an in-database permission check. The existing API returns at most 500 override rows in stable order and explicitly signals truncation. Large-tenant pagination and live identity-provider verification remain outstanding; this control requires PostgreSQL integration verification before release.

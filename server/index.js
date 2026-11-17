@@ -55,10 +55,11 @@ app.get("/v1/me/security",async(req,res)=>{res.set("Cache-Control","no-store");r
  currentSession:{sessionId:req.identity.jti,authenticatedAt:req.identity.authTime,assuranceClass:req.identity.acr}
 });});
 app.get("/v1/tenants/:tenantId/security/permissions",membership,requirePermission("security.permissions.read"),requireStepUp(),async(req,res,next)=>{try{
- const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
+ const tenant=req.membership.tenantId;
+ const result=await withPrivacyStepUp(req.membership,req.identity,tenant,"read_permission_overrides",async(client,proof)=>{
   const catalogue=await client.query("SELECT pc.permission_key,pc.description,pc.sensitive,rp.role,(rp.permission_key IS NOT NULL) AS granted_by_role FROM permission_catalog pc LEFT JOIN role_permissions rp ON rp.permission_key=pc.permission_key ORDER BY pc.permission_key,rp.role");
-  const overrides=await client.query("SELECT user_id,permission_key,effect,reason,granted_by,created_at FROM tenant_membership_permission_overrides WHERE tenant_id=$1 ORDER BY user_id,permission_key",[req.membership.tenantId]);
-  return {catalogue:catalogue.rows,overrides:overrides.rows};
+  const {rows:[row]}=await client.query("SELECT private.read_permission_overrides($1,$2,$3) AS result",[tenant,req.identity.authTime,proof]);
+  return {catalogue:catalogue.rows,...row.result};
  });
  res.json(result);
 }catch(e){next(e);}});
