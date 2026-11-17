@@ -22,7 +22,7 @@ import {DEMO_CONTRACTS} from "../src/demo-data.js";
 const initial=structuredClone(DEMO_CONTRACTS);
 let contracts=structuredClone(initial);
 let exceptions=[{title:"Invoice not matched",detail:"Riverside Offices · INV-204",value:"$1,850",status:"Review"},{title:"Labour allocation review",detail:"Northside Retail · November",value:"",status:"Pending"}];
-const fmt=value=>{if(typeof value!=="string"||! /^-?(?:0|[1-9]\\d*)(?:\\.\\d{1,2})?$/.test(value))return "Unavailable";const negative=value.startsWith("-"),unsigned=negative?value.slice(1):value,[whole,fraction=""]=unsigned.split(".");return (negative?"−":"")+"$"+whole.replace(/\\B(?=(\\d{3})+(?!\\d))/g,",")+"."+fraction.padEnd(2,"0");};
+const fmt=value=>{if(typeof value!=="string"||! /^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value))return "Unavailable";const negative=value.startsWith("-"),unsigned=negative?value.slice(1):value,[whole,fraction=""]=unsigned.split(".");return (negative?"−":"")+"$"+whole.replace(/\B(?=(\d{3})+(?!\d))/g,",")+"."+fraction.padEnd(2,"0");};
 function render(){
  const m=aggregateMetrics(contracts);document.querySelector("#revenue").textContent=fmt(m.revenue);document.querySelector("#cost").textContent=fmt(m.cost);document.querySelector("#contribution").textContent=fmt(m.contribution);document.querySelector("#margin").textContent=m.complete&&m.margin!==null?m.margin+"% of eligible revenue":"Unavailable — reporting basis incomplete";
  document.querySelector("#bars").innerHTML=m.contracts.map(c=>'<div class="bar"><i style="height:'+Math.max(8,c.margin||0)+'%"></i><span>'+c.site+'</span></div>').join("");
