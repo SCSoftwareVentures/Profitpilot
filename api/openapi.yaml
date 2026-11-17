@@ -179,7 +179,7 @@ paths:
         schema: { type: string, format: uuid }
     post:
       summary: Independently approve local account closure
-      description: Single-tenant non-owner account only; no holds or outstanding requests. Optional email erasure requires explicitly enabled policy.
+      description: Each active organization must independently approve; another active owner must remain in each organization. No holds or outstanding non-closure requests. Optional email erasure requires explicitly enabled policy.
       requestBody:
         required: true
         content:

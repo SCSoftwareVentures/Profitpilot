@@ -43,7 +43,9 @@ test("account closure, token revocation, email erasure and restore safeguards",{
   await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role) VALUES($1,$2,'analyst'),($1,$3,'owner'),($1,$4,'admin'),($1,$5,'analyst'),($6,$5,'analyst')",[tenant,user,owner,other,multi,otherTenant]);
   assert.equal((await req("/v1/me","unknown-closure-subject")).status,401);
   const multiReq=await reviewed("closure-multi");
-  assert.equal((await req(multiReq.p+"/approve-closure","closure-owner",{eraseEmail:false})).status,409);
+  assert.equal((await req(multiReq.p+"/approve-closure","closure-owner",{eraseEmail:false})).status,200);
+  await new Promise(r=>setTimeout(r,1100));
+  assert.equal((await req(multiReq.p+"/execute-closure","closure-multi",{eraseEmail:false})).status,409,"one organization cannot authorize global closure");
   const ownerReq=await reviewed("closure-owner","closure-other");
   assert.equal((await req(ownerReq.p+"/approve-closure","closure-other",{eraseEmail:false})).status,409);
   const x=await reviewed("closure-user");
@@ -97,6 +99,27 @@ test("account closure, token revocation, email erasure and restore safeguards",{
   assert.equal(retainedResult.status,200);
   assert.equal((await retainedResult.json()).profileEmailErased,false);
   assert.deepEqual((await admin.query("SELECT status,email FROM users WHERE id=$1",[other])).rows[0],{status:"disabled",email:"other@example.invalid"});
+  // Each organization requires its own independent approval, and each retains an active owner.
+  const successor="97979797-1111-4111-8111-111111111111";
+  await admin.query("INSERT INTO users(id,auth_subject,email) VALUES($1,'closure-successor','successor@example.invalid')",[successor]);
+  await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role) VALUES($1,$3,'owner'),($2,$3,'owner')",[tenant,otherTenant,successor]);
+  const otherRoot="/v1/tenants/"+otherTenant+"/privacy/requests";
+  const created=await req(otherRoot,"closure-multi",{requestType:"account_closure",details:"Close second organization account"});
+  assert.equal(created.status,201);
+  const p2=otherRoot+"/"+(await created.json()).id;
+  assert.equal((await req(p2+"/decision","closure-successor",{action:"verify_identity",reason:"Begin verification"})).status,200);
+  assert.equal((await req(p2+"/confirm-account","closure-multi",{})).status,200);
+  assert.equal((await req(p2+"/decision","closure-successor",{action:"begin_review",reason:"Independent review"})).status,200);
+  assert.equal((await req(p2+"/approve-closure","closure-successor",{eraseEmail:false})).status,200);
+  await new Promise(r=>setTimeout(r,1100));
+  const multiDone=await req(multiReq.p+"/execute-closure","closure-multi",{eraseEmail:false});
+  assert.equal(multiDone.status,200);
+  assert.equal((await admin.query("SELECT count(*)::int AS n FROM tenant_memberships WHERE user_id=$1 AND status='active'",[multi])).rows[0].n,0);
+  // Previously ineligible owner becomes eligible only with a separate active successor.
+  assert.equal((await req(ownerReq.p+"/approve-closure","closure-successor",{eraseEmail:false})).status,200);
+  await new Promise(r=>setTimeout(r,1100));
+  assert.equal((await req(ownerReq.p+"/execute-closure","closure-owner",{eraseEmail:false})).status,200);
+  assert.equal((await req("/v1/me","closure-successor")).status,200);
   const state=(await admin.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;
   assert.deepEqual(state.violations,[]);
   assert.equal(state.markers.find(m=>m.id===user).emailErased,true);
@@ -106,6 +129,7 @@ test("account closure, token revocation, email erasure and restore safeguards",{
   assert.equal(verifyCheckpoint(manifest,state,verifyOpts).verified,true);
   assert.throws(()=>verifyCheckpoint(manifest,before,verifyOpts),/missing or has changed/);
   assert.equal((await admin.query("SELECT is_valid FROM private.verify_audit_chain($1)",[tenant])).rows[0].is_valid,true);
+  assert.equal((await admin.query("SELECT is_valid FROM private.verify_audit_chain($1)",[otherTenant])).rows[0].is_valid,true);
  }finally{
   await new Promise(r=>api.close(r));await pool.end();await admin.end();await new Promise(r=>jwks.close(r));
  }
