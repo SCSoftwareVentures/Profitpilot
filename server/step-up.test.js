@@ -28,7 +28,7 @@ test("step-up denies absent or incorrect assurance",()=>{
  }
 });
 test("step-up denies missing, stale and future authentication times",()=>{
- for(const authTime of [null,undefined,"recent",now()-301,now()+6]){
+ for(const authTime of [null,undefined,"recent",now()-301,now()+1,now()+6]){
   assert.equal(evaluate({authTime,acr:"urn:profitpilot:mfa"}).status,403);
  }
 });
