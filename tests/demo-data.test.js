@@ -14,6 +14,7 @@ test("browser demo fixture supplies explicit financial basis and exact decimal s
     assert.equal(contract.periodEnd,"2026-11-30");
   }
   const result=aggregateMetrics(DEMO_CONTRACTS);
-  assert.equal(result.complete,true);
+  assert.equal(result.aggregationValid,true);
+  assert.equal(result.completeness,"unverified");
   assert.deepEqual([result.revenue,result.cost,result.contribution,result.margin],["48250.00","31840.00","16410.00","34.01"]);
 });
