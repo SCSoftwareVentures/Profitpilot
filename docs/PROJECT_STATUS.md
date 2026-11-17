@@ -208,3 +208,8 @@ Draft PR #28 `hardening/financial-security-followup` targets the combined PR #27
 PostgreSQL CI applied migrations through 014 and passed the tenant/FK catalogue audit across 20 protected/root tables, restricted-role RLS, authenticated API integration, production image build, verified TLS with a trusted CA, rejection of an untrusted CA and production-mode database health. Integration tests cover database-enforced reviewer roles, signed actor binding, immutable evidence/final decisions, mandatory audit reason and same-transaction audit events. Node.js job reported 56 passed, 0 failed, 3 database-dependent skips (executed in PostgreSQL job).
 
 The complete product is still not ready for pilot or production. Payroll ingestion remains disabled; full financial acceptance, private file lifecycle, production identity/operations, independent penetration/accounting/legal review, G0–G4 customer evidence and signed G5 GO remain open. PR #28 remains draft and unmerged.
+
+
+### Current PR #28 head — 17 November 2026
+
+Exact head `5988ba408eae176cf5c69def1a9b5f4106e954c1` passed GitHub Actions run **#43984181421 (run #684)**. Both Node.js 22 and PostgreSQL 16 jobs succeeded, including migrations through 014, tenant/FK and restricted-role RLS checks, authenticated API reviewer/audit tests, production image build, trusted/untrusted TLS verification and production-mode database health. Product and production readiness remain NOT COMPLETE; all financial acceptance and external release gates remain open.
