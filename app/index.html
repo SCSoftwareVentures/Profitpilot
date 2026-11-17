@@ -25,7 +25,7 @@ let contracts=structuredClone(initial);
 let exceptions=[{title:"Invoice not matched",detail:"Riverside Offices · INV-204",value:"$1,850",status:"Review"},{title:"Labour allocation review",detail:"Northside Retail · November",value:"",status:"Pending"}];
 const fmt=formatDemoMoney;
 const escapeHtml=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
-const displayMargin=value=>typeof value==="string"&&/^-?(?:0|[1-9]\\d*)(?:\\.\\d{1,2})?$/.test(value)?escapeHtml(value)+"%":"Unavailable";
+const displayMargin=value=>typeof value==="string"&&/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value)?escapeHtml(value)+"%":"Unavailable";
 function render(){
  const m=aggregateMetrics(contracts);
  document.querySelector("#revenue").textContent=fmt(m.revenue);
