@@ -61,9 +61,9 @@ function validateCell(name,value){
  else reject();
 }
 
-// Preflight only: returns just the row count, never persists or returns row
-// values to callers. Financial validation and provenance mapping remain separate.
-export function inspectInvoiceCsv(bytes){
+// Restricted workers alone consume canonical parsed rows; the preflight wrapper
+// returns only a count. This code never logs source values.
+export function parseQuarantinedInvoiceCsv(bytes){
  if(!Buffer.isBuffer(bytes)||bytes.length<1||bytes.length>MAX_QUARANTINE_BYTES)reject();
  let text;
  try{text=new TextDecoder("utf-8",{fatal:true}).decode(bytes);}catch{reject();}
@@ -74,12 +74,15 @@ export function inspectInvoiceCsv(bytes){
  if(lines.length<2||lines.length>MAX_INVOICE_ROWS+1||lines.some(line=>!line))reject();
  const headers=cellsOf(lines[0]);
  if(headers.some(h=>!allowed.has(h))||new Set(headers).size!==headers.length||required.some(h=>!headers.includes(h)))reject();
+ const rows=[];
  for(let i=1;i<lines.length;i++){
   const values=cellsOf(lines[i]);
   if(values.length!==headers.length)reject();
   headers.forEach((h,j)=>validateCell(h,values[j]));
   const start=values[headers.indexOf("service_period_start")],end=values[headers.indexOf("service_period_end")];
   if(start&&end&&start>end)reject();
+  rows.push(Object.fromEntries(headers.map((h,j)=>[h,values[j]])));
  }
- return {rowCount:lines.length-1};
+ return rows;
 }
+export function inspectInvoiceCsv(bytes){return {rowCount:parseQuarantinedInvoiceCsv(bytes).length};}
