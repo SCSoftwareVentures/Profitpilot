@@ -125,6 +125,21 @@ export async function revokeAuthSession(jti,identity){
   });
  }
 
+ // Payload read capabilities are generated only inside a verified tenant transaction.
+ export async function sourceReadProof(client,membership,identity,batchId,purpose){
+  if(!["compare","validate","payroll_reconcile","invoice_prepare","reconcile"].includes(purpose))throw Error("Invalid source read purpose");
+  let authTime=0;
+  if(!["compare","validate"].includes(purpose)){
+   const now=Math.floor(Date.now()/1000),maxAge=Number(process.env.AUTH_STEP_UP_MAX_AGE_SECONDS??300);
+   if(!Number.isInteger(maxAge)||maxAge<30||maxAge>900||!Number.isSafeInteger(identity?.authTime)||identity.authTime>now||now-identity.authTime>maxAge||!process.env.AUTH_STEP_UP_ACR||identity.acr!==process.env.AUTH_STEP_UP_ACR||!identity.amr?.includes("mfa"))throw Object.assign(new Error("Recent source read MFA required"),{status:403});
+   authTime=identity.authTime;
+  }
+  const {rows:[ctx]}=await client.query("SELECT current_setting('app.tenant_nonce',true) AS nonce");
+  const body=["profitpilot-privacy-step-up-v1",membership.tenantId.toLowerCase(),membership.userId.toLowerCase(),batchId.toLowerCase(),"source_read:"+purpose,String(authTime),ctx.nonce].join("\n");
+  const proof=createHmac("sha256",Buffer.from(process.env.TENANT_CONTEXT_HMAC_SECRET,"hex")).update(body).digest("hex");
+  return [membership.tenantId,batchId,purpose,authTime,proof];
+ }
+
  // Only trusted server code can attest an exact audit event in its signed transaction.
  export async function appendAudit(client,member,action,objectType,objectId,reason,metadata={}){
   const {rows:[context]}=await client.query("SELECT current_setting('app.tenant_nonce',true) AS nonce");

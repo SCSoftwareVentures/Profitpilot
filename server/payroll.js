@@ -1,7 +1,7 @@
 // Human-controlled payroll source reconciliation and allocation workflow.
 // Only synthetic evidence until production identity, privacy and legal gates are met.
 import {randomUUID} from "node:crypto";
-import {withTenant,withFinancialStepUp,appendAudit} from "./db.js";
+import {withTenant,withFinancialStepUp,sourceReadProof,appendAudit} from "./db.js";
 import {requirePermission,requireStepUp} from "./auth.js";
 import {validatePayrollRows} from "../src/engine.js";
 
@@ -91,11 +91,12 @@ export function registerPayrollRoutes(app,membership){
     if(batch.status!=="review")return error(409,"Payroll source batch is not open for reconciliation");
     if(batch.created_by===req.membership.userId)return error(403,"Importer cannot reconcile their own payroll batch");
     if(!batch.start_date||!batch.end_date)return error(422,"Payroll batch period is required");
+    const readArgs=await sourceReadProof(client,req.membership,req.identity,req.params.batchId,"payroll_reconcile");
     const rows=await client.query(
-     "SELECT r.row_number,r.payload,d.decision FROM raw_import_rows r "+
+     "SELECT r.row_number,r.payload,d.decision FROM private.read_source_rows($1,$2,$3,$4,$5) r "+
      "LEFT JOIN mapping_decisions d ON d.tenant_id=r.tenant_id AND d.raw_row_id=r.id AND d.method_version='payroll-validator-0.1.0' "+
-     "WHERE r.tenant_id=$1 AND r.batch_id=$2 ORDER BY r.row_number",
-     [req.membership.tenantId,req.params.batchId]);
+     "ORDER BY r.row_number",readArgs);
+    if(rows.rowCount>200)return error(422,"Source batch exceeds the supported review limit");
     if(!rows.rowCount)return error(422,"Payroll batch contains no source rows");
     if(rows.rows.some(row=>!["accepted","rejected"].includes(row.decision)))
      return error(409,"Every source row must be independently accepted or rejected first");

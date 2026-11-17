@@ -1,4 +1,4 @@
-import {withTenant,withFinancialStepUp,appendAudit} from "./db.js";
+import {withTenant,withFinancialStepUp,sourceReadProof,appendAudit} from "./db.js";
 import {requirePermission,requireStepUp} from "./auth.js";
 import {UUID,reconcileInvoiceRows} from "../src/canonical-invoices.js";
 const METHOD="canonical-invoice-0.1.0";
@@ -37,7 +37,7 @@ export function registerInvoiceRoutes(app,membership){
    if(!["customer_invoice","supplier_invoice"].includes(b.source_type))return fail(422,"Invoice batch required");
    if(b.created_by===m.userId)return fail(403,"Independent source reviewer required");
    if(b.status!=="review")return fail(409,"Batch must be open for review");
-   const raw=(await c.query("SELECT id,row_number,payload FROM raw_import_rows WHERE tenant_id=$1 AND batch_id=$2 ORDER BY row_number LIMIT 201",[m.tenantId,batchId])).rows;
+   const raw=(await c.query("SELECT id,row_number,payload FROM private.read_source_rows($1,$2,$3,$4,$5) ORDER BY row_number",await sourceReadProof(c,m,req.identity,batchId,"invoice_prepare"))).rows;
    if(raw.length!==expectedRowCount)return fail(422,"Persisted row count does not match declaration");
    const parsed=reconcileInvoiceRows(raw,manifest,{periodStart:b.start,periodEnd:b.end});
    if(parsed.error)return fail(422,parsed.error);

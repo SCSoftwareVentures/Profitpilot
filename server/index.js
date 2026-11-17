@@ -5,7 +5,7 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import {randomUUID,createHash} from "node:crypto";
-import {withTenant,health,assertRuntimeDatabaseRole,listAuthSessions,revokeAuthSession,revokeAllAuthSessions,withPrivacyStepUp,withFinancialStepUp,appendAudit} from "./db.js";
+import {withTenant,health,assertRuntimeDatabaseRole,listAuthSessions,revokeAuthSession,revokeAllAuthSessions,withPrivacyStepUp,withFinancialStepUp,sourceReadProof,appendAudit} from "./db.js";
 import {assertProductionConfig} from "./production-config.js";
 import {authRequired,requirePermission,requireStepUp} from "./auth.js";
 import {parseCsv,validateInvoiceRows,validatePayrollRows,isIsoDate} from "../src/engine.js";
@@ -318,7 +318,8 @@ async function stageFinancialRows(req,res,next,{csv=false}={}){try{
     rows=checked.rows;
    }
    if(!importPayloadAllowed(batch.rows[0].source_type,rows))return {status:422,error:"Source rows contain unsupported fields, nested values or excessive lengths; remove unnecessary personal data before submitting"};
-   const prior=(await client.query("SELECT count(*)::int AS n, COALESCE(jsonb_agg(payload ORDER BY row_number)=$3::jsonb,false) AS identical FROM raw_import_rows WHERE batch_id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId,JSON.stringify(rows)])).rows[0];
+   const readArgs=await sourceReadProof(client,req.membership,req.identity,req.params.batchId,"compare");
+   const prior=(await client.query("SELECT count(*)::int AS n, COALESCE(jsonb_agg(payload ORDER BY row_number)=$6::jsonb,false) AS identical FROM private.read_source_rows($1,$2,$3,$4,$5)",[...readArgs,JSON.stringify(rows)])).rows[0];
    if(prior.n>0){
     if(!prior.identical)return {status:409,error:"Source batch already contains different rows; create a new batch and reconcile independently"};
     if(csv)return {status:409,error:"Batch already staged; file submission cannot replace or certify a previous upload"};
@@ -385,7 +386,9 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requirePer
   if(!["uploaded","review","validating"].includes(batch.rows[0].status))return {status:409,error:"Import batch is not open for validation"};
   const payroll=batch.rows[0].source_type==="payroll";
   if(!payroll&&!["customer_invoice","supplier_invoice"].includes(batch.rows[0].source_type))return {status:422,error:"Unsupported import source type"};
-  const raw=await client.query("SELECT id,row_number,payload FROM raw_import_rows WHERE batch_id=$1 AND tenant_id=$2 ORDER BY row_number",[req.params.batchId,req.membership.tenantId]);
+  const readArgs=await sourceReadProof(client,req.membership,req.identity,req.params.batchId,"validate");
+  const raw=await client.query("SELECT id,row_number,payload FROM private.read_source_rows($1,$2,$3,$4,$5) ORDER BY row_number",readArgs);
+  if(raw.rowCount>200)return {status:422,error:"Source batch exceeds the supported review limit"};
   if(!raw.rowCount)return {status:422,error:"No persisted import rows found. Ingest rows before validation."};
   const input=raw.rows.map(r=>({...r.payload,__rowNumber:String(r.row_number)}));
   const checked=payroll?validatePayrollRows(input,{periodStart:batch.rows[0].source_period_start,periodEnd:batch.rows[0].source_period_end}):validateInvoiceRows(input);

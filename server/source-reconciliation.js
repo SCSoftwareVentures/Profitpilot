@@ -1,15 +1,17 @@
-import {withTenant} from "./db.js";
+import {withTenant,sourceReadProof} from "./db.js";
 import {requirePermission,requireStepUp} from "./auth.js";
 import {UUID} from "../src/canonical-invoices.js";
 import {reconcileStoredSource} from "../src/source-reconciliation.js";
 import {validatePeriodDeclaration,reconcilePeriodInventory} from "../src/period-reconciliation.js";
-async function readStoredSource(c,tenantId,batchId){
+async function readStoredSource(c,membership,identity,batchId){
+   const tenantId=membership.tenantId;
+   const [, ,purpose,authTime,proof]=await sourceReadProof(c,membership,identity,batchId,"reconcile");
    // One MVCC statement, no source payload or personally identifying references in the response.
    const q=await c.query(`
     WITH b AS ( SELECT id,tenant_id,source_type,status,source_period_start::text AS start,source_period_end::text AS end FROM import_batches WHERE tenant_id=$1 AND id=$2 ),
     raw AS (
       SELECT r.id,r.row_number,r.payload,md.decision
-      FROM raw_import_rows r JOIN b ON b.id=r.batch_id AND b.tenant_id=r.tenant_id
+      FROM private.read_source_rows($1,$2,$3,$4,$5) r JOIN b ON b.id=r.batch_id AND b.tenant_id=r.tenant_id
       LEFT JOIN mapping_decisions md ON md.tenant_id=r.tenant_id AND md.raw_row_id=r.id AND md.method_version='payroll-validator-0.1.0'
       ORDER BY r.row_number LIMIT 201
     ), canon AS (
@@ -53,7 +55,7 @@ async function readStoredSource(c,tenantId,batchId){
      COALESCE((SELECT jsonb_agg(x.metadata) FROM manifests x),'[]'::jsonb) AS "manifestEvents",
      COALESCE((SELECT jsonb_agg(x) FROM pools x),'[]'::jsonb) AS "payrollPools",
      COALESCE((SELECT jsonb_agg(x) FROM allocations x),'[]'::jsonb) AS allocations
-   `,[tenantId,batchId]);
+   `,[tenantId,batchId,purpose,authTime,proof]);
    const snapshot=q.rows[0];
    if(!snapshot?.batch)return null;
    return reconcileStoredSource(snapshot);
@@ -63,7 +65,7 @@ export function registerSourceReconciliationRoutes(app,membership){
   const batchId=req.params.batchId;
   if(!UUID.test(batchId))return res.status(400).json({error:"Invalid batch ID"});
   const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
-   return readStoredSource(c,req.membership.tenantId,batchId);
+   return readStoredSource(c,req.membership,req.identity,batchId);
   });
   if(!result)return res.status(404).json({error:"Import batch not found"});
   res.json(result);
@@ -82,7 +84,7 @@ export function registerSourceReconciliationRoutes(app,membership){
     "SELECT count(*)::int AS n FROM invoice_lines l JOIN invoices i ON i.tenant_id=l.tenant_id AND i.id=l.invoice_id WHERE l.tenant_id=$1 AND NOT EXISTS (SELECT 1 FROM raw_import_rows r JOIN import_batches b ON b.tenant_id=r.tenant_id AND b.id=r.batch_id WHERE r.tenant_id=l.tenant_id AND r.id=l.source_row_id AND b.id=ANY($4::uuid[])) AND (i.invoice_date BETWEEN $2::date AND $3::date OR EXISTS (SELECT 1 FROM match_reviews m WHERE m.tenant_id=l.tenant_id AND m.invoice_line_id=l.id AND (m.service_period_start IS NULL OR m.service_period_end IS NULL OR m.service_period_end<m.service_period_start OR (m.service_period_start<=$3::date AND m.service_period_end>=$2::date))))",
     [tenantId,d.periodStart,d.periodEnd,inventory.map(x=>x.id)])).rows[0].n;
    const summaries=[];
-   for(const b of inventory){const s=await readStoredSource(c,tenantId,b.id);if(!s)throw Error("Source inventory snapshot changed");summaries.push(s);}
+   for(const b of inventory){const s=await readStoredSource(c,req.membership,req.identity,b.id);if(!s)throw Error("Source inventory snapshot changed");summaries.push(s);}
    return reconcilePeriodInventory(d,inventory,summaries,legacy);
   },{repeatableRead:true});
   res.json(result);

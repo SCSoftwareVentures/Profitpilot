@@ -35,7 +35,7 @@ test("independent payroll decisions, exact source reconciliation and maker-check
  process.env.AUTH_JWKS_URL="http://127.0.0.1:"+jwks.address().port+"/.well-known/jwks.json";
  const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL});
  const {default:app}=await import("../server/index.js");
- const {pool:appPool,withTenant,withFinancialStepUp}=await import("../server/db.js");
+ const {pool:appPool,withTenant,withFinancialStepUp,sourceReadProof}=await import("../server/db.js");
  const api=createServer(app);
  await new Promise(resolve=>api.listen(0,"127.0.0.1",resolve));
  const base="http://127.0.0.1:"+api.address().port;
@@ -113,6 +113,15 @@ test("independent payroll decisions, exact source reconciliation and maker-check
   await assert.rejects(()=>withFinancialStepUp({tenantId:tenantA,userId:reviewer},{subject:"ci-payroll-reviewer",authTime:Math.floor(Date.now()/1000),acr:"urn:profitpilot:step-up",amr:["pwd"]},batchId,"payroll_row_decision:1",directDecision),/MFA required/i);
   const verifiedIdentity={subject:"ci-payroll-reviewer",authTime:Math.floor(Date.now()/1000),acr:"urn:profitpilot:step-up",amr:["pwd","mfa"]};
   await assert.rejects(()=>withFinancialStepUp({tenantId:tenantA,userId:reviewer},verifiedIdentity,batchId,"payroll_row_decision:2",directDecision),/step-up proof/i,"proof for a different row must fail");
+  for(const subject of ["ci-payroll-importer","ci-payroll-owner","ci-payroll-reviewer"]){
+   await assert.rejects(()=>withTenant(tenantA,subject,c=>c.query("SELECT payload FROM raw_import_rows WHERE batch_id=$1",[batchId])),/permission denied/i);
+   await assert.rejects(()=>withTenant(tenantA,subject,c=>c.query("SELECT * FROM private.read_source_rows($1,$2,'validate',0,$3)",[tenantA,batchId,"0".repeat(64)])),/attestation/i);
+  }
+  await assert.rejects(()=>withTenant(tenantA,"ci-payroll-reviewer",async c=>{
+   const args=await sourceReadProof(c,{tenantId:tenantA,userId:reviewer},verifiedIdentity,batchId,"validate");
+   args[1]=randomUUID();
+   return c.query("SELECT * FROM private.read_source_rows($1,$2,$3,$4,$5)",args);
+  }),/attestation/i);
   const rowPath=n=>path(tenantA)+"/imports/"+batchId+"/payroll/rows/"+n+"/decision";
   const approve={decision:"accepted",reason:"Independent validation of synthetic source row"};
   assert.equal((await send("POST",rowPath(1),"ci-payroll-importer",approve)).status,403,
