@@ -1,10 +1,12 @@
 import {performance} from "node:perf_hooks";
+import {createSecurityAlertPolicy} from "./security-alert-policy.js";
 
 function newCounters(){return {requests:0,success:0,authDenied:0,roleDenied:0,rateLimited:0,otherClientError:0,unavailable:0,serverError:0,aborted:0,slow:0};}
 // Aggregate only fixed enumerated fields. Never record headers, URLs,
 // identity, IP, body, user-controlled labels or exception contents.
 export function createSecurityMonitor({clock=()=>performance.now(),sink=event=>process.stdout.write(JSON.stringify(event)+"\n")}={}){
  let counters=newCounters(), interval;
+ const evaluateAlerts=createSecurityAlertPolicy();
  function middleware(req,res,next){
   const start=clock();
   let recorded=false;
@@ -29,8 +31,9 @@ export function createSecurityMonitor({clock=()=>performance.now(),sink=event=>p
  }
  function flush(){
   const report={event:"api_security_interval",...counters};
-  sink(report);
   counters=newCounters();
+  sink(report);
+  for(const alert of evaluateAlerts(report))sink(alert);
   return report;
  }
  function start(){
