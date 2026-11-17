@@ -10,7 +10,6 @@ function cents(v){
 }
 function decimal(v){const n=v<0n?-v:v;return (v<0n?"-":"")+(n/100n)+"."+String(n%100n).padStart(2,"0");}
 function sameAmount(a,b){return money(a)&&money(b)&&cents(a)===cents(b);}
-const SUM=(rows,key)=>rows.reduce((n,r)=>n+cents(r[key]),0n);
 const supported=["customer_invoice","supplier_invoice","payroll"];
 export function reconcileStoredSource({batch,rows,manifestEvents=[],invoiceRecords=[],payrollPools=[],allocations=[]}){
  const base={batchId:batch.id,sourceType:batch.source_type,batchStatus:batch.status,sourceStatus:"pending",approvalStatus:"pending",rowCount:rows.length,completeSourceCoverage:false,externallyVerified:false};
@@ -37,7 +36,9 @@ export function reconcileStoredSource({batch,rows,manifestEvents=[],invoiceRecor
   if(matching.length===0)return result;
   if(matching.length!==1)return {...result,approvalStatus:"allocation_inconsistent"};
   const a=matching[0],keys=["direct","allocated","nonSite","excluded","residual"];
-  if(keys.some(k=>!money(a[k])||cents(a[k])<0n)||keys.reduce((v,k)=>v+cents(a[k]),0n)!==total||!a.reviewed||!sameAmount(a.lineTotal,decimal(total-cents(a.residual))))return {...result,approvalStatus:"allocation_inconsistent"};
+  // The persisted allocation contains a real residual line; all five buckets must reconcile.
+  const check=a.lineChecks;
+  if(!check||!Number.isInteger(check.lineCount)||check.lineCount<1||check.badSites!==0||keys.some(k=>!money(a[k])||cents(a[k])<0n||!sameAmount(a[k],check[k]))||keys.reduce((v,k)=>v+cents(a[k]),0n)!==total||!a.reviewed||!sameAmount(check.total,decimal(total)))return {...result,approvalStatus:"allocation_inconsistent"};
   return {...result,approvalStatus:"allocation_reconciled",allocation:{direct:a.direct,allocated:a.allocated,nonSite:a.nonSite,excluded:a.excluded,residual:a.residual}};
  }
  if(manifestEvents.length!==1||!Array.isArray(manifestEvents[0]?.manifest)||manifestEvents[0]?.rowCount!==rows.length)return {...base,sourceStatus:"declaration_unavailable",reason:"missing_unique_original_manifest"};

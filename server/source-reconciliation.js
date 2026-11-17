@@ -34,9 +34,19 @@ export function registerSourceReconciliationRoutes(app,membership){
       FROM payroll_pools p JOIN b ON b.tenant_id=p.tenant_id AND b.id=p.batch_id ORDER BY p.id LIMIT 2
     ), allocations AS (
       SELECT a.payroll_pool_id AS "poolId",a.status,a.direct_amount::text AS direct,a.allocated_amount::text AS allocated,a.non_site_amount::text AS "nonSite",a.excluded_amount::text AS excluded,a.residual_amount::text AS residual,
-       (a.reviewer_id IS NOT NULL AND a.approved_at IS NOT NULL) AS reviewed,
-       (SELECT COALESCE(sum(l.amount),0)::numeric(14,2)::text FROM allocation_lines l WHERE l.tenant_id=$1 AND l.allocation_run_id=a.id) AS "lineTotal"
-      FROM allocation_runs a JOIN pools p ON p.id=a.payroll_pool_id WHERE a.tenant_id=$1 AND a.status='confirmed' LIMIT 2
+       (a.reviewer_id IS NOT NULL AND a.approved_at IS NOT NULL AND a.created_by IS NOT NULL AND a.created_by<>a.reviewer_id) AS reviewed,
+       to_jsonb(checks) AS "lineChecks"
+      FROM allocation_runs a JOIN pools p ON p.id=a.payroll_pool_id
+       CROSS JOIN LATERAL (
+        SELECT count(*)::int AS "lineCount",COALESCE(sum(l.amount),0)::text AS total,
+         COALESCE(sum(l.amount) FILTER(WHERE l.bucket_type='direct'),0)::text AS direct,
+         COALESCE(sum(l.amount) FILTER(WHERE l.bucket_type='approved_allocated'),0)::text AS allocated,
+         COALESCE(sum(l.amount) FILTER(WHERE l.bucket_type='non_site'),0)::text AS "nonSite",
+         COALESCE(sum(l.amount) FILTER(WHERE l.bucket_type='excluded'),0)::text AS excluded,
+         COALESCE(sum(l.amount) FILTER(WHERE l.bucket_type='unallocated'),0)::text AS residual,
+         count(*) FILTER(WHERE (l.bucket_type IN ('direct','approved_allocated')) IS DISTINCT FROM (l.site_id IS NOT NULL))::int AS "badSites"
+        FROM allocation_lines l WHERE l.tenant_id=$1 AND l.allocation_run_id=a.id
+       ) checks WHERE a.tenant_id=$1 AND a.status='confirmed' LIMIT 2
     ), manifests AS (
       SELECT metadata FROM audit_events WHERE tenant_id=$1 AND object_id=$2 AND action='invoice_batch_prepared' AND object_type='import_batch' LIMIT 2
     )

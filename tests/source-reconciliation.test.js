@@ -16,3 +16,13 @@ test("missing manifest and tampered canonical values fail closed",()=>{
   f=fixture();Object.assign(f.invoiceRecords[0],patch);assert.equal(reconcileStoredSource(f).sourceStatus,"unreconciled");
  }
 });
+
+test("payroll allocation includes explicit residual line and separately reconciles every bucket",()=>{
+ const p={source_ref:"SOURCE-A",cost_component:"gross_wages",amount:"100.00",currency:"AUD",period_start:batch.start,period_end:batch.end};
+ const buckets={direct:"60.00",allocated:"20.00",nonSite:"10.00",excluded:"0.00",residual:"10.00"};
+ const a={...buckets,poolId:"pool",status:"confirmed",reviewed:true,lineChecks:{...buckets,lineCount:4,badSites:0,total:"100.00"}};
+ const f={batch:{...batch,source_type:"payroll"},rows:[{payload:p,decision:"accepted"}],payrollPools:[{id:"pool",currency:"AUD",start:batch.start,end:batch.end,total:"100.00"}],allocations:[a]};
+ assert.equal(reconcileStoredSource(f).approvalStatus,"allocation_reconciled");
+ a.lineChecks={...a.lineChecks,direct:"61.00",allocated:"19.00"};assert.equal(reconcileStoredSource(f).approvalStatus,"allocation_inconsistent");
+ a.lineChecks={...buckets,lineCount:3,badSites:0,total:"90.00",residual:"0.00"};assert.equal(reconcileStoredSource(f).approvalStatus,"allocation_inconsistent");
+});
