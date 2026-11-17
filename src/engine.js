@@ -99,7 +99,7 @@ export function validateInvoiceRows(rows){
 export function allocatePayroll({pool,direct=[],approved=[],nonSite="0.00",excluded="0.00"}={}){
   const directRows=Array.isArray(direct)?direct:null;
   const approvedRows=Array.isArray(approved)?approved:null;
-  const rowAmounts=rows=>rows===null?null:sumCents(rows.map(x=>x&&typeof x==="object"&&!Array.isArray(x)?(x.amount??"0.00"):null));
+  const rowAmounts=rows=>rows===null?null:sumCents(rows.map(x=>x&&typeof x==="object"&&!Array.isArray(x)?x.amount:null));
   const p=decimalCents(pool),d=rowAmounts(directRows),a=rowAmounts(approvedRows),n=decimalCents(nonSite),e=decimalCents(excluded);
   const validInputs=[p,d,a,n,e].every(x=>x!==null);
   const residual=validInputs?p-d-a-n-e:null;
@@ -107,7 +107,7 @@ export function allocatePayroll({pool,direct=[],approved=[],nonSite="0.00",exclu
   let sitesValid=directRows!==null&&approvedRows!==null;
   for(const x of [...(directRows||[]),...(approvedRows||[])]){
     if(!x||typeof x!=="object"||Array.isArray(x)){sitesValid=false;continue;}
-    const amount=decimalCents(x.amount??"0.00");
+    const amount=decimalCents(x.amount);
     const key=typeof x.site==="string"?x.site.trim():"";
     if(amount===null||!key){sitesValid=false;continue;}
     siteCents[key]=(siteCents[key]||0n)+amount;
