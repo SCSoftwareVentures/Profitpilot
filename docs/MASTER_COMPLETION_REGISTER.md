@@ -434,3 +434,12 @@ The dashboard remains a synthetic, browser-local demonstration and does not conn
 The complete DEC/TAX/PAY/PAYLED/INV/CON/VAR/IMP acceptance plan, qualified accounting/payroll/tax policy approvals, private file lifecycle, production identity/MFA and managed secrets, distributed rate limiting, backup/restore, monitoring, incident response, independent penetration testing, Australian privacy/legal review and G0–G4 customer/commercial evidence remain outstanding. G5 remains DEFERRED / NOT AUTHORISED; G6 remains NOT STARTED.
 
 The owner has authorised continued repository-level engineering hardening and synthetic prototype development only. No merge, production deployment, real customer or employee data intake, customer pilot, payment activity or external buyer outreach is authorised.
+
+
+## Owner acquisition strategy and resourcing update — 17 November 2026
+
+The owner confirms the intended outcome is sale of the entire ProfitPilot project, not an owner-operated launch. Completion planning must optimise for a buyer-ready software asset: working and polished synthetic demonstration, complete core workflows, financial-engine acceptance evidence, secure architecture, reproducible build/test setup, documented known issues, IP/licence diligence and a professional handover package. A live production launch, real customer pilot or recurring revenue is not a prerequisite for the owner to sell the project.
+
+The AUD 30,000–50,000 figure is an initial reference target only and is not a ceiling, appraisal, guaranteed valuation or buyer commitment. No predetermined upper valuation limit is set; the objective is to maximise evidence-backed strategic value. The former AUD 500 initial and AUD 100 monthly project caps are withdrawn as planning constraints. Actual paid spend, subscriptions, contractors, external services or other financial commitments still require explicit owner approval.
+
+This changes the commercial objective and removes the former budget caps; it does not waive technical correctness, privacy/security safeguards, IP diligence, evidence discipline or the owner's authority over external actions. No merge, deployment, real-data intake, buyer outreach, sale or transfer of ownership is authorised.
