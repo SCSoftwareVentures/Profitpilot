@@ -33,7 +33,7 @@ test("step-up denies missing, stale and future authentication times",()=>{
  }
 });
 test("step-up denies unsafe freshness configuration",()=>{
- for(const maxAge of ["29","901","NaN","1.5"]){
+ for(const maxAge of ["","29","901","NaN","1.5"]){
   assert.equal(evaluate({authTime:now(),acr:"urn:profitpilot:mfa"},{maxAge}).status,403);
  }
 });
