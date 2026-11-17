@@ -42,9 +42,14 @@ app.get("/v1/tenants/:tenantId/contracts",membership,async(req,res,next)=>{try{c
 app.post("/v1/tenants/:tenantId/imports",membership,requireRole("owner","admin","analyst"),async(req,res,next)=>{
  try{
   const {sourceType,fileName,sha256,permissionReference,periodStart,periodEnd}=req.body||{};
-  if(!["payroll","customer_invoice","supplier_invoice"].includes(sourceType)||typeof fileName!=="string"||fileName.length>255||!/^[a-f0-9]{64}$/i.test(sha256||"")||typeof permissionReference!=="string"||!permissionReference.trim()||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodEnd<periodStart)return res.status(400).json({error:"Invalid import metadata"});
+  if(!["payroll","customer_invoice","supplier_invoice"].includes(sourceType)||typeof fileName!=="string"||!fileName.trim()||fileName.length>255||typeof sha256!=="string"||!/^[a-f0-9]{64}$/i.test(sha256)||typeof permissionReference!=="string"||permissionReference.length>256||!permissionReference.trim()||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodEnd<periodStart)return res.status(400).json({error:"Invalid import metadata"});
   const id=randomUUID();
-  const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>c.query("INSERT INTO import_batches(id,tenant_id,source_type,source_period_start,source_period_end,permission_ref,status,file_sha256,file_name,created_by) SELECT $1,$2,$3,$4,$5,$6,'registered',$7,$8,u.id FROM users u WHERE u.auth_subject=$9 ON CONFLICT(tenant_id,file_sha256) DO NOTHING RETURNING id,status",[id,req.membership.tenantId,sourceType,periodStart,periodEnd,permissionReference.trim(),sha256.toLowerCase(),fileName,req.identity.subject]));
+  const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
+    const check=await c.query("SELECT private.import_reference_safe($1,255,true) AND private.import_reference_safe($2,256,false) AS safe",[fileName,permissionReference.trim()]);
+    if(!check.rows[0].safe)return null;
+    return c.query("INSERT INTO import_batches(id,tenant_id,source_type,source_period_start,source_period_end,permission_ref,status,file_sha256,file_name,created_by) SELECT $1,$2,$3,$4,$5,$6,'registered',$7,$8,u.id FROM users u WHERE u.auth_subject=$9 ON CONFLICT(tenant_id,file_sha256) DO NOTHING RETURNING id,status",[id,req.membership.tenantId,sourceType,periodStart,periodEnd,permissionReference.trim(),sha256.toLowerCase(),fileName,req.identity.subject]);
+  });
+  if(!result)return res.status(422).json({error:"Import metadata contains unsupported or potentially sensitive information; use an opaque business reference."});
   if(!result.rowCount){
    const old=await withTenant(req.membership.tenantId,req.identity.subject,async c=>c.query("SELECT id,status,(source_type=$3 AND file_name=$4 AND source_period_start=$5::date AND source_period_end=$6::date AND permission_ref=$7) AS same_metadata FROM import_batches WHERE tenant_id=$1 AND file_sha256=$2",[req.membership.tenantId,sha256.toLowerCase(),sourceType,fileName,periodStart,periodEnd,permissionReference.trim()]));
    const existing=old.rows[0];
@@ -63,6 +68,9 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requireRole("o
   if(!batch.rowCount)return {status:404,error:"Import batch not found"};
   if(!["registered","review","validating"].includes(batch.rows[0].status))return {status:409,error:"Import batch is not open for row ingestion"};
   if(batch.rows[0].source_type==="payroll")return {status:422,error:"Payroll row ingestion is disabled until the source-row ledger, privacy-safe column mapping and reviewer workflow are implemented. Do not submit employee or payroll personal information."};
+  // Screen the entire chunk before persisting anything. Do not echo rejected values.
+  const privacy=await client.query("SELECT bool_and(private.invoice_import_payload_safe(value)) AS safe FROM jsonb_array_elements($1::jsonb)",[JSON.stringify(rows)]);
+  if(!privacy.rows[0].safe)return {status:422,error:"Invoice rows contain unsupported fields or potentially sensitive information. Use only approved business fields and opaque references."};
   // Preflight every row number before writing any row. A retry is idempotent
   // only when the persisted payload is byte-for-byte equivalent as JSON data.
   for(let i=0;i<rows.length;i++){
