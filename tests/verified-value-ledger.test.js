@@ -30,14 +30,14 @@ test("partial credits and refunds remain separate and cannot exceed invoiced amo
 
 test("currency and tax-basis mismatches are rejected for one value lineage",()=>{
   let ledger=appendValueEvent(initial(),event("quote","quoted"));
-  assert.throws(()=>appendValueEvent(ledger,event("invoice","invoiced",{currency:"USD",invoiceRef:"INV-1"})),/cannot silently mix currencies or tax bases/);
-  assert.throws(()=>appendValueEvent(ledger,event("invoice","invoiced",{taxBasis:"gst_inclusive",invoiceRef:"INV-1"})),/cannot silently mix currencies or tax bases/);
+  assert.throws(()=>appendValueEvent(ledger,event("invoice","invoiced",{currency:"USD",invoiceRef:"INV-1"})),/cannot silently mix currencies, tax bases or reporting periods/);
+  assert.throws(()=>appendValueEvent(ledger,event("invoice","invoiced",{taxBasis:"gst_inclusive",invoiceRef:"INV-1"})),/cannot silently mix currencies, tax bases or reporting periods/);
 });
 
 test("invalid money, numeric JSON values and missing evidence are rejected",()=>{
   assert.throws(()=>appendValueEvent(initial(),event("bad","quoted",{amount:100})),/positive canonical decimal string/);
   assert.throws(()=>appendValueEvent(initial(),event("bad","quoted",{amount:"1.005"})),/positive canonical decimal string/);
-  assert.throws(()=>appendValueEvent(initial(),event("bad","delivered",{evidenceRef:""})),/supporting evidence/);
+  assert.throws(()=>appendValueEvent(initial(),event("bad","delivered",{evidenceRef:""})),/evidenceRef is required/);
 });
 
 test("invoice, credit and refund events require traceable invoice references and reasons",()=>{
