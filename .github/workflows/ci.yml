@@ -126,15 +126,14 @@ jobs:
         run: |
           set -eu
           DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@127.0.0.1:5432/profitpilot"
+          trap 'status=$?; if [ "$status" -ne 0 ]; then docker ps -a --filter name=profitpilot-api-ci; docker logs profitpilot-api-ci 2>&1 || true; fi; docker rm -f profitpilot-api-ci >/dev/null 2>&1 || true' EXIT
           docker run -d --network host --name profitpilot-api-ci -e NODE_ENV=test -e PORT=8080 -e DATABASE_URL="$DATABASE_URL" -e DATABASE_SSL=false -e CORS_ORIGIN="$CORS_ORIGIN" -e AUTH_ISSUER="$AUTH_ISSUER" -e AUTH_AUDIENCE="$AUTH_AUDIENCE" -e AUTH_JWKS_URL="$AUTH_JWKS_URL" -e TENANT_CONTEXT_HMAC_SECRET="$TENANT_CONTEXT_HMAC_SECRET" profitpilot-api:ci
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8080/health | grep -q '"database":"connected"'; then
               echo 'Production container health check passed'
-              docker rm -f profitpilot-api-ci
               exit 0
             fi
             sleep 2
           done
-          docker logs profitpilot-api-ci
-          docker rm -f profitpilot-api-ci
+          echo 'Container did not report a connected database after 60 seconds' >&2
           exit 1
