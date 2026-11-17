@@ -115,17 +115,17 @@ CREATE TRIGGER import_batch_delete_guard BEFORE DELETE ON public.import_batches
  FOR EACH ROW EXECUTE FUNCTION private.guard_import_batch_delete();
 
 CREATE FUNCTION private.guard_raw_import_delete()
-RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $
+RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$
 BEGIN
  IF NOT EXISTS(SELECT 1 FROM private.import_disposal_tombstones WHERE tenant_id=OLD.tenant_id AND batch_id=OLD.batch_id) THEN RAISE EXCEPTION 'Raw import disposal requires a recorded tombstone'; END IF;
  IF EXISTS(SELECT 1 FROM private.import_disposal_controls WHERE tenant_id=OLD.tenant_id AND batch_id=OLD.batch_id AND hold_active) THEN RAISE EXCEPTION 'Active legal hold blocks disposal'; END IF;
  RETURN OLD;
-END $;
+END $$;
 CREATE TRIGGER raw_import_delete_guard BEFORE DELETE ON public.raw_import_rows
  FOR EACH ROW EXECUTE FUNCTION private.guard_raw_import_delete();
 
 CREATE FUNCTION private.guard_import_terminal_state()
-RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $
+RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$
 BEGIN
  IF current_user='profitpilot_app' AND TG_OP='INSERT' THEN
   IF NEW.status<>'registered' THEN RAISE EXCEPTION 'New imports must be registered' USING ERRCODE='42501'; END IF;
@@ -135,7 +135,7 @@ BEGIN
   RAISE EXCEPTION 'Terminal import states require administrator review' USING ERRCODE='42501';
  END IF;
  RETURN NEW;
-END $;
+END $$;
 CREATE TRIGGER import_terminal_state_guard BEFORE INSERT OR UPDATE ON public.import_batches
  FOR EACH ROW EXECUTE FUNCTION private.guard_import_terminal_state();
 
