@@ -3,6 +3,8 @@ export function validateProductionSecrets(env=process.env){
  if(env.NODE_ENV!=="production")return;
  const secret=env.TENANT_CONTEXT_HMAC_SECRET||"";
  if(!/^[0-9a-f]{64,}$/i.test(secret)||secret.length%2!==0)throw new Error("Production tenant signing key must be at least 32 random bytes encoded as hex");
+ const keyId=env.TENANT_CONTEXT_HMAC_KEY_ID||"primary";
+ if(!/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(keyId))throw new Error("Invalid tenant signing key ID");
  const rateSecret=env.RATE_LIMIT_HASH_SECRET||"";
  if(!/^[0-9a-f]{64}$/i.test(rateSecret)||rateSecret.toLowerCase()===secret.toLowerCase())throw new Error("Production rate-limit key must be an independent 32-byte hex secret");
  if(!env.DATABASE_URL)throw new Error("Production DATABASE_URL is required");
