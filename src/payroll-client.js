@@ -78,12 +78,16 @@ export function createPayrollClient({getAccessToken,fetchImpl=globalThis.fetch}=
    if(new Set(r.items.map(i=>i.matchId)).size!==r.items.length)throw new PayrollRequestError(422);
    return r;
   },
-  decideInvoiceMatch(tenant,matchId,{decision,expectedDirection,reason,acknowledged,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,siteOverheadReviewed,signal}={}){
+  decideInvoiceMatch(tenant,matchId,{decision,expectedDirection,reason,acknowledged,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,siteOverheadReviewed,sharedOverheadShares,sharedOverheadBasis,sharedOverheadReviewed,signal}={}){
    if(acknowledged!==true||!["confirmed","held","rejected"].includes(decision)||!["customer","supplier"].includes(expectedDirection))throw new TypeError("Explicit match review required");
    const body={decision,expectedDirection,reason:text(reason,3,2000)};
    if(decision==="confirmed"&&expectedDirection==="supplier"){
-    if(!["supplier","subcontractor","other_delivery","site_overhead"].includes(costCategory)||payrollOverlapReviewed!==true||duplicateExpenseReviewed!==true||(costCategory==="site_overhead"&&siteOverheadReviewed!==true))throw new TypeError("Explicit supplier checks required");
+    if(!["supplier","subcontractor","other_delivery","site_overhead","shared_overhead"].includes(costCategory)||payrollOverlapReviewed!==true||duplicateExpenseReviewed!==true||(costCategory==="site_overhead"&&siteOverheadReviewed!==true))throw new TypeError("Explicit supplier checks required");
     Object.assign(body,{costCategory,payrollOverlapReviewed:true,duplicateExpenseReviewed:true,...(costCategory==="site_overhead"?{siteOverheadReviewed:true}:{})});
+    if(costCategory==="shared_overhead"){
+     if(sharedOverheadReviewed!==true||!Array.isArray(sharedOverheadShares)||sharedOverheadShares.length<2||sharedOverheadShares.length>50)throw new TypeError("Explicit shared overhead review and site shares required");
+     Object.assign(body,{sharedOverheadReviewed:true,sharedOverheadBasis:text(sharedOverheadBasis,3,1000),sharedOverheadShares:sharedOverheadShares.map(l=>{if(!l||typeof l.amount!=="string"||! /^-?(0|[1-9]\d{0,11})\.\d{2}$/.test(l.amount))throw new TypeError("Exact signed cents required");return {siteId:id(l.siteId),amount:l.amount};})});
+    }
    }
    return request(root(tenant)+"/matches/"+id(matchId)+"/decision",{body,fresh:true,signal});
   },

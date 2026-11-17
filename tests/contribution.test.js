@@ -35,3 +35,12 @@ test("site overhead is separate from delivery contribution and requires exclusiv
  e.siteOverheadReviewed=true;const o=buildContribution(f).outputs;
  assert.deepEqual([o.deliveryCost,o.contribution,o.siteOverheadCost,o.includedOperatingResult,o.marginPercent,o.completeness],["80.00","40.01","8.01","32.00",null,"incomplete"]);
 });
+
+test("shared overhead only deducts selected site's exact share; source mismatch blocks",()=>{
+ const a="11111111-1111-4111-8111-111111111111",b="22222222-2222-4222-8222-222222222222";
+ const f=fixture();f.reportSiteId=a;
+ f.sharedEvidence=[{invoiceLineId:"shared",anchorSiteId:a,amount:"12.01",contained:true,reviewed:true,currency:"AUD",taxBasis:"gst_exclusive",confidence:"MEDIUM",payrollOverlapReviewed:true,duplicateExpenseReviewed:true,sharedOverhead:{method:"exact-site-shares-0.1.0",sourceAmount:"12.01",basisReviewed:true,shares:[{siteId:a,amount:"7.01"},{siteId:b,amount:"5.00"}]}}];
+ const o=buildContribution(f).outputs;assert.deepEqual([o.contribution,o.sharedOverheadCost,o.includedOperatingResult,o.marginPercent],["40.01","7.01","33.00",null]);
+ f.reportSiteId=b;assert.equal(buildContribution(f).outputs.sharedOverheadCost,"5.00");
+ f.sharedEvidence[0].sharedOverhead.sourceAmount="12.00";assert.ok(buildContribution(f).error);
+});

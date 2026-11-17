@@ -440,7 +440,19 @@ paths:
                 decision: { type: string, enum: [confirmed, rejected, held] }
                 reason: { type: string, minLength: 3, maxLength: 2000 }
                 expectedDirection: { type: string, enum: [customer, supplier], description: Optional direction guard for selected match. }
-                costCategory: { type: string, enum: [supplier, subcontractor, other_delivery, site_overhead] }
+                costCategory: { type: string, enum: [supplier, subcontractor, other_delivery, site_overhead, shared_overhead] }
+                sharedOverheadReviewed: { type: boolean }
+                sharedOverheadBasis: { type: string, minLength: 3, maxLength: 1000 }
+                sharedOverheadShares:
+                  type: array
+                  minItems: 2
+                  maxItems: 50
+                  items:
+                    type: object
+                    required: [siteId, amount]
+                    properties:
+                      siteId: { type: string, format: uuid }
+                      amount: { type: string }
                 siteOverheadReviewed: { type: boolean, description: Required for site_overhead; exclusive attribution and no overlap. }
                 payrollOverlapReviewed: { type: boolean }
                 duplicateExpenseReviewed: { type: boolean }
@@ -454,7 +466,7 @@ paths:
       - $ref: '#/components/parameters/TenantId'
     post:
       summary: Create a versioned contract/site/period calculation run
-      description: Version 0.4.0 captures confirmed customer invoices, approved site payroll, reviewed supplier delivery expenses, wholly attributable site overhead and observed coverage in one service-period snapshot. Single-contract businesses only; exact AUD decimal strings, partial contribution and included-cost ratio only. Definitive margin suppressed. No client-supplied totals.
+      description: Version 0.5.0 adds approved shared overhead shares to the prior calculation, and captures confirmed customer invoices, approved site payroll, reviewed supplier delivery expenses, wholly attributable site overhead and observed coverage in one service-period snapshot. Single-contract businesses only; exact AUD decimal strings, partial contribution and included-cost ratio only. Definitive margin suppressed. No client-supplied totals.
       responses:
         "201": { description: Calculation run created }
         "422": { description: Insufficient or unreconciled source evidence }
