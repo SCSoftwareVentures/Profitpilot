@@ -4,14 +4,14 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import {randomUUID,createHash} from "node:crypto";
-import {withTenant,health} from "./db.js";
+import {withTenant,health,listAuthSessions,revokeAuthSession} from "./db.js";
 import {authRequired,requirePermission,requireStepUp} from "./auth.js";
 import {parseCsv,validateInvoiceRows,isIsoDate} from "../src/engine.js";
 
 const app=express();
 app.disable("x-powered-by");
 app.use(helmet());
-app.use(cors({origin:(process.env.CORS_ORIGIN||"").split(",").map(x=>x.trim()).filter(Boolean),credentials:false,methods:["GET","POST"]}));
+app.use(cors({origin:(process.env.CORS_ORIGIN||"").split(",").map(x=>x.trim()).filter(Boolean),credentials:false,methods:["GET","POST","DELETE"]}));
 app.use(express.json({limit:"100kb"}));
 app.use(rateLimit({windowMs:60_000,limit:100,standardHeaders:true,legacyHeaders:false}));
 app.get("/health",async(req,res)=>{try{await health();res.json({status:"ok",database:"connected"});}catch{res.status(503).json({status:"unavailable"});}});
@@ -28,6 +28,17 @@ async function membership(req,res,next){
  }catch(e){next(e);}
 }
 app.get("/v1/me",async(req,res)=>{res.json({subject:req.identity.subject,email:req.identity.email,membershipsEndpoint:"Membership discovery is not exposed until a separately reviewed security-definer function is installed."});});
+app.get("/v1/me/sessions",async(req,res,next)=>{try{
+ const sessions=await listAuthSessions(req.identity.subject);
+ res.json({items:sessions.map(s=>({sessionId:s.jti,issuedAt:s.issued_at,expiresAt:s.expires_at,lastSeenAt:s.last_seen_at,revokedAt:s.revoked_at}))});
+}catch(e){next(e);}});
+app.delete("/v1/me/sessions/:jti",async(req,res,next)=>{try{
+ const jti=req.params.jti;
+ if(typeof jti!=="string"||jti.length<16||jti.length>128||!/^[A-Za-z0-9._~-]+$/.test(jti))return res.status(400).json({error:"Invalid session identifier"});
+ const revoked=await revokeAuthSession(jti,req.identity.subject);
+ if(!revoked)return res.status(404).json({error:"Active session not found"});
+ res.status(200).json({sessionId:jti,revoked:true});
+}catch(e){next(e);}});
 app.get("/v1/tenants/:tenantId/contracts",membership,requirePermission("contracts.read"),async(req,res,next)=>{try{const rows=await withTenant(req.membership.tenantId,req.identity.subject,async c=>(await c.query("SELECT id,customer_name,status FROM contracts WHERE tenant_id=$1 ORDER BY customer_name",[req.membership.tenantId])).rows);res.json({items:rows});}catch(e){next(e);}});
 app.post("/v1/tenants/:tenantId/imports",membership,requirePermission("imports.create"),async(req,res,next)=>{
  try{
