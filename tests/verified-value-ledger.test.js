@@ -56,6 +56,21 @@ test("events are chronological, unique and append-only",()=>{
   assert.equal(ledger.events.length,1);
 });
 
+test("one value lineage rejects a reporting-period change",()=>{
+  const ledger=appendValueEvent(initial(),event("quote","quoted"));
+  assert.throws(()=>appendValueEvent(ledger,event("invoice","invoiced",{invoiceRef:"INV-1",periodStart:"2026-10-01",periodEnd:"2026-10-31"})),/cannot silently mix currencies, tax bases or reporting periods/);
+});
+
+test("summary groups distinct reporting bases instead of mixing totals",()=>{
+  let ledger=appendValueEvent(initial(),event("quote-nov","quoted"));
+  ledger=appendValueEvent(ledger,event("quote-dec","quoted",{valueId:"value-2",periodStart:"2026-12-01",periodEnd:"2026-12-31"}));
+  const summary=summarizeValueLedger(ledger);
+  assert.equal(summary.mixedReportingBasis,true);
+  assert.equal(summary.totalsByState,null);
+  assert.equal(summary.totalsByBasis.length,2);
+  assert.deepEqual(summary.totalsByBasis.map(x=>x.totalsByState.quoted),["100.00","100.00"]);
+});
+
 test("settlement events are not accepted by the prototype",()=>{
   assert.throws(()=>appendValueEvent(initial(),event("settled","settled")),/supported value event type/);
 });
