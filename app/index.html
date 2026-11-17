@@ -52,6 +52,14 @@ const profitLeakDemoResult=detectProfitLeaks({
 const fmt=formatDemoMoney;
 const escapeHtml=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
 const displayMargin=value=>typeof value==="string"&&/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value)?escapeHtml(value)+"%":"Unavailable";
+function renderProfitLeaks(){
+  const result=profitLeakDemoResult;
+  document.querySelector("#leakSummary").innerHTML='<div class="cardhead"><h2>'+escapeHtml(result.status.replaceAll("_"," "))+'</h2><b>'+result.candidateCount+' candidates · '+result.unknownCount+' unknown</b></div><p class="small">Formula '+escapeHtml(result.formulaVersion)+' · '+escapeHtml(result.reportingBasis.currency)+' · '+escapeHtml(result.reportingBasis.taxBasis)+' · '+escapeHtml(result.reportingBasis.periodStart)+' to '+escapeHtml(result.reportingBasis.periodEnd)+'</p>';
+  document.querySelector("#leakAlerts").innerHTML=result.alerts.map(alert=>{
+    const amount=alert.amount===null?"Unknown":fmt(alert.amount)+(alert.currency?" "+escapeHtml(alert.currency):"");
+    return '<div class="activityrow"><div><b>'+escapeHtml(alert.type.replaceAll("_"," "))+'</b><small>'+escapeHtml(alert.direction||"Evidence incomplete")+' · '+escapeHtml(amount)+'</small><small>'+escapeHtml(alert.explanation)+'</small><small>'+escapeHtml(alert.recommendedAction)+'</small><small>Evidence: '+escapeHtml(alert.evidenceRefs.join("; ")||"Not available")+'</small></div><span class="tag '+(alert.status==="candidate"?"warn":"")+'">'+escapeHtml(alert.status)+'</span></div>';
+  }).join("");
+}
 function renderPromiseLedger(){
   const records=promiseDemoRecords.map(record=>{
     const current=record.current;
@@ -79,6 +87,7 @@ function render(){
  document.querySelector("#exceptionTable").innerHTML=exceptions.length?'<table><thead><tr><th>Exception</th><th>Reference</th><th>Value</th><th>Status</th></tr></thead><tbody>'+exceptions.map(e=>'<tr><td>'+escapeHtml(e.title)+'</td><td>'+escapeHtml(e.detail)+'</td><td>'+escapeHtml(e.value)+'</td><td><span class="tag warn">'+escapeHtml(e.status)+'</span></td></tr>').join("")+'</tbody></table>':'<div class="empty">No open exceptions.</div>';
  renderReadiness();
  renderPromiseLedger();
+ renderProfitLeaks();
  document.querySelector("#reportSummary").innerHTML='<p>Revenue: <b>'+fmt(m.revenue)+'</b></p><p>Delivery costs: <b>'+fmt(m.cost)+'</b></p><p>Contribution: <b>'+fmt(m.contribution)+'</b></p><p class="small">Source completeness: unverified. This is a fictional, incomplete demonstration dataset and must not be interpreted as verified business performance.</p>';
 }
 function show(view){document.querySelectorAll(".view").forEach(x=>x.classList.toggle("hidden",x.id!==view));document.querySelectorAll("[data-view]").forEach(x=>{const active=x.dataset.view===view;x.classList.toggle("active",active);if(active)x.setAttribute("aria-current","page");else x.removeAttribute("aria-current");});}
