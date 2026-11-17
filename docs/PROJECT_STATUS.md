@@ -199,3 +199,12 @@ The product remains **NOT COMPLETE**. Payroll ingestion stays disabled; the full
 ### Latest exact-head verification
 
 GitHub Actions run **#667** passed on exact PR head `6b98299006d9aa620f494ec4fe52d095e82947c4`, including migrations through 014, reviewer decision immutability and same-transaction audit tests, PostgreSQL tenant/RLS checks, verified TLS trust/rejection and production-mode API health. The draft PR remains unmerged. Product completion and all external release approvals remain outstanding.
+
+ 
+## Latest hardening CI — 17 November 2026
+
+Draft PR #28 `hardening/financial-security-followup` targets the combined PR #27 branch. Latest verified head: `6b98299006d9aa620f494ec4fe52d095e82947c4`. CI run **#43983962328** passed both Node.js 22 and PostgreSQL 16 jobs.
+
+PostgreSQL CI applied migrations through 014 and passed the tenant/FK catalogue audit across 20 protected/root tables, restricted-role RLS, authenticated API integration, production image build, verified TLS with a trusted CA, rejection of an untrusted CA and production-mode database health. Integration tests cover database-enforced reviewer roles, signed actor binding, immutable evidence/final decisions, mandatory audit reason and same-transaction audit events. Node.js job reported 56 passed, 0 failed, 3 database-dependent skips (executed in PostgreSQL job).
+
+The complete product is still not ready for pilot or production. Payroll ingestion remains disabled; full financial acceptance, private file lifecycle, production identity/operations, independent penetration/accounting/legal review, G0–G4 customer evidence and signed G5 GO remain open. PR #28 remains draft and unmerged.
