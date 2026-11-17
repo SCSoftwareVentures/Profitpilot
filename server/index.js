@@ -5,7 +5,8 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import {randomUUID,createHash} from "node:crypto";
-import {withTenant,health,listAuthSessions,revokeAuthSession,revokeAllAuthSessions,withPrivacyStepUp,appendAudit} from "./db.js";
+import {withTenant,health,assertRuntimeDatabaseRole,listAuthSessions,revokeAuthSession,revokeAllAuthSessions,withPrivacyStepUp,appendAudit} from "./db.js";
+import {assertProductionConfig} from "./production-config.js";
 import {authRequired,requirePermission,requireStepUp} from "./auth.js";
 import {parseCsv,validateInvoiceRows,validatePayrollRows,isIsoDate} from "../src/engine.js";
 import {registerPayrollRoutes} from "./payroll.js";
@@ -19,6 +20,7 @@ import {accountRateLimit} from "./request-guard.js";
 import {createSecurityTelemetry,securityTelemetryMiddleware} from "./security-telemetry.js";
 import {registerAttachmentQuarantineRoutes} from "./attachment-quarantine.js";
 
+assertProductionConfig();
 const app=express();
 const securityTelemetry=createSecurityTelemetry();
 if(process.env.NODE_ENV!=="test")setInterval(()=>securityTelemetry.flush(),60_000).unref();
@@ -480,6 +482,7 @@ registerPayrollRoutes(app,membership);
 app.use((err,req,res,next)=>{const id=randomUUID();const status=["23505","PPR01"].includes(err.code)?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);const safeCode=typeof err.code==="string"&&/^[A-Z0-9_]{1,32}$/.test(err.code)?err.code:undefined;process.stderr.write(JSON.stringify({event:"request_error",reference:id,status,method:req.method,errorCode:safeCode,timestamp:new Date().toISOString()})+"\n");const publicErrors={400:"Invalid request",401:"Authentication required",403:"Request denied",404:"Resource not found",409:"Conflicting record; refresh and review the current state",413:"Request too large",415:"Unsupported media type",422:"Request could not be processed",429:"Too many requests"};res.status(status).json({error:publicErrors[status]||"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
 if(process.env.NODE_ENV!=="test"){
+ if(process.env.NODE_ENV==="production")await assertRuntimeDatabaseRole();
  const server=app.listen(port,()=>process.stdout.write("ProfitPilot API listening on "+port+"\n"));
  server.headersTimeout=10_000;
  server.requestTimeout=15_000;

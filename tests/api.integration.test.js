@@ -38,7 +38,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
   process.env.AUTH_JWKS_URL=`http://127.0.0.1:${jwksAddress.port}/.well-known/jwks.json`;
   if(!process.env.TENANT_CONTEXT_HMAC_SECRET)throw new Error("CI tenant context signing key is required");
   const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL});
-  const [{default:app},{pool:appPool,withTenant}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);
+  const [{default:app},{pool:appPool,withTenant,assertRuntimeDatabaseRole}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);
   const api=createServer(app);
   await new Promise(resolve=>api.listen(0,"127.0.0.1",resolve));
   const apiAddress=api.address();
@@ -78,6 +78,9 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'CI Customer B','active') ON CONFLICT(id) DO NOTHING",[contractB,tenantB,businessB]);
     await assert.rejects(()=>admin.query("INSERT INTO import_batches(id,tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by) VALUES ($1,$2,'payroll','CI permission','uploaded',$3,'cross-tenant.csv',$4)",["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",tenantA,"d".repeat(64),userC]),/foreign key constraint/i,"a user who belongs only to tenant B must not be recorded as the creator of a tenant A import");
 
+    assert.equal(await assertRuntimeDatabaseRole(),true,"actual production role gate accepts the least-privilege runtime");
+    await assert.rejects(()=>appPool.query("CREATE TEMP TABLE shadow_identity(id uuid)"),/permission denied/i);
+    await assert.rejects(()=>appPool.query("CREATE TABLE public.shadow_identity(id uuid)"),/permission denied/i);
     const healthResponse=await request("/health");
     assert.equal(healthResponse.headers.get("x-powered-by"),null,"the API must not disclose its Express framework");
     assert.ok(healthResponse.headers.get("x-content-type-options"),"Helmet security headers must be present");

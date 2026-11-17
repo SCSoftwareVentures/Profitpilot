@@ -1,5 +1,7 @@
 import pg from "pg";
 import {createHmac,randomBytes,randomUUID} from "node:crypto";
+import {validRuntimeRole} from "./production-config.js";
+import {releaseCleanConnection} from "./pool-safety.js";
 const {Pool}=pg;
 const production=process.env.NODE_ENV==="production";
 const databaseSslEnabled=process.env.DATABASE_SSL==="true";
@@ -41,7 +43,21 @@ export async function withTenant(tenantId,subject,fn,{repeatableRead=false}={}){
  }catch(error){
   try{await client.query("ROLLBACK");}catch(rollbackError){discard=rollbackError;}
   throw error;
- }finally{client.release(discard);}
+ }finally{await releaseCleanConnection(client,discard);}
+}
+export async function assertRuntimeDatabaseRole(){
+ const {rows:[role]}=await pool.query(`
+ SELECT r.rolname AS role,session_user AS "sessionRole",r.rolcanlogin AS "canLogin",
+  r.rolsuper AS superuser,r.rolbypassrls AS "bypassRls",r.rolcreaterole AS "createRole",
+  r.rolcreatedb AS "createDb",r.rolreplication AS replication,r.rolinherit AS inherit,
+  EXISTS(SELECT 1 FROM pg_auth_members m WHERE m.member=r.oid) AS "otherMembership",
+  has_database_privilege(current_user,current_database(),'CREATE') AS "databaseCreate",
+  has_database_privilege(current_user,current_database(),'TEMPORARY') AS "databaseTemp",
+  has_schema_privilege(current_user,'public','CREATE') AS "publicCreate",
+  has_schema_privilege(current_user,'private','CREATE') AS "privateCreate"
+ FROM pg_roles r WHERE r.rolname=current_user`);
+ if(!validRuntimeRole(role))throw Error("Restricted database runtime role verification failed");
+ return true;
 }
 export async function health(){const r=await pool.query("SELECT 1 AS ok");return r.rows[0].ok===1;}
 
@@ -63,7 +79,7 @@ async function verifiedSessionOperation(action,{jti,subject,issuer,issuedAt,expi
  }catch(error){
   try{await client.query("ROLLBACK");}catch(rollbackError){discard=rollbackError;}
   throw error;
- }finally{client.release(discard);}
+ }finally{await releaseCleanConnection(client,discard);}
 }
 export async function registerAndCheckAuthSession(identity){
  const result=await verifiedSessionOperation("admit",identity);

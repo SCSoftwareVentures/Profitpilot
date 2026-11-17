@@ -55,3 +55,5 @@ Migrations 039–045 add transaction-bound session operations, database permissi
 Security detection now has an allowlisted aggregate telemetry module and deterministic synthetic tests. It does not implement a live SIEM, incident delivery or account-attribution analytics; no such external service is configured.
 
 Supply-chain update: resolved dependency lock, lifecycle-script suppression, npm ci, CycloneDX SBOM generation, existing dependency audit and Docker build-context/capability controls are now implemented. Registry provenance, image digest/scanner integration and ongoing dependency operations remain unverified. Current branch must pass the updated CI checks.
+
+Runtime boundary update (migration 046): database/schema object creation and temporary tables are prohibited for the application role; production startup refuses elevated or misconfigured database connections and unsafe identity/CORS/secret configuration. Pool connections are reset or destroyed after work. Current commit-specific CI is required; new infrastructure and actual TLS provider handshake remain unverified.

@@ -102,6 +102,14 @@ test("all public tables require explicit security classification and restrictive
    assert.equal(access.allowed,false,"privacy requests must not be deleted directly by runtime");
   }
 
+  for(const privilege of ["CREATE","TEMPORARY"]){
+   const {rows:[access]}=await admin.query("SELECT has_database_privilege('profitpilot_app',current_database(),$1) AS allowed",[privilege]);
+   assert.equal(access.allowed,false,"runtime cannot create database objects: "+privilege);
+  }
+  for(const schema of ["public","private"]){
+   const {rows:[access]}=await admin.query("SELECT has_schema_privilege('profitpilot_app',$1,'CREATE') AS allowed",[schema]);
+   assert.equal(access.allowed,false,"runtime cannot shadow schema objects: "+schema);
+  }
   const {rows:[defaults]}=await admin.query([
    "SELECT count(*)::integer AS unsafe FROM pg_default_acl d",
    "JOIN pg_namespace ns ON ns.oid=d.defaclnamespace",
