@@ -160,7 +160,18 @@ The first repository implementation slice is the **Job Readiness Engine**:
 - Template identity/version and a completeness-only percentage are returned.
 - Synthetic dashboard demonstration exposes no override or approval action.
 
-This is an initial deterministic engine and synthetic UI demonstration, not a persisted job workflow, production authorisation system, safety assessment, compliance certification or customer-validated feature. The remaining five differentiators are not represented as implemented merely because they are specified below.
+This is an initial deterministic engine and synthetic UI demonstration, not a persisted job workflow, production authorisation system, safety assessment, compliance certification or customer-validated feature.
+
+The **Promise Ledger** now also has an initial in-memory domain state machine and synthetic dashboard demonstration:
+- Customer promises and internal tasks are distinct record types.
+- Proposed, communicated, accepted, changed, fulfilled, missed, disputed and cancelled lifecycle states are explicit.
+- Communication records a sent-message reference only; receipt and acceptance are not inferred.
+- Customer acceptance requires a customer-contact actor type and acknowledgement evidence reference.
+- Changes append version snapshots and require re-communication/re-acceptance.
+- Fulfilment requires evidence; missed status cannot be recorded before the due timestamp.
+- Disputes/cancellations require reasons; terminal states cannot be rewritten.
+
+The Promise Ledger is not yet persisted, searchable, connected to authenticated customer identities, or integrated with notification channels. Evidence references and actor types are recorded assertions, not independent verification. The remaining four differentiators are not represented as implemented merely because they are specified below.
 
 ## 4. Shared platform foundations
 
