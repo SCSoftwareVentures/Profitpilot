@@ -56,33 +56,9 @@ BEGIN
  PERFORM private.lock_privacy_retention_subject(p_tenant,actor);
  IF EXISTS(SELECT 1 FROM private.source_ingestion_restrictions r WHERE r.tenant_id=p_tenant AND r.user_id=actor AND r.released_at IS NULL)
  THEN RAISE EXCEPTION 'Source ingestion is restricted' USING ERRCODE='PPR01'; END IF;
- IF mode_value='csv' AND ((data->>'checksum') IS DISTINCT FROM item.file_sha256 OR (item.file_name !~* '\.csv)
- THEN RETURN jsonb_build_object('status',422,'error','CSV checksum or registered filename is invalid'); END IF;
- IF mode_value='json' AND data->>'checksum' IS NOT NULL THEN RAISE EXCEPTION 'JSON submission cannot certify source bytes' USING ERRCODE='22023'; END IF;
- n:=jsonb_array_length(rows_data);
- IF n NOT BETWEEN 1 AND 200 OR EXISTS(SELECT 1 FROM jsonb_array_elements(rows_data) r(value) WHERE NOT private.valid_source_payload(item.source_type,r.value))
- THEN RETURN jsonb_build_object('status',422,'error','Source rows contain unsupported fields or excessive data'); END IF;
- SELECT count(*)::integer,jsonb_agg(r.payload ORDER BY r.row_number) INTO prior_count,prior_rows FROM public.raw_import_rows r WHERE r.tenant_id=p_tenant AND r.batch_id=p_batch;
- IF prior_count>0 THEN
-  IF prior_rows IS DISTINCT FROM rows_data OR mode_value='csv' THEN RETURN jsonb_build_object('status',409,'error','Source batch already staged'); END IF;
-  RETURN jsonb_build_object('status',201,'inserted',0,'received',n,'duplicates',n);
- END IF;
- INSERT INTO public.raw_import_rows(tenant_id,batch_id,row_number,payload)
- SELECT p_tenant,p_batch,r.ord::integer,r.value FROM jsonb_array_elements(rows_data) WITH ORDINALITY r(value,ord);
- UPDATE public.import_batches SET status='review' WHERE tenant_id=p_tenant AND id=p_batch;
- IF mode_value='csv' THEN
-  INSERT INTO public.audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata)
-  VALUES(p_tenant,actor,'import_csv_staged','import_batch',p_batch,'CSV bytes matched declared source checksum',
-  jsonb_build_object('sha256',item.file_sha256,'rowCount',n,'rawFilePersisted',false));
- END IF;
- RETURN jsonb_build_object('status',201,'inserted',n,'received',n,'duplicates',0);
-END
-$fn$;
-ALTER FUNCTION private.stage_verified_source_rows(uuid,uuid,text,bigint,text) OWNER TO profitpilot_context_owner;
-REVOKE ALL ON FUNCTION private.stage_verified_source_rows(uuid,uuid,text,bigint,text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION private.stage_verified_source_rows(uuid,uuid,text,bigint,text) TO profitpilot_app;
-COMMIT;
- OR length(item.file_name)>254 OR position('/' in item.file_name)>0 OR position(chr(92) in item.file_name)>0 OR item.file_name ~ '[[:cntrl:]]'))
+ IF mode_value='csv' AND ((data->>'checksum') IS DISTINCT FROM item.file_sha256
+ OR lower(right(item.file_name,4))<>'.csv' OR length(item.file_name) NOT BETWEEN 5 AND 254
+ OR position('/' in item.file_name)>0 OR position(chr(92) in item.file_name)>0 OR item.file_name ~ '[[:cntrl:]]')
  THEN RETURN jsonb_build_object('status',422,'error','CSV checksum or registered filename is invalid'); END IF;
  IF mode_value='json' AND data->>'checksum' IS NOT NULL THEN RAISE EXCEPTION 'JSON submission cannot certify source bytes' USING ERRCODE='22023'; END IF;
  n:=jsonb_array_length(rows_data);
