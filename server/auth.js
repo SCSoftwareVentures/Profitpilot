@@ -49,7 +49,7 @@ export function authRequired(){
   }
   const token=req.headers.authorization?.match(/^Bearer\\s+([^\\s]+)$/i)?.[1];
   if(!token)return res.status(401).json({error:"Authentication required"});
-  if(token.length>16384)return res.status(401).json({error:"Invalid access token"});
+  if(token.length>8192)return res.status(401).json({error:"Invalid access token"});
   try{
    const {payload}=await jwtVerify(token,remoteKeys(c.url),{
     issuer:c.issuer,
