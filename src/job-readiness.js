@@ -25,6 +25,7 @@ export const COMMERCIAL_CLEANING_READINESS_TEMPLATE=Object.freeze({
 function validateTemplate(template){
   if(!template||typeof template!=="object"||typeof template.id!=="string"||!template.id.trim()||typeof template.version!=="string"||!template.version.trim()||!Array.isArray(template.requirements)||template.requirements.length===0)
     throw new TypeError("A versioned readiness template with requirements is required");
+  if(!template.requirements.some(requirement=>requirement&&requirement.required===true))throw new TypeError("At least one required readiness check is required");
   const seen=new Set();
   for(const requirement of template.requirements){
     if(!requirement||typeof requirement.id!=="string"||!/^[a-z][a-z0-9_]{0,63}$/.test(requirement.id)||seen.has(requirement.id)||typeof requirement.label!=="string"||!requirement.label.trim()||!VALUE_TYPES.has(requirement.valueType)||typeof requirement.required!=="boolean"||typeof requirement.evidenceRequired!=="boolean"||typeof requirement.allowNotApplicable!=="boolean")
@@ -54,8 +55,9 @@ export function evaluateJobReadiness(template,proposal){
   const requirements=template.requirements;
   const checkResults=requirements.map(requirement=>{
     const input=supplied[requirement.id]&&typeof supplied[requirement.id]==="object"&&!Array.isArray(supplied[requirement.id])?supplied[requirement.id]:{};
-    let status=CHECK_STATUSES.has(input.status)?input.status:"missing";
-    let issue=null;
+    const hasStatus=Object.prototype.hasOwnProperty.call(input,"status")&&input.status!==undefined;
+    let status=hasStatus?(CHECK_STATUSES.has(input.status)?input.status:"unverified"):"missing";
+    let issue=hasStatus&&!CHECK_STATUSES.has(input.status)?"status_invalid":null;
     const reason=typeof input.reason==="string"?input.reason.trim():"";
     const evidenceRef=typeof input.evidenceRef==="string"?input.evidenceRef.trim():"";
     if(status==="not_applicable"){
@@ -64,8 +66,8 @@ export function evaluateJobReadiness(template,proposal){
     }else if(status==="satisfied"){
       if(!validValue(requirement.valueType,input.value)){status="unverified";issue="value_invalid";}
       else if(requirement.evidenceRequired&&!evidenceRef){status="unverified";issue="evidence_reference_required";}
-    }else if(!CHECK_STATUSES.has(input.status)){
-      status="unverified";issue="status_invalid";
+    }else if(status==="conflicting"&&!reason){
+      issue="conflict_reason_required";
     }
     const blocking=requirement.required&&!["satisfied","not_applicable"].includes(status);
     return {id:requirement.id,label:requirement.label,required:requirement.required,status,blocking,evidenceRef:evidenceRef||null,reason:reason||null,issue};
