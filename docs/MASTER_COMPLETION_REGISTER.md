@@ -7,25 +7,30 @@
 
 ## 1. Executive status
 
-**Overall status: NOT COMPLETE — pre-build validation and technical integration remain open.**
+**Overall status: NOT COMPLETE — active hardening and product implementation continue; production, customer validation and acquisition readiness remain unproven.**
 
-ProfitPilot currently consists of a product-validation specification, a partial API/database implementation scaffold, static UI concepts, security-hardening work on a draft branch, and a substantial product/financial/security design pack on another draft branch. It is not a complete customer-facing application, a deployed service, a verified accounting system or a commercially validated business.
+The repository now contains a combined integration candidate (PR #27) and a separate hardening follow-up (PR #28). PR #28 is the active draft branch based on PR #27. PR #25 and PR #26 are historical source/review branches. No PR has been merged and no production service is deployed.
 
-The correct completion measure is evidence, not the volume of documentation or commits.
+ProfitPilot is not yet a complete customer-facing application, a verified accounting system, a production-ready SaaS business or a commercially validated asset. The browser dashboard remains a synthetic local demonstration and does not call the API. Payroll ingestion remains deliberately disabled.
 
-### Verified repository position
+### Current branch and evidence position
 
-| Item | Exact position | Interpretation |
+| Item | Current position | Interpretation |
 |---|---|---|
-| Common base | main commit 55d1403c0dc34ac26a9bdb58107662754f34a8e3 | Both active PRs originate from this base |
-| PR #25 | security/exhaustive-hardening; head 17178768002b978d6f5bd76f0192b2bbff7a4355; open, draft, unmerged | Application, database, CI and security hardening changes for review |
-| PR #25 CI | Run #310; Node.js 22 and PostgreSQL migration/RLS jobs passed | Configured automated checks passed on PR #25's exact head |
-| PR #26 | product/six-differentiators-blueprint; last fully CI-verified content head 559c7476d13e42ec9d9190409b8e3b091407a1bb; later changes limited to README/status documentation; open, draft, unmerged | Documentation-only product, validation, financial and governance design |
-| PR #26 CI | Run #347; Node.js 22 and PostgreSQL migration/RLS jobs passed | Configured checks passed on PR #26's exact head and its own base |
-| Branch relationship | PR #25 and PR #26 are sibling branches, not a combined candidate | PR #26's CI does not exercise PR #25's changes |
-| Production | No production deployment or configured customer environment established | No customer data or production use authorised |
+| PR #25 | Historical security source branch | Its changes were integrated into PR #27; do not treat its older standalone CI as current combined evidence |
+| PR #26 | Historical product blueprint source branch | Its documentation was integrated into PR #27 |
+| PR #27 | Combined integration candidate | Draft/unmerged integration base for current hardening |
+| PR #28 | `hardening/financial-security-followup`, based on PR #27 | Active hardening review; draft and unmerged |
+| Latest previously verified PR #28 head | `08f071be14eb01cac12c1f7de2595e75365367a8`, CI run #43985247441 / run #710 | Node.js 22 and PostgreSQL 16 jobs passed; later dashboard/aggregation changes require their own exact-head CI |
+| Production | No production deployment or configured customer environment established | No customer data, pilot or payment activity authorised |
 
-A passing CI run is limited to the tests and environment actually exercised. It is not a penetration test, finance/accounting sign-off, privacy approval, customer validation, or combined-branch integration test.
+### Acquisition objective
+
+The owner wishes to preserve the option to sell or license ProfitPilot and has identified AUD 30,000–50,000 as a desired sale outcome. This is an aspiration only, not an appraisal, market-supported valuation or buyer commitment.
+
+The acquisition-readiness workstream is defined in [ACQUISITION_READINESS_PLAN.md](ACQUISITION_READINESS_PLAN.md). Its priorities are product completeness, financial acceptance, independent assurance, IP ownership and licence diligence, reproducible engineering handover and credible customer evidence.
+
+The correct completion measure is evidence, not the volume of documentation or commits. Automated CI is limited to the exact commit and tests actually executed; it is not independent assurance, finance/tax approval, legal/privacy clearance, customer validation or commercial proof.
 
 ## 2. What is complete within the current preparation scope
 
