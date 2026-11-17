@@ -23,10 +23,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, reviewed immutable revision
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4, reviewed immutable revision
         with:
           node-version: 22
 
@@ -67,7 +69,9 @@ jobs:
           --health-retries 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4, reviewed immutable revision
+        with:
+          persist-credentials: false
 
       - name: Generate ephemeral tenant context signing key
         run: |
@@ -235,3 +239,79 @@ jobs:
           done
           echo 'Container did not report a connected database after 60 seconds' >&2
           exit 1
+
+  security-static:
+    name: Static application and secret security gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout for full-history secret audit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check repository history for credentials (fully redacted)
+        env:
+          GOTOOLCHAIN: auto
+          GOSUMDB: sum.golang.org
+        run: |
+          export GOBIN="$RUNNER_TEMP/security-tools"
+          go install github.com/zricethezav/gitleaks/v8@v8.30.0
+          "$GOBIN/gitleaks" git --redact=100 --no-banner --exit-code=1 --log-opts="--all" .
+          "$GOBIN/gitleaks" dir --redact=100 --no-banner --exit-code=1 .
+      - name: Initialise pinned CodeQL analysis
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066
+        with:
+          languages: javascript-typescript
+          build-mode: none
+          config: |
+            queries:
+              - uses: security-extended
+            paths:
+              - server
+              - src
+              - app
+              - scripts
+            paths-ignore:
+              - '**/*.test.js'
+      - name: Analyse application source without publishing raw SARIF
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066
+        with:
+          upload: never
+          upload-database: false
+          output: ${{ runner.temp }}/profitpilot-codeql
+      - name: Enforce static security severity gate
+        run: node scripts/check-security-sarif.js "$RUNNER_TEMP/profitpilot-codeql"
+
+  security-container:
+    name: Production image vulnerability gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Build exact hardened runtime image
+        run: docker build --pull --build-arg PROFITPILOT_BUILD_REVISION="$GITHUB_SHA" -t profitpilot-security:ci .
+      - name: Scan OS and runtime dependencies with pinned Trivy
+        uses: aquasecurity/trivy-action@38b337fff0a2f984d5be173c99e3f633438167ec
+        with:
+          version: v0.76.2
+          image-ref: profitpilot-security:ci
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: 'false'
+          exit-code: '1'
+          format: json
+          output: ${{ runner.temp }}/profitpilot-trivy.json
+          hide-progress: 'true'
+          cache: 'false'
+      - name: Summarise scan without credentials or file contents
+        if: always()
+        run: |
+          node --input-type=module -e 'import fs from "node:fs";const p=process.env.RUNNER_TEMP+"/profitpilot-trivy.json";if(!fs.existsSync(p))throw Error("Image scan evidence unavailable");const x=JSON.parse(fs.readFileSync(p));if(!Array.isArray(x.Results)||!x.Results.length)throw Error("Empty image scan evidence");const findings=x.Results.flatMap(r=>r.Vulnerabilities||[]).filter(v=>["HIGH","CRITICAL"].includes(v.Severity));console.log(JSON.stringify({targets:x.Results.length,blocking:findings.map(v=>({id:v.VulnerabilityID,package:v.PkgName,installed:v.InstalledVersion,fixed:v.FixedVersion,severity:v.Severity}))}));if(findings.length)process.exitCode=1;'
