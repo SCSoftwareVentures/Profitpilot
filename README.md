@@ -104,3 +104,16 @@ Owner instruction dated 17 November 2026 authorises continued repository-level e
 
 No merge, deployment, live customer-data intake or payment activity is authorised by the documents.
  
+
+## Six differentiator implementation foundations
+
+The owner has authorised staged implementation of the six approved differentiators in synthetic/test environments. Initial domain foundations and demonstration panels now exist:
+
+- [Job Readiness Engine](src/job-readiness.js) — versioned evidence checklist; missing/conflicting/unverified states block readiness; human decision remains mandatory.
+- [Promise Ledger](src/promise-ledger.js) — append-only-style event model with communication/acceptance states, source references and chronology checks.
+- [Profit Leak Radar](src/profit-leak-radar.js) — evidence-gated exception candidates; monetary exposure is withheld when source coverage or reporting dimensions are incomplete.
+- [Verified Value Ledger](src/verified-value-ledger.js) — separates quoted, contracted, delivered, accepted, invoiced, credited, refunded and settled amounts without silent netting.
+- [SwitchProof Migration](src/switchproof-migration.js) — pre-migration source profiling, duplicate detection, explicit mappings and control-total reconciliation; no automatic migration.
+- [Field Knowledge Memory](src/field-knowledge-memory.js) — tenant/scope/owner/visibility metadata with review/expiry states and access-policy primitives.
+
+These are initial domain foundations and synthetic demo workflows, not complete production features. Each has a dedicated test file. Database persistence, authenticated server-side enforcement, full workflows, operational controls and independent review remain outstanding. See the [six differentiators blueprint](docs/SIX_DIFFERENTIATORS_PRODUCT_BLUEPRINT.md).
