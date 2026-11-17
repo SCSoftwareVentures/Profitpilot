@@ -236,3 +236,10 @@ The dashboard includes a synthetic lifecycle table. This is not independent veri
 A pre-migration profiler is provided in `src/switchproof-migration.js` with synthetic tests in `tests/switchproof-migration.test.js`. It requires a source manifest, permission reference, checksum, expected row count, explicit mapping version, source-key mapping, required-field mappings, currency/tax basis/period and source control total. It detects duplicate source keys, missing required values, malformed amounts/dates, currency mismatches, row-count differences and control-total mismatches. The output contains exception codes and row numbers, not raw source row content.
 
 A passing profile means only that the supplied synthetic/in-memory rows reconcile to the supplied metadata and declared mappings. It does not independently verify the checksum or permission, copy data, approve mappings or perform a migration. Durable quarantine, private storage, malware scanning, reversible transformation, target reconciliation and human migration approval remain outstanding.
+
+
+## Implementation record — Field Knowledge Memory foundation
+
+A permission-scoped in-memory domain model is provided in `src/field-knowledge-memory.js`, with tests in `tests/field-knowledge-memory.test.js`. Entries require tenant, scope, owner, source, visibility, confidence, content, review date and expiry date. Customer-visible entries require an explicit customer scope; restricted entries are owner/admin-only; all access is tenant-bound. Review-due and expired states are explicit. Caller-supplied confidence is labelled as not independently verified.
+
+The synthetic dashboard shows current, review-due and restricted sample entries. These are domain primitives, not production access controls. Database persistence, authenticated server-side authorisation, retention/deletion enforcement, consent, search, conflict resolution, audit history and mobile editing workflows remain outstanding.
