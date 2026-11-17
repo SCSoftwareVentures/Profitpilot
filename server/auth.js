@@ -111,7 +111,7 @@ export function requirePermission(permission){
 export function requireStepUp(){
  return (req,res,next)=>{
   const requiredAcr=process.env.AUTH_STEP_UP_ACR;
-  const maxAge=Number(process.env.AUTH_STEP_UP_MAX_AGE_SECONDS||300);
+  const maxAge=Number(process.env.AUTH_STEP_UP_MAX_AGE_SECONDS??300);
   const authTime=req.identity?.authTime;
   const now=Math.floor(Date.now()/1000);
   const fresh=Number.isInteger(authTime)&&authTime<=now+5&&now-authTime<=maxAge;
