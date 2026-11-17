@@ -47,3 +47,10 @@ test("unparseable or non-string control totals never pass reconciliation",()=>{
     assert.equal(result.sourceControlTotal,null);
   }
 });
+
+test("source rows outside the declared period and missing mapping versions are blocked",()=>{
+  const outside=profileMigration({manifest,mappings,requiredTargets:["sourceId","amount","date","currency"],rows:[{...rows[0],service_date:"2026-12-01"},rows[1]]});
+  assert.equal(outside.status,"blocked");
+  assert.ok(outside.exceptions.some(x=>x.code==="date_outside_manifest_period"));
+  assert.throws(()=>profileMigration({manifest:{...manifest,mappingVersion:""},mappings,requiredTargets:["sourceId","amount","date","currency"],rows}),/Source manifest/);
+});
