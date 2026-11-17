@@ -51,8 +51,11 @@ BEGIN
  IF EXISTS(SELECT 1 FROM private.quarantined_files WHERE tenant_id=p_tenant AND batch_id=p_batch) THEN
   RAISE EXCEPTION 'Quarantine file already exists' USING ERRCODE='23505';
  END IF;
- SELECT count(*) INTO n FROM private.quarantined_files WHERE tenant_id=p_tenant;
+ SELECT count(*) INTO n FROM private.quarantined_files WHERE tenant_id=p_tenant AND ciphertext IS NOT NULL;
  IF n>=100 THEN RAISE EXCEPTION 'Tenant quarantine capacity reached' USING ERRCODE='54000'; END IF;
+ -- Preserve disposed markers without letting expired bytes permanently exhaust the live quota.
+ SELECT count(*) INTO n FROM private.quarantined_files WHERE tenant_id=p_tenant;
+ IF n>=10000 THEN RAISE EXCEPTION 'Tenant quarantine history capacity reached' USING ERRCODE='54000'; END IF;
  INSERT INTO private.quarantined_files(tenant_id,batch_id,file_sha256,byte_count,key_id,nonce,auth_tag,ciphertext,uploaded_by)
  VALUES(p_tenant,p_batch,p_sha,octet_length(p_cipher),p_key,p_nonce,p_tag,p_cipher,actor)
  RETURNING created_at INTO stored_at;
