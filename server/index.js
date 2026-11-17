@@ -8,6 +8,7 @@ import {sharedLimiter,startRateLimitRetention} from "./shared-rate-limit.js";
 import {randomUUID,createHash} from "node:crypto";
 import {withTenant,health,checkIdentitySession} from "./db.js";
 import {validateProductionSecrets} from "./production-config.js";
+import {proxyTrust,corsOrigins,createBoundedServer} from "./network-boundary.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
 import {quarantineConfig,sealQuarantine,MAX_QUARANTINE_BYTES} from "./quarantine.js";
@@ -16,20 +17,21 @@ import {parseCsv,validateInvoiceRows,isIsoDate,money} from "../src/engine.js";
 
 const app=express();
 app.disable("x-powered-by");
+app.set("trust proxy",proxyTrust());
 const securityMonitor=createSecurityMonitor();
 app.use(securityMonitor.middleware);
 // Set privacy headers even for rejected or throttled requests.
 app.use("/v1",(req,res,next)=>{res.set("Cache-Control","no-store");res.set("Pragma","no-cache");next();});
 app.use(helmet());
-app.use(cors({origin:(process.env.CORS_ORIGIN||"").split(",").map(x=>x.trim()).filter(Boolean),credentials:false,methods:["GET","POST"]}));
+app.use(cors({origin:corsOrigins(),credentials:false,methods:["GET","POST"]}));
 app.use(process.env.NODE_ENV==="production"?sharedLimiter({windowMs:60_000,limit:100,scope:"global"}):rateLimit({windowMs:60_000,limit:100,standardHeaders:true,legacyHeaders:false}));
-app.use(express.json({limit:"100kb"}));
 // Production shares write counters across replicas; development uses local counters.
 const mutationLimiter=process.env.NODE_ENV==="production"?sharedLimiter({windowMs:60_000,limit:60,scope:"write"}):rateLimit({windowMs:60_000,limit:60,standardHeaders:true,legacyHeaders:false,message:{error:"Too many write requests; retry later"}});
 app.use("/v1/tenants/:tenantId",(req,res,next)=>req.method==="POST"?mutationLimiter(req,res,next):next());
 app.get("/health",async(req,res)=>{try{await health();res.json({status:"ok",database:"connected"});}catch{res.status(503).json({status:"unavailable"});}});
 app.use("/v1",authRequired());
 app.use("/v1",sessionRequired(checkIdentitySession));
+app.use("/v1",express.json({limit:"100kb",inflate:false}));
 const requestTenant=(req,tenantId,fn)=>withTenant(tenantId,req.identity.subject,fn,req.identity);
 
 async function membership(req,res,next){
@@ -225,5 +227,5 @@ app.post("/v1/tenants/:tenantId/calculations/:runId/export",membership,requireRo
 app.use((err,req,res,next)=>{const id=randomUUID();const status=err.code==="23505"?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
 if(process.env.NODE_ENV==="production"){startRateLimitRetention();securityMonitor.start();}
-if(process.env.NODE_ENV!=="test")app.listen(port,()=>process.stdout.write("ProfitPilot API listening on "+port+"\n"));
+if(process.env.NODE_ENV!=="test")createBoundedServer(app).listen(port,()=>process.stdout.write("ProfitPilot API listening on "+port+"\n"));
 export default app;
