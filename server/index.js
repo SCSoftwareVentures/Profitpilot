@@ -110,14 +110,14 @@ app.post("/v1/tenants/:tenantId/privacy/requests",membership,requirePermission("
 }catch(e){next(e);}});
 app.get("/v1/tenants/:tenantId/privacy/requests",membership,requirePermission("privacy.requests.read"),async(req,res,next)=>{try{
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const rows=await client.query("SELECT id,request_type,status,details,created_at,updated_at,resolved_at,resolution_summary,legal_hold_reason,account_confirmed_at FROM privacy_requests WHERE tenant_id=$1 AND subject_user_id=$2 ORDER BY created_at DESC LIMIT 100",[req.membership.tenantId,req.membership.userId]);
+  const rows=await client.query("SELECT id,request_type,status,details,created_at,updated_at,resolved_at,resolution_summary,legal_hold_reason,account_confirmed_at,details_redacted_at FROM privacy_requests WHERE tenant_id=$1 AND subject_user_id=$2 ORDER BY created_at DESC LIMIT 100",[req.membership.tenantId,req.membership.userId]);
   return {items:rows.rows};
  });
  res.json(result);
 }catch(e){next(e);}});
 app.get("/v1/tenants/:tenantId/privacy/requests/manage",membership,requirePermission("privacy.requests.manage"),async(req,res,next)=>{try{
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const rows=await client.query("SELECT id,subject_user_id,submitted_by,request_type,status,details,assigned_to,created_at,updated_at,resolved_at,resolution_summary,legal_hold_reason,account_confirmed_at FROM privacy_requests WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 200",[req.membership.tenantId]);
+  const rows=await client.query("SELECT id,subject_user_id,submitted_by,request_type,status,details,assigned_to,created_at,updated_at,resolved_at,resolution_summary,legal_hold_reason,account_confirmed_at,details_redacted_at FROM privacy_requests WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 200",[req.membership.tenantId]);
   return {items:rows.rows};
  });
  res.json(result);
@@ -171,6 +171,22 @@ app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/export",membership,r
  // No persisted file, public URL, email attachment, or server-side copy.
  res.status(200).type("application/json").send(JSON.stringify(result.item));
 }catch(e){next(e);}});
+for(const [route,permission,fn] of [
+ ["approve-redaction","privacy.requests.manage","approve_request_redaction"],
+ ["execute-redaction","privacy.requests.submit","execute_request_redaction"]
+]){
+ app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/"+route,membership,requirePermission(permission),requireStepUp(),async(req,res,next)=>{try{
+  const id=req.params.requestId,target=req.body?.targetRequestId;
+  if(!privacyRequestIdValid(id)||!privacyRequestIdValid(target))return res.status(400).json({error:"Valid request and target IDs required"});
+  const result=await withPrivacyStepUp(req.membership,req.identity,id,fn+":"+target.toLowerCase(),async(client,proof)=>{
+   // fn is from a fixed server-side allowlist, never user input.
+   const r=await client.query("SELECT private."+fn+"($1,$2,$3,$4,$5) AS result",[req.membership.tenantId,id,target,req.identity.authTime,proof]);
+   return r.rows[0].result;
+  });
+  if(result.error)return res.status(result.status).json({error:result.error});
+  res.status(result.status).json(result.item);
+ }catch(e){next(e);}});
+}
 app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/withdraw",membership,requirePermission("privacy.requests.submit"),async(req,res,next)=>{try{
  const {reason}=req.body||{};
  if(typeof reason!=="string"||reason.trim().length<3||reason.length>1000)return res.status(400).json({error:"A withdrawal reason is required"});

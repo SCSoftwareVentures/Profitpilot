@@ -307,6 +307,9 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("UPDATE private.privacy_export_approvals SET approved_at=clock_timestamp()-interval '16 minutes',expires_at=clock_timestamp()-interval '1 minute' WHERE request_id=$1",[privacyItem.id]);
     assert.equal((await request(exportBase+"/export",{subject:"ci-api-analyst",method:"POST"})).status,409,"expired approval denied");
     assert.equal((await request(exportBase+"/approve-export",{subject:"ci-api-owner",method:"POST"})).status,200,"expired grant can be replaced by independent approval");
+    await admin.query("UPDATE private.privacy_export_approvals SET scope='account-v1' WHERE request_id=$1",[privacyItem.id]);
+    assert.equal((await request(exportBase+"/export",{subject:"ci-api-analyst",method:"POST"})).status,409,"old approval cannot authorize expanded scope");
+    assert.equal((await request(exportBase+"/approve-export",{subject:"ci-api-owner",method:"POST"})).status,200,"expanded scope needs independent reapproval");
     const releases=await Promise.all([request(exportBase+"/export",{subject:"ci-api-analyst",method:"POST"}),request(exportBase+"/export",{subject:"ci-api-analyst",method:"POST"})]);
     assert.deepEqual(releases.map(x=>x.status).sort(),[200,409],"concurrent release consumes approval exactly once");
     const downloaded=releases.find(x=>x.status===200);
@@ -314,6 +317,10 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.match(downloaded.headers.get("content-disposition"),/attachment/);
     const exported=await downloaded.json();
     assert.equal(exported.completePersonalDataExport,false);
+    assert.equal(exported.scope,"account-v2");
+    assert.equal(exported.schemaVersion,2);
+    assert.equal(exported.attributedActivity.filter(x=>x.kind==="import_created").length,1,"export includes only the requester's own import attribution");
+    assert.ok(exported.attributedActivity.every(x=>Object.keys(x).sort().join(",")==="at,kind"),"no business record fields in activity projection");
     assert.deepEqual(Object.keys(exported.account).sort(),["createdAt","email","status"]);
     assert.equal(exported.account.email,"analyst@example.invalid");
     assert.equal(exported.membership.tenantId,tenantA);
@@ -343,6 +350,56 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const pendingItem=(await pending.json()).items.find(item=>item.id===privacyItem.id);
     assert.equal(pendingItem.status,"identity_verification");
     assert.equal(pendingItem.account_confirmed_at,null);
+    // Runtime role must not bypass workflow by deleting requests or changing role grants.
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-owner",c=>c.query("DELETE FROM privacy_requests WHERE id=$1",[secondPrivacyItem.id])),/permission denied/i);
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("UPDATE tenant_memberships SET role='owner' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA])),/permission denied/i);
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("INSERT INTO role_permissions(role,permission_key) VALUES('analyst','privacy.requests.manage')")),/permission denied/i);
+    const deletion=await request("/v1/tenants/"+tenantA+"/privacy/requests",{subject:"ci-api-reader",method:"POST",body:{requestType:"deletion",details:"Remove my closed request narrative"}});
+    assert.equal(deletion.status,201);
+    const deletionId=(await deletion.json()).id;
+    const deletionBase="/v1/tenants/"+tenantA+"/privacy/requests/"+deletionId;
+    const redactionBody={targetRequestId:secondPrivacyItem.id};
+    assert.equal((await request(deletionBase+"/decision",{subject:"ci-api-owner",method:"POST",body:{action:"verify_identity",reason:"Begin deletion verification"}})).status,200);
+    assert.equal((await request(deletionBase+"/confirm-account",{subject:"ci-api-reader",method:"POST"})).status,200);
+    assert.equal((await request(deletionBase+"/decision",{subject:"ci-api-owner",method:"POST",body:{action:"begin_review",reason:"Confirmed request ownership"}})).status,200);
+    // CI-only fixtures. No production policy is seeded by migrations.
+    assert.equal((await request(deletionBase+"/approve-redaction",{subject:"ci-api-owner",method:"POST",body:redactionBody})).status,409,"absent retention policy fails closed");
+    const policyId="dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    await admin.query("INSERT INTO private.privacy_retention_policies(tenant_id,revision,enabled,minimum_closed_age_days,authority_reference) VALUES($1,$2,true,30,'CI synthetic policy only')",[tenantA,policyId]);
+    assert.equal((await request(deletionBase+"/approve-redaction",{subject:"ci-api-owner",method:"POST",body:redactionBody})).status,409,"minimum age protects recent records");
+    await admin.query("UPDATE privacy_requests SET updated_at=clock_timestamp()-interval '31 days' WHERE id=$1",[secondPrivacyItem.id]);
+    assert.equal((await request(deletionBase+"/approve-redaction",{subject:"ci-api-owner",method:"POST",body:{targetRequestId:privacyItem.id}})).status,404,"cannot approve deletion of another member's request");
+    assert.equal((await request(deletionBase+"/approve-redaction",{subject:"ci-api-owner",method:"POST",body:redactionBody})).status,200);
+    const {withPrivacyStepUp}=await import("../server/db.js");
+    const readerMembership={tenantId:tenantA,userId:userB};
+    async function directRedaction(action,member=readerMembership,subject="ci-api-reader",authTime=Math.floor(Date.now()/1000)){
+     return withPrivacyStepUp(member,{subject,authTime},deletionId,action+":"+secondPrivacyItem.id,async(c,proof)=>{
+      const r=await c.query("SELECT private."+action+"($1,$2,$3,$4,$5) AS result",[tenantA,deletionId,secondPrivacyItem.id,authTime,proof]);
+      return r.rows[0].result;
+     });
+    }
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-reader",c=>c.query("SELECT * FROM private.privacy_redaction_approvals")),/permission denied/i);
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-reader",c=>c.query("SELECT private.execute_request_redaction($1,$2,$3,$4,$5)",[tenantA,deletionId,secondPrivacyItem.id,Math.floor(Date.now()/1000),"0".repeat(64)])),/step-up proof/i);
+    assert.equal((await directRedaction("execute_request_redaction",{tenantId:tenantA,userId:userE},"ci-api-owner")).status,404,"manager cannot execute another person's deletion");
+    await new Promise(resolve=>setTimeout(resolve,1100));
+    await admin.query("INSERT INTO private.privacy_retention_holds(tenant_id,subject_user_id,authority_reference) VALUES($1,$2,'CI subject-wide legal hold')",[tenantA,userB]);
+    assert.equal((await directRedaction("execute_request_redaction")).status,409,"subject hold blocks even previously approved deletion");
+    await admin.query("DELETE FROM private.privacy_retention_holds WHERE tenant_id=$1 AND subject_user_id=$2",[tenantA,userB]);
+    await admin.query("UPDATE private.privacy_retention_policies SET enabled=false WHERE tenant_id=$1",[tenantA]);
+    assert.equal((await directRedaction("execute_request_redaction")).status,409,"policy disabled after approval blocks execution");
+    await admin.query("UPDATE private.privacy_retention_policies SET enabled=true WHERE tenant_id=$1",[tenantA]);
+    const before=await admin.query("SELECT details FROM privacy_requests WHERE id=$1",[secondPrivacyItem.id]);
+    assert.match(before.rows[0].details,/personal information/);
+    const redacted=await request(deletionBase+"/execute-redaction",{subject:"ci-api-reader",method:"POST",body:redactionBody});
+    assert.equal(redacted.status,200,"requester executes narrowly approved deletion after new MFA");
+    assert.equal((await redacted.json()).completePersonalDataDeletion,false);
+    assert.equal((await directRedaction("execute_request_redaction")).status,409,"redaction approval is single-use");
+    const after=await admin.query("SELECT details,details_redacted_at,status FROM privacy_requests WHERE id=$1",[secondPrivacyItem.id]);
+    assert.equal(after.rows[0].details,"[Removed under approved retention policy]");
+    assert.ok(after.rows[0].details_redacted_at);
+    assert.equal(after.rows[0].status,"withdrawn","retain legal record");
+    assert.equal((await admin.query("SELECT status FROM privacy_requests WHERE id=$1",[deletionId])).rows[0].status,"under_review","partial deletion is not full fulfilment");
+    assert.equal((await admin.query("SELECT count(*)::int AS n FROM audit_events WHERE object_id=$1 AND action='privacy_redaction_executed'",[deletionId])).rows[0].n,1);
     const privacyAudit=await request(`/v1/tenants/${tenantA}/security/audit?limit=100`,{subject:"ci-api-owner"});
     assert.equal((await privacyAudit.json()).integrity.is_valid,true,"privacy request events must remain verifiable in the audit chain");
     const privacyOtherTenant=await request(`/v1/tenants/${tenantB}/privacy/requests/manage`,{subject:"ci-api-tenant-b-only"});

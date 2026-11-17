@@ -27,6 +27,8 @@ services:
       - ./database/migrations/012_privacy_subject_isolation.sql:/docker-entrypoint-initdb.d/014-privacy-isolation.sql:ro
       - ./database/migrations/013_privacy_account_confirmation.sql:/docker-entrypoint-initdb.d/015-privacy-confirmation.sql:ro
       - ./database/migrations/014_privacy_account_export.sql:/docker-entrypoint-initdb.d/016-privacy-export.sql:ro
+      - ./database/migrations/015_privacy_export_coverage.sql:/docker-entrypoint-initdb.d/017-export-coverage.sql:ro
+      - ./database/migrations/016_privacy_controlled_redaction.sql:/docker-entrypoint-initdb.d/018-controlled-redaction.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s

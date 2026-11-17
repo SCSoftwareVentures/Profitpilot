@@ -111,7 +111,7 @@ paths:
         required: true
         schema: { type: string, format: uuid }
     post:
-      summary: Download a restricted JSON account export
+      summary: Download a restricted JSON account and attributed-activity export
       description: Requester only, recent MFA and valid one-use approval required. No cache or persisted file. This partial export does not complete the privacy request.
       responses:
         "200":
@@ -122,6 +122,54 @@ paths:
         "403": { description: Permission or fresh MFA required }
         "404": { description: Request not found or not owned by caller }
         "409": { description: Approval invalid, consumed, expired, blocked by request state or export exceeds limits }
+  /tenants/{tenantId}/privacy/requests/{requestId}/approve-redaction:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Independently approve deletion of an eligible closed request narrative
+      description: Requires reviewed deletion request, manager MFA, explicitly enabled retention policy and no holds.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetRequestId]
+              properties:
+                targetRequestId: { type: string, format: uuid }
+      responses:
+        "200": { description: One-use target-specific approval for 15 minutes }
+        "403": { description: Permission or MFA required }
+        "404": { description: Request or eligible target not found }
+        "409": { description: Retention, hold, state or approval conflict }
+  /tenants/{tenantId}/privacy/requests/{requestId}/execute-redaction:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Remove approved closed-request narrative from active database
+      description: Requester only, new MFA after approval, policy and hold rechecked. Preserves records and audit chain. Does not fulfil the deletion request or erase backups.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetRequestId]
+              properties:
+                targetRequestId: { type: string, format: uuid }
+      responses:
+        "200": { description: Narrow deletion receipt, not full fulfilment }
+        "403": { description: Permission or MFA required }
+        "404": { description: Request or eligible target not found }
+        "409": { description: Retention, hold, expiry or approval conflict }
   /tenants/{tenantId}/privacy/requests/{requestId}/withdraw:
     parameters:
       - $ref: '#/components/parameters/TenantId'

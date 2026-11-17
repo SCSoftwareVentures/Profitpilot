@@ -90,6 +90,8 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/012_privacy_subject_isolation.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/013_privacy_account_confirmation.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/014_privacy_account_export.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/015_privacy_export_coverage.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/016_privacy_controlled_redaction.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:
