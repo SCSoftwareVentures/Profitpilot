@@ -70,6 +70,8 @@ BEGIN
  FOR c IN SELECT b.tenant_id,b.id AS batch_id FROM public.import_batches b
  JOIN private.quarantined_files q ON q.tenant_id=b.tenant_id AND q.batch_id=b.id
  WHERE q.created_at<=clock_timestamp()-interval '24 hours' AND q.scan_state<>'disposed'
+ AND (q.scan_state<>'scanning' OR q.lease_until<clock_timestamp())
+ AND NOT EXISTS(SELECT 1 FROM private.import_disposal_controls h WHERE h.tenant_id=b.tenant_id AND h.batch_id=b.id AND h.hold_active)
  ORDER BY q.created_at,b.id LIMIT 100 FOR UPDATE OF b SKIP LOCKED
  LOOP
   IF EXISTS(SELECT 1 FROM private.import_disposal_controls h WHERE h.tenant_id=c.tenant_id AND h.batch_id=c.batch_id AND h.hold_active) THEN CONTINUE; END IF;
