@@ -41,3 +41,9 @@ test("authenticated API responses carry explicit no-store protection",()=>{
   assert.match(source,/app\.use\("\/v1",\s*\(req,res,next\)\s*=>\s*\{res\.set\("Cache-Control","no-store"\)/);
   assert.ok(source.indexOf('res.set("Cache-Control","no-store")')<source.indexOf('app.use("/v1",authRequired())'),"cache controls must precede authentication and tenant endpoints");
 });
+
+test("tenant mutations have a separate bounded rate limiter",()=>{
+  assert.match(source,/const mutationLimiter=rateLimit\(\{windowMs:60_000,limit:20,/);
+  assert.match(source,/app\.use\("\/v1\/tenants\/:tenantId",\(req,res,next\)=>req\.method==="POST"\?mutationLimiter\(req,res,next\):next\(\)\)/);
+  assert.ok(source.indexOf('const mutationLimiter=rateLimit(')<source.indexOf('app.post("/v1/tenants/:tenantId/imports"'),"write limiter must be installed before tenant write routes");
+});
