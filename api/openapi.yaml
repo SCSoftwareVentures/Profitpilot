@@ -115,6 +115,97 @@ paths:
       responses:
         "200": { description: Calculation output }
         "404": { description: Run not found in this tenant }
+  /me/security:
+    get:
+      summary: Inspect current authentication assurance and session context
+      responses:
+        "200": { description: Current authentication configuration and session assurance metadata }
+  /me/sessions:
+    get:
+      summary: List active and recently revoked sessions for the authenticated identity
+      responses:
+        "200": { description: Session identifiers, issue/expiry/last-seen and revocation timestamps }
+  /me/sessions/{jti}:
+    parameters:
+      - name: jti
+        in: path
+        required: true
+        schema: { type: string, minLength: 16, maxLength: 128 }
+    delete:
+      summary: Revoke one session belonging to the authenticated identity
+      responses:
+        "200": { description: Session revoked }
+        "404": { description: Session not found or not owned by identity }
+  /tenants/{tenantId}/security/permissions:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      summary: Read tenant permission catalogue and member overrides
+      responses:
+        "200": { description: Permission catalogue and tenant-scoped overrides }
+        "403": { description: Security permission not granted }
+  /tenants/{tenantId}/security/permissions/overrides:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      summary: Grant or deny a non-security permission for a tenant member
+      description: Requires tenant permission and fresh step-up authentication. Every change requires a reason and is written to the append-only audit chain.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId, permissionKey, effect, reason]
+              properties:
+                userId: { type: string, format: uuid }
+                permissionKey: { type: string, maxLength: 128 }
+                effect: { type: string, enum: [grant, deny] }
+                reason: { type: string, minLength: 3, maxLength: 1000 }
+      responses:
+        "201": { description: Permission override recorded }
+        "400": { description: Invalid override }
+        "403": { description: Not authorised or step-up authentication required }
+        "404": { description: Active member not found }
+  /tenants/{tenantId}/security/permissions/overrides/{userId}/{permissionKey}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: userId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: permissionKey
+        in: path
+        required: true
+        schema: { type: string, maxLength: 128 }
+    delete:
+      summary: Remove a tenant member permission override
+      description: Requires fresh step-up authentication and a reason; security and privacy permissions cannot be overridden.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, minLength: 3, maxLength: 1000 }
+      responses:
+        "200": { description: Override removed }
+        "403": { description: Not authorised or step-up authentication required }
+        "404": { description: Override not found }
+  /tenants/{tenantId}/security/audit:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      summary: Retrieve recent tenant audit events and verify the audit hash chain
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+      responses:
+        "200": { description: Audit entries and chain-integrity verification result }
+        "403": { description: Audit read permission not granted }
 components:
   securitySchemes:
     bearerAuth:
