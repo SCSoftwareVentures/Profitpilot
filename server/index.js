@@ -87,7 +87,7 @@ app.delete("/v1/tenants/:tenantId/security/permissions/overrides/:userId/:permis
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const removed=await client.query("SELECT private.remove_member_permission_override($1,$2,$3,$4) AS removed",[req.membership.tenantId,req.membership.userId,userId,permissionKey]);
   if(!removed.rows[0].removed)return {status:404,error:"Permission override not found"};
-  await appendAudit(client,req.membership,"member_permission_override_removed","tenant_membership_permission_override",userId,reason.trim(),{permissionKey,effect});
+  await appendAudit(client,req.membership,"member_permission_override_removed","tenant_membership_permission_override",userId,reason.trim(),{permissionKey});
   return {status:200};
  });
  if(result.error)return res.status(result.status).json({error:result.error});
