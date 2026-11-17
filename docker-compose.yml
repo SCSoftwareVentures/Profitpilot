@@ -34,6 +34,7 @@ services:
       - ./database/migrations/019_calculation_export.sql:/docker-entrypoint-initdb.d/021-calculation-export.sql:ro
       - ./database/migrations/020_private_file_quarantine.sql:/docker-entrypoint-initdb.d/022-private-file-quarantine.sql:ro
       - ./database/migrations/021_quarantine_scanner_lifecycle.sql:/docker-entrypoint-initdb.d/023-quarantine-scanner-lifecycle.sql:ro
+      - ./database/migrations/022_quarantine_content_validation.sql:/docker-entrypoint-initdb.d/024-quarantine-content-validation.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
