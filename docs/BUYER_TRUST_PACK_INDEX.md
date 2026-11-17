@@ -25,8 +25,8 @@
 
 ## CI evidence
 
-- [Run #1046 — passed](https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44002838128): verifies the earlier privacy subject-isolation milestone, including migrations/RLS, authenticated API integration, Node.js checks, container build and health check.
-- The subsequent fail-closed privacy fulfilment change and buyer-pack documents require a fresh passing CI run. Check the branch's latest workflow result before treating those later changes as verified.
+- [Run #1046 — passed](https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44002838128): verifies the privacy subject-isolation milestone.
+- [Run #1058 — passed](https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44004207499): verifies the fail-closed privacy fulfilment change, its regression test, PostgreSQL migrations/RLS, authenticated API integration, Node.js checks, production API image build and container health check.
 
 ## Acquirer diligence checklist
 
