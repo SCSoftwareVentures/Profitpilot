@@ -371,3 +371,21 @@ PostgreSQL integration coverage checks direct-SQL audit creation, final-decision
 GitHub Actions run **#667** passed on exact PR head `6b98299006d9aa620f494ec4fe52d095e82947c4`. The Node.js 22 job passed (59 tests, 56 passed, 0 failed, 3 skipped; database-dependent API/TLS tests are exercised in the PostgreSQL job). PostgreSQL 16 passed migration application through 014, tenant/FK catalogue audit, restricted-role RLS, authenticated API integration including the distinct invoice-line fixture and database-enforced reviewer/audit tests, production image build, trusted-CA TLS connection, untrusted-CA rejection and production-mode API health against verified TLS. This supersedes the earlier "exact-head CI pending" note for migration 014.
 
 The PR remains draft and unmerged. This CI pass is software verification only; it does not close the independent security, financial, privacy/legal, operational, customer-validation or signed release gates.
+
+ 
+## 22. Database-enforced invoice decision integrity and exact-head CI — 17 November 2026
+
+Migration 014 closes an additional reviewer-authority/audit gap found during continued code review:
+- match decisions are bound to the signed active tenant actor and their reviewer/admin/owner role;
+- candidate evidence and identity fields cannot be altered by the runtime role;
+- only candidate/held to confirmed/rejected/held transitions are permitted;
+- finalised decisions are immutable;
+- every decision requires a bounded audit reason;
+- the database trigger inserts the audit event in the same transaction, including previous/new decision and reason;
+- the API no longer performs a separate duplicate audit insert.
+
+The integration suite verifies direct-SQL reviewer permission, analyst denial, reviewer impersonation denial, evidence rewrite denial, final-state immutability, missing-reason denial, API decision success and atomic audit-event creation. Payroll confirmation actor binding remains separately enforced by migration 013.
+
+**Latest exact-head CI:** run **#43983962328** passed on `6b98299006d9aa620f494ec4fe52d095e82947c4`. Node.js 22: 56 passed, 0 failed, 3 database-dependent tests skipped in the standalone job. PostgreSQL 16: migrations through 014, 20-table tenant/FK catalogue, restricted-role RLS, authenticated API integration, image build, trusted-CA TLS connection, untrusted-CA rejection and production-mode API health all passed.
+
+PR #28 remains draft and unmerged, based on PR #27's integration branch. The product remains NOT COMPLETE: full financial acceptance, private file lifecycle, production operations, independent assurance, customer evidence and G5 authorisation remain outstanding. No merge, deployment, real-data intake or payment activity is authorised.
