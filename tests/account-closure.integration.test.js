@@ -18,8 +18,8 @@ test("account closure, token revocation, email erasure and restore safeguards",{
  const [{default:app},{pool,withTenant}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);
  const api=createServer(app);await new Promise(r=>api.listen(0,"127.0.0.1",r));
  const base="http://127.0.0.1:"+api.address().port,root="/v1/tenants/"+tenant+"/privacy/requests";
- async function token(sub,{authTime=Math.floor(Date.now()/1000),mfa=true,tokenIssuer=issuer}={}){
-  return new SignJWT({auth_time:authTime,acr:"urn:profitpilot:step-up",amr:mfa?["pwd","mfa"]:["pwd"]})
+ async function token(sub,{authTime=Math.floor(Date.now()/1000),mfa=true,tokenIssuer=issuer,email,emailVerified=false}={}){
+  return new SignJWT({auth_time:authTime,acr:"urn:profitpilot:step-up",amr:mfa?["pwd","mfa"]:["pwd"],...(email?{email,email_verified:emailVerified}:{})})
   .setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(tokenIssuer).setAudience(audience).setSubject(sub)
   .setIssuedAt().setExpirationTime("5m").setJti(randomBytes(16).toString("hex")).sign(privateKey);
  }
@@ -53,6 +53,37 @@ test("account closure, token revocation, email erasure and restore safeguards",{
   const unbound="96969696-2222-4222-8222-222222222222";
   await admin.query("INSERT INTO users(id,auth_subject,email) VALUES($1,'unbound-ci','unbound@example.invalid')",[unbound]);
   assert.equal((await req("/v1/me","unbound-ci")).status,401,"no trust on first login");
+  // Narrow reviewed profile correction, without touching provider identity or broader data.
+  const correctionUser="97979797-1111-4111-8111-111111111111";
+  await admin.query("INSERT INTO users(id,auth_subject,email,auth_issuer) VALUES($1,'correction-ci','old@example.invalid',$2)",[correctionUser,issuer]);
+  await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role) VALUES($1,$2,'analyst')",[tenant,correctionUser]);
+  const correction=await req(root,"correction-ci",{requestType:"correction",details:"Correct my local profile email only"});
+  assert.equal(correction.status,201);
+  const correctionId=(await correction.json()).id,cp=root+"/"+correctionId,ce=cp+"/correct-local-email";
+  const claim={email:"corrected@example.invalid",emailVerified:true};
+  assert.equal((await req(ce,"correction-ci",{localProfileOnly:true},claim)).status,409);
+  assert.equal((await req(cp+"/decision","closure-owner",{action:"verify_identity",reason:"Begin correction verification"})).status,200);
+  assert.equal((await req(cp+"/confirm-account","correction-ci",{})).status,200);
+  assert.equal((await req(cp+"/decision","closure-owner",{action:"begin_review",reason:"Review local profile correction"})).status,200);
+  await new Promise(r=>setTimeout(r,1100));
+  assert.equal((await req(ce,"closure-other",{localProfileOnly:true},claim)).status,404);
+  assert.equal((await req(ce,"correction-ci",{localProfileOnly:true},{...claim,emailVerified:false})).status,403);
+  assert.equal((await req(ce,"correction-ci",{localProfileOnly:true},{...claim,mfa:false})).status,403);
+  assert.equal((await req(ce,"correction-ci",{localProfileOnly:false},claim)).status,400);
+  await admin.query("INSERT INTO private.privacy_retention_holds(tenant_id,subject_user_id,authority_reference) VALUES($1,$2,'CI correction hold')",[tenant,correctionUser]);
+  assert.equal((await req(ce,"correction-ci",{localProfileOnly:true},claim)).status,409);
+  await admin.query("DELETE FROM private.privacy_retention_holds WHERE tenant_id=$1 AND subject_user_id=$2",[tenant,correctionUser]);
+  const corrected=await req(ce,"correction-ci",{localProfileOnly:true,email:"ignored-request-body@example.invalid"},claim);
+  assert.equal(corrected.status,200,await corrected.clone().text());
+  assert.equal((await corrected.json()).completePersonalDataCorrection,false);
+  assert.equal((await admin.query("SELECT email FROM users WHERE id=$1",[correctionUser])).rows[0].email,claim.email);
+  assert.equal((await req(ce,"correction-ci",{localProfileOnly:true},claim)).status,409);
+  assert.equal((await admin.query("SELECT status FROM privacy_requests WHERE id=$1",[correctionId])).rows[0].status,"under_review");
+  await assert.rejects(()=>withTenant(tenant,"correction-ci",c=>c.query("SELECT * FROM private.local_email_corrections")),/permission denied/i);
+  const correctionState=(await admin.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;
+  assert.ok(correctionState.markers.some(m=>m.kind==="local_email_correction"&&m.id===correctionId));
+  assert.equal(JSON.stringify(correctionState).includes(claim.email),false);
+  assert.equal((await admin.query("SELECT count(*)::int AS n FROM audit_events WHERE object_id=$1 AND action='privacy_local_email_corrected' AND metadata::text NOT LIKE '%@%'",[correctionId])).rows[0].n,1);
   const multiReq=await reviewed("closure-multi");
   assert.equal((await req(multiReq.p+"/approve-closure","closure-owner",{eraseEmail:false})).status,200);
   await new Promise(r=>setTimeout(r,1100));

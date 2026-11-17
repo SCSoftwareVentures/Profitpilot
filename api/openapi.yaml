@@ -69,6 +69,29 @@ paths:
         "400": { description: Invalid ID or access purpose }
         "403": { description: Missing manager permission or fresh MFA }
         "404": { description: Request not found in tenant }
+  /tenants/{tenantId}/privacy/requests/{requestId}/correct-local-email:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Correct local profile email from a newly verified provider claim
+      description: Own independently reviewed correction request, new MFA, one membership and no hold required. No arbitrary email or provider identity change. Does not fulfil the entire correction request.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [localProfileOnly]
+              properties:
+                localProfileOnly: { type: boolean, const: true }
+      responses:
+        "200": { description: Scoped local correction receipt }
+        "403": { description: Missing verified claim or authority }
+        "409": { description: Review, hold, eligibility or replay conflict }
   /tenants/{tenantId}/privacy/requests/{requestId}/confirm-account:
     parameters:
       - $ref: '#/components/parameters/TenantId'

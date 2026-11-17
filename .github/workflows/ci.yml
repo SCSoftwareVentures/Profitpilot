@@ -110,6 +110,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/032_signed_audit_writes.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/033_csv_ingestion_audit.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/034_signing_key_lifecycle.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/035_local_profile_correction.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:

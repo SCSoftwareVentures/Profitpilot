@@ -37,3 +37,13 @@ test("operator recovery connection requires verified TLS without URL overrides",
  assert.deepEqual(restorePoolOptions("postgresql://operator:placeholder@db.example.invalid/profitpilot").ssl,{rejectUnauthorized:true});
  for(const url of ["postgres://operator@db.example.invalid/profitpilot?sslmode=disable","postgres://operator@db.example.invalid/profitpilot?sslmode=require","postgresql://operator@db.example.invalid/profitpilot?sslrootcert=anything","https://db.example.invalid/profitpilot","not-a-url"])assert.throws(()=>restorePoolOptions(url),/PostgreSQL URL/);
 });
+
+test("restore checkpoint retains correction receipts without personal email addresses",()=>{
+ const c={kind:"local_email_correction",id:uuid(5),tenantId:uuid(2),userId:uuid(6),at:"1794873600.345678"};
+ const st={markers:[...state.markers,c],violations:[]};
+ const signed=signCheckpoint(st,{key,deploymentId,now});
+ const options={...opt,expectedDigest:checkpointDigest(signed)};
+ assert.equal(verifyCheckpoint(signed,st,options).requiredMarkers,3);
+ assert.throws(()=>verifyCheckpoint(signed,state,options),/missing or has changed/);
+ assert.equal(JSON.stringify(signed).includes("@"),false);
+});

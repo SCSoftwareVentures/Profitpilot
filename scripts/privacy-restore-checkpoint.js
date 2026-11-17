@@ -14,7 +14,7 @@ function cleanState(state){
  if(!state||!Array.isArray(state.markers)||!Array.isArray(state.violations)||state.violations.length)throw Error("Privacy state missing or inconsistent");
  const seen=new Set();
  return state.markers.map(m=>{
-  if(!m||!["closure","redaction","session_cleanup","provider_erasure","import_purge"].includes(m.kind)||!uuid.test(m.id)||!uuid.test(m.tenantId)||typeof m.at!=="string"||!/^\d+(\.\d+)?$/.test(m.at))throw Error("Invalid privacy marker");
+  if(!m||!["closure","redaction","session_cleanup","provider_erasure","import_purge","local_email_correction"].includes(m.kind)||!uuid.test(m.id)||!uuid.test(m.tenantId)||typeof m.at!=="string"||!/^\d+(\.\d+)?$/.test(m.at))throw Error("Invalid privacy marker");
   const index=m.kind+":"+m.id;
   if(seen.has(index))throw Error("Duplicate privacy marker");
   seen.add(index);
@@ -26,7 +26,7 @@ function cleanState(state){
    if(!Number.isSafeInteger(m.rowCount)||m.rowCount<1)throw Error("Invalid import purge marker");
    return {kind:m.kind,id:m.id,tenantId:m.tenantId,at:m.at,rowCount:m.rowCount};
   }
-  if(m.kind==="provider_erasure"){
+  if(m.kind==="provider_erasure"||m.kind==="local_email_correction"){
    if(!uuid.test(m.userId))throw Error("Invalid provider erasure marker");
    return {kind:m.kind,id:m.id,tenantId:m.tenantId,userId:m.userId,at:m.at};
   }

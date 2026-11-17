@@ -157,6 +157,21 @@ app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/read-details",member
  if(result.error)return res.status(result.status).json({error:result.error});
  res.json(result.item);
 }catch(e){next(e);}});
+// Scope-limited account correction, never a provider credential or identity change.
+app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/correct-local-email",membership,requirePermission("privacy.requests.submit"),requireStepUp(),async(req,res,next)=>{try{
+ const id=req.params.requestId;
+ if(!privacyRequestIdValid(id)||req.body?.localProfileOnly!==true)return res.status(400).json({error:"Explicit local-profile-only correction required"});
+ const {email,emailVerified,issuer,issuedAt}=req.identity;
+ if(!emailVerified||typeof email!=="string"||email.length>254||!/^[^\s@\x00-\x1f\x7f]+@[^\s@\x00-\x1f\x7f]+\.[^\s@\x00-\x1f\x7f]+$/.test(email))return res.status(403).json({error:"Fresh provider-verified email claim required"});
+ const evidence=JSON.stringify({email,issuer,issuedAt});
+ const action="correct_local_email:"+createHash("sha256").update(evidence).digest("hex");
+ const result=await withPrivacyStepUp(req.membership,req.identity,id,action,async(client,proof)=>{
+  const r=await client.query("SELECT private.correct_local_email($1,$2,$3,$4,$5) AS result",[req.membership.tenantId,id,evidence,req.identity.authTime,proof]);
+  return r.rows[0].result;
+ });
+ if(result.error)return res.status(result.status).json({error:result.error});
+ res.status(200).json(result.item);
+}catch(e){next(e);}});
 const privacyRequestIdValid=id=>typeof id==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
 app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/confirm-account",membership,requirePermission("privacy.requests.submit"),requireStepUp(),async(req,res,next)=>{try{
  const id=req.params.requestId;
