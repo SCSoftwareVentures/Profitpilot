@@ -25,6 +25,9 @@ services:
       - ./database/migrations/010_payroll_source_row_ledger.sql:/docker-entrypoint-initdb.d/012-payroll-source-row-ledger.sql:ro
       - ./database/migrations/011_payroll_confirmation_integrity.sql:/docker-entrypoint-initdb.d/013-payroll-confirmation-integrity.sql:ro
       - ./database/migrations/012_contract_tax_basis.sql:/docker-entrypoint-initdb.d/014-contract-tax-basis.sql:ro
+      - ./database/migrations/013_actor_authorization.sql:/docker-entrypoint-initdb.d/015-actor-authorization.sql:ro
+      - ./database/migrations/014_match_decision_audit.sql:/docker-entrypoint-initdb.d/016-match-decision-audit.sql:ro
+      - ./database/migrations/015_shared_rate_limits.sql:/docker-entrypoint-initdb.d/017-shared-rate-limits.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
@@ -34,7 +37,8 @@ services:
   api:
     build: .
     environment:
-      NODE_ENV: production
+      # Local loopback development only; production requires a separate TLS-enabled deployment.
+      NODE_ENV: development
       PORT: 8080
       DATABASE_URL: postgres://profitpilot_app:${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD}@db:5432/profitpilot
       DATABASE_SSL: "false"
