@@ -75,7 +75,7 @@ test("invalid money or missing source evidence never produces a quantified alert
 });
 
 test("missing payroll and invoice row coverage are unknown, never zero",()=>{
-  const result=detectProfitLeaks({...complete,payroll:null,invoices:{...complete.invoices,rows:undefined}});
+  const result=detectProfitLeaks({...complete,payroll:null,invoices:{...complete.invoices,amount:"1100.00",rows:undefined}});
   assert.equal(result.alerts.find(x=>x.type==="payroll_allocation_variance").amount,null);
   assert.equal(result.alerts.find(x=>x.type==="invoice_row_exceptions").status,"unknown");
   assert.equal(result.status,"incomplete_evidence");
