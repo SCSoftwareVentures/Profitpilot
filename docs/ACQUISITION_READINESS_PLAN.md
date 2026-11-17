@@ -1,28 +1,29 @@
 # ProfitPilot — Acquisition Readiness Plan
 
-**Purpose:** prepare ProfitPilot as a transferable software asset for a potential outright sale, licence or strategic acquisition.
-**Owner's commercial objective:** explore a possible sale in the AUD 30,000–50,000 range. This is an aspiration, not an appraisal, market-supported valuation or buyer commitment.
-**Budget constraint:** AUD 500 maximum initial spend and AUD 100 maximum recurring monthly spend unless the owner explicitly changes those limits.
+**Purpose:** prepare ProfitPilot for an outright sale or strategic acquisition as a complete, demonstrable, technically coherent and transferable software asset. The owner does not intend to launch or operate the product as a standalone business.
+**Commercial objective:** maximise evidence-backed strategic value. AUD 30,000–50,000 was an initial reference target, not a ceiling, minimum, appraisal, market-supported valuation or buyer commitment. No predetermined upper valuation limit is set.
+**Budget direction:** the owner has removed the previous AUD 500 initial / AUD 100 monthly project budget caps. Product scope and engineering priorities must not be constrained by those former caps. This does not authorise purchases, paid subscriptions, contractor engagements, external services or other financial commitments; obtain the owner's explicit approval before incurring actual spend.
 **Evidence rule:** never claim a feature, control, certification, customer, revenue or valuation that has not been verified.
 
 ## 1. Intended asset
 
 The intended asset is a well-documented, demonstrable and technically coherent software product focused initially on contract-economics reconciliation and exception control for Australian independent commercial cleaning contractors with recurring multi-site B2B contracts.
 
-A buyer should receive enough material to understand the product, run it in a controlled environment, assess its limitations, continue development and decide independently whether to commercialise it.
+A buyer should receive a coherent, working demonstration and reproducible engineering package, with enough source, architecture, test evidence and handover material to evaluate, run, extend and commercialise the asset without depending on the current owner. Optimise for transferability and buyer confidence rather than preparing the owner to operate a live SaaS business.
 
 The product must not be described as a deployed SaaS business, accounting system, payroll processor, audited financial product or production-ready service unless the relevant evidence exists.
 
 ## 2. Acquisition-readiness workstreams
 
 ### AR-01 — Product completeness
-- Implement and demonstrate the agreed initial workflows end to end.
-- Remove dead ends, placeholder controls and misleading success states.
-- Provide a synthetic demonstration environment with clearly labelled sample data.
+- Implement and demonstrate the coherent core workflows end to end, with realistic synthetic fixtures.
+- Remove dead ends, placeholder controls, broken navigation and misleading success states.
+- Provide a polished buyer-facing demonstration that runs reliably from documented setup instructions.
 - Keep unsupported industries and out-of-scope functions explicit.
 - Maintain a feature inventory distinguishing implemented, partial, planned and blocked capabilities.
+- Prioritise functionality and documentation that make the asset easy for an acquiring engineering team to understand and continue.
 
-**Exit evidence:** buyer can follow the core product journeys without developer intervention; known limitations are visible.
+**Exit evidence:** a buyer can run and inspect the core product journeys from a clean setup without developer intervention; known limitations are visible.
 
 ### AR-02 — Financial correctness
 - Complete the DEC, TAX, PAY, PAYLED, INV, CON, VAR and IMP acceptance coverage.
@@ -63,14 +64,14 @@ The product must not be described as a deployed SaaS business, accounting system
 
 **Exit evidence:** an independent engineer can reproduce the build and tests and explain the system without relying on the original developer.
 
-### AR-06 — Commercial evidence
-- Validate the target customer and recurring problem through structured interviews.
-- Obtain evidence of workflow feasibility and willingness to pay.
-- Test pricing assumptions and the cost to serve.
-- Record competitor comparisons and the product's defensible differentiation.
+### AR-06 — Buyer and market evidence
+- Research the target customer, recurring problem, competitive alternatives and strategic buyer categories.
+- Document the value hypothesis, potential cost savings and differentiators without inventing measured outcomes.
+- Where authorised and feasible, collect consent-based discovery evidence that can be lawfully transferred or independently repeated by a buyer.
+- Do not make owner-operated launch, recurring revenue or a live customer pilot a prerequisite for a sale-ready asset.
 - Do not present survey interest, informal compliments or hypothetical subscription revenue as actual traction.
 
-**Exit evidence:** documented customer evidence, quantified outcomes and a defensible commercial thesis. Customer evidence may materially improve buyer confidence but must be obtained with appropriate consent and privacy controls.
+**Exit evidence:** a credible buyer thesis, competitive map and clearly separated verified evidence, assumptions and unvalidated opportunities.
 
 ## 3. Buyer information pack
 
@@ -114,18 +115,17 @@ A buyer's offer will depend on factors including:
 
 An unlaunched product may receive a low offer or no offer. Do not spend money solely to make a target valuation appear plausible.
 
-## 6. Financial guardrails
+## 6. Resourcing and expenditure authority
 
-- Initial project spend must not exceed AUD 500.
-- Recurring monthly spend must not exceed AUD 100.
-- Prefer existing repository, CI and no-cost development facilities.
-- No paid agency, marketing campaign, certification, cloud commitment or subscription without explicit owner approval.
-- Record actual costs and renewals; cancel or avoid services that are not essential.
-- Independent security, legal and accounting reviews are recognised external funding gates, not assumed to fit inside the current budget.
+- The previous AUD 500 initial and AUD 100 recurring monthly caps have been withdrawn by the owner; they are not constraints on product scope or engineering planning.
+- Prioritise the work required to make the complete asset technically sound, demonstrable, secure by design and straightforward to transfer.
+- Actual expenditure remains subject to explicit owner approval. Do not purchase services, subscribe, engage contractors, commission certification or create financial commitments without that approval.
+- Record any approved spend, renewals, dependencies and cancellation obligations.
+- Distinguish work that can be completed within repository engineering from independent reviews or services that require an external provider.
 
 ## 7. Release and authority boundary
 
-Acquisition preparation does not authorise production deployment, customer data intake, payroll ingestion, customer communications, payments, merge to the protected production branch or transfer of ownership.
+Acquisition preparation is not an owner-operated product launch. It does not authorise production deployment, real customer/employee/payroll data intake, external customer communications, buyer outreach, paid services, merge to a protected release branch or transfer of ownership. A buyer-ready local demonstration, synthetic test environment and documented deployment pathway are appropriate deliverables; a live production service is not a prerequisite unless separately approved.
 
 The owner retains authority over any external contact, buyer disclosure, repository access grant, sale, licence, assignment, merge or deployment.
 
