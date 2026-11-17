@@ -346,3 +346,13 @@ The hardening branch adds a deterministic property subset and exact-money regres
 - Property subset: 500 seeded payroll bucket reconciliation cases (seed `0x5eed1234`), aggregation row-order invariance, null/sign preservation and mixed currency/tax-basis blocking passed.
 
 This is a targeted subset only. The complete DEC/TAX/PAY/PAYLED/INV/CON/VAR/IMP and property-based acceptance plan remains **NOT COMPLETE**. Locale parsing, approved rounding, GST/FX, full payroll restatement, invoice denominator/credit handling, variation lifecycle, source control totals, timezone and export injection cases remain unimplemented or not fully tested. Independent expected-value review and qualified accounting/payroll/tax approval are still required.
+
+ 
+### Follow-up CI run #43983962328 — migration 014 and reviewer decision integrity
+
+CI run **#43983962328** passed on exact hardening head `6b98299006d9aa620f494ec4fe52d095e82947c4`:
+- Node.js 22: 59 tests, 56 passed, 0 failed, 3 skipped. The three skipped tests are database-dependent API/TLS integration tests in the standalone Node job; they ran in the PostgreSQL job.
+- PostgreSQL 16: migrations through 014; 20-table tenant/FK catalogue audit; restricted-role RLS; authenticated API integration; production image build; trusted-CA TLS success; untrusted-CA rejection; production-mode API database health success.
+- Reviewer decision tests now prove signed actor binding, immutable evidence, final-state immutability, mandatory audit reason and same-transaction audit-event creation for both direct SQL and the API.
+
+The complete deterministic/property acceptance plan remains NOT COMPLETE and still requires the policy-dependent and domain cases enumerated above, independent expected-value review and qualified finance/payroll/tax approval.
