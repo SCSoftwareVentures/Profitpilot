@@ -43,5 +43,17 @@ test("synthetic logical backup restores all source rows and preserves tenant bou
    await assert.rejects(()=>client.query("DELETE FROM public.audit_events"),/permission denied/i);
   }finally{try{await client.query("ROLLBACK");}finally{client.release();}}
   assert.equal((await runtime.query("SELECT id FROM public.contracts")).rowCount,0,"restored pooled connection must clear signed context");
+  // Snapshot predates disposal: authoritative source ledger is consulted after restore.
+  const batch="f831ab34-efb8-48b4-9979-434711943ea2";
+  assert.equal((await restored.query("SELECT id FROM public.import_batches WHERE tenant_id=$1 AND id=$2",[tenant,batch])).rowCount,1);
+  assert.equal((await source.query("SELECT private.execute_import_disposal($1,$2) AS removed",[tenant,batch])).rows[0].removed,1);
+  const tombstone=(await source.query("SELECT file_sha256,authority_ref,disposed_at::text AS disposed_at FROM private.import_disposal_tombstones WHERE tenant_id=$1 AND batch_id=$2",[tenant,batch])).rows[0];
+  const args=[tenant,batch,tombstone.file_sha256,tombstone.authority_ref,tombstone.disposed_at];
+  await assert.rejects(()=>restored.query("SELECT private.replay_import_disposal($1,$2,$3,$4,$5)",[tenant,batch,"0".repeat(64),tombstone.authority_ref,tombstone.disposed_at]),/does not match/);
+  assert.equal((await restored.query("SELECT private.replay_import_disposal($1,$2,$3,$4,$5) AS removed",args)).rows[0].removed,1);
+  assert.equal((await restored.query("SELECT private.replay_import_disposal($1,$2,$3,$4,$5) AS removed",args)).rows[0].removed,0);
+  assert.equal((await restored.query("SELECT id FROM public.import_batches WHERE tenant_id=$1 AND id=$2",[tenant,batch])).rowCount,0);
+  assert.equal((await restored.query("SELECT id FROM public.raw_import_rows WHERE tenant_id=$1 AND batch_id=$2",[tenant,batch])).rowCount,0);
+  await assert.rejects(()=>runtime.query("SELECT * FROM private.import_disposal_tombstones"),/permission denied/i);
  }finally{await Promise.all([source.end(),restored.end(),runtime.end()]);}
 });
