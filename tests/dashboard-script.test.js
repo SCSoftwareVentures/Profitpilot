@@ -18,3 +18,13 @@ test("dashboard module script parses as JavaScript and its local imports exist",
   assert.ok(imports.length>=2,"dashboard must use local source modules");
   for(const specifier of imports)await access(resolve(dirname(htmlPath),specifier));
 });
+
+test("dashboard shell exposes keyboard focus, labelled import and explicit report limitations",async()=>{
+  const html=await readFile(htmlPath,"utf8");
+  assert.match(html,/:focus-visible/);
+  assert.match(html,/for="csvFile"/);
+  assert.match(html,/aria-describedby="importHelp"/);
+  assert.match(html,/aria-current="page"/);
+  assert.match(html,/source_completeness,unverified/);
+  assert.match(html,/indicative_contribution/);
+});
