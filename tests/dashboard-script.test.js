@@ -63,3 +63,12 @@ test("dashboard exposes evidence-gated Profit Leak Radar candidates",async()=>{
   assert.match(html,/Exposure withheld/);
   assert.match(html,/not verified losses or recovered savings/);
 });
+
+test("dashboard exposes separate value lifecycle states without netting credits",async()=>{
+  const html=await readFile(htmlPath,"utf8");
+  assert.match(html,/data-view="value"/);
+  assert.match(html,/id="value"/);
+  assert.match(html,/summariseValueEvents\(valueLedger\.events\)/);
+  assert.match(html,/Credits are not silently netted/);
+  assert.match(html,/Net total: withheld/);
+});
