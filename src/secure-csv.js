@@ -5,7 +5,7 @@ import {importPayloadAllowed} from "./import-privacy.js";
 const MAX_BYTES=100*1024,MAX_ROWS=200,MAX_COLS=12,MAX_CELL=500;
 const fail=error=>({error});
 export function parseFinancialCsv(bytes,sourceType){
- if(!Buffer.isBuffer(bytes)||bytes.length<1||bytes.length>MAX_BYTES)return fail("Invalid CSV size");
+ if(!(bytes instanceof Buffer)||bytes.length<1||bytes.length>MAX_BYTES)return fail("Invalid CSV size");
  let text;
  try{text=new TextDecoder("utf-8",{fatal:true}).decode(bytes);}catch{return fail("CSV must be valid UTF-8");}
  if(/[\x00-\x09\x0b\x0c\x0e-\x1f\x7f]/.test(text))return fail("CSV contains prohibited control characters");

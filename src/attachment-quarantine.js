@@ -10,7 +10,8 @@ function secret(key){
  return Buffer.from(key,"hex");
 }
 export function attachmentShape(type,body){
- if(!Buffer.isBuffer(body)||body.length<8||body.length>MAX_ATTACHMENT_BYTES||!TYPES.includes(type))return false;
+ if(!(body instanceof Buffer)||typeof type!=="string")return false;
+ if(body.length<8||body.length>MAX_ATTACHMENT_BYTES||!TYPES.includes(type))return false;
  if(type==="application/pdf")return /^%PDF-1\.[0-7]/.test(body.subarray(0,8).toString("ascii"));
  if(type==="image/png")return body.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));
  return body[0]===255&&body[1]===216&&body[2]===255;
@@ -18,11 +19,11 @@ export function attachmentShape(type,body){
 function context(meta){
  const {tenantId,batchId,userId,id,type,keyId,size}=meta;
  if(![tenantId,batchId,userId,id].every(v=>typeof v==="string"&&UUID.test(v))||
- !KEY_ID.test(keyId||"")||!TYPES.includes(type)||!Number.isSafeInteger(size)||size<8||size>MAX_ATTACHMENT_BYTES)throw Error("Invalid attachment context");
+ typeof keyId!=="string"||!KEY_ID.test(keyId)||typeof type!=="string"||!TYPES.includes(type)||!Number.isSafeInteger(size)||size<8||size>MAX_ATTACHMENT_BYTES)throw Error("Invalid attachment context");
  return Buffer.from(["profitpilot-quarantine-v1",tenantId,batchId,userId,id,type,keyId,String(size)].join("\n"),"utf8");
 }
 export function sealAttachment(body,meta,key){
- if(!attachmentShape(meta.type,body)||meta.size!==body.length)throw Error("Unsupported or oversized attachment");
+ if(!(body instanceof Buffer)||!meta||typeof meta!=="object"||Array.isArray(meta)||!attachmentShape(meta.type,body)||meta.size!==body.length)throw Error("Unsupported or oversized attachment");
  const aad=context(meta),material=secret(key),nonce=randomBytes(12);
  try{
   const cipher=createCipheriv("aes-256-gcm",material,nonce,{authTagLength:16});cipher.setAAD(aad);

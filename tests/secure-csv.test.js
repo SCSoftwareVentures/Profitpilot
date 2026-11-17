@@ -12,3 +12,7 @@ test("reject malformed text, unexpected fields and unsafe CSV inputs",()=>{
  assert.ok(parseFinancialCsv(Buffer.from([0xff,0xfe]),"payroll").error);
  assert.ok(parseFinancialCsv(Buffer.alloc(102401),"payroll").error);
 });
+
+test("CSV rejects non-buffer and forged payload types",()=>{
+ for(const bad of ["invoice_id\nA",[],new Uint8Array(8),{length:8}])assert.ok(parseFinancialCsv(bad,"supplier_invoice").error);
+});

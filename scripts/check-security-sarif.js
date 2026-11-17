@@ -1,5 +1,5 @@
 // Fail closed on absent or malformed static analysis evidence. Print rule/line only, never messages or source.
-import {readFileSync,readdirSync,statSync} from "node:fs";
+import {openSync,readSync,fstatSync,closeSync,readdirSync,constants} from "node:fs";
 import {join} from "node:path";
 import {pathToFileURL} from "node:url";
 export function assessSarif(doc){
@@ -34,14 +34,25 @@ export function assessSarif(doc){
  }
  return {total,blocking};
 }
+export function readBoundedSarif(path){
+ const limit=64*1024*1024;
+ const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
+ try{
+  const info=fstatSync(fd);
+  if(!info.isFile()||info.size>limit)throw Error("Invalid SARIF file");
+  const chunks=[];let total=0;
+  for(;;){const chunk=Buffer.allocUnsafe(Math.min(65536,limit-total+1));const n=readSync(fd,chunk,0,chunk.length,null);if(!n)break;total+=n;if(total>limit)throw Error("Oversized SARIF");chunks.push(chunk.subarray(0,n));}
+  return JSON.parse(new TextDecoder("utf-8",{fatal:true}).decode(Buffer.concat(chunks,total)));
+ }finally{closeSync(fd);}
+}
 function main(){
  const dir=process.argv[2];
  if(!dir)throw Error("CodeQL evidence directory required");
  const files=readdirSync(dir).filter(p=>p.endsWith(".sarif"));
  if(!files.length)throw Error("CodeQL produced no SARIF");
  let total=0,blocking=[];
- for(const file of files){const path=join(dir,file);if(statSync(path).size>64*1024*1024)throw Error("Oversized SARIF");const r=assessSarif(JSON.parse(readFileSync(path,"utf8")));total+=r.total;blocking.push(...r.blocking);}
+ for(const file of files){const path=join(dir,file);const r=assessSarif(readBoundedSarif(path));total+=r.total;blocking.push(...r.blocking);}
  console.log(JSON.stringify({reports:files.length,findings:total,blocking}));
  if(blocking.length)process.exitCode=1;
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)try{main();}catch(e){const known=new Set(["CodeQL evidence directory required","CodeQL produced no SARIF","Oversized SARIF","Missing SARIF analysis","Unrecognised CodeQL evidence","Incomplete CodeQL invocation","Invalid CodeQL rule metadata","Conflicting CodeQL rule metadata","Unclassified static analysis finding"]);console.error(known.has(e?.message)?e.message:"Static security evidence invalid or unavailable.");process.exitCode=1;}
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)try{main();}catch(e){const known=new Set(["CodeQL evidence directory required","CodeQL produced no SARIF","Oversized SARIF","Invalid SARIF file","Missing SARIF analysis","Unrecognised CodeQL evidence","Incomplete CodeQL invocation","Invalid CodeQL rule metadata","Conflicting CodeQL rule metadata","Unclassified static analysis finding"]);console.error(known.has(e?.message)?e.message:"Static security evidence invalid or unavailable.");process.exitCode=1;}

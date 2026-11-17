@@ -20,3 +20,11 @@ test("unsupported or excessive content and reused key material are refused",()=>
  assert.throws(()=>independentAttachmentKey({ATTACHMENT_ENCRYPTION_KEY:key,ATTACHMENT_ENCRYPTION_KEY_ID:"test",TENANT_CONTEXT_HMAC_SECRET:key.toUpperCase()}),/Independent/);
  assert.equal(independentAttachmentKey({ATTACHMENT_ENCRYPTION_KEY:key,ATTACHMENT_ENCRYPTION_KEY_ID:"test"}).keyId,"test");
 });
+
+test("attachment payloads reject strings, arrays and buffer-like objects",()=>{
+ for(const bad of ["%PDF-1.7",[],new Uint8Array(body),{length:body.length,subarray:()=>body}]){
+  assert.equal(attachmentShape("application/pdf",bad),false);
+  assert.throws(()=>sealAttachment(bad,meta,key),/Unsupported/);
+ }
+ assert.equal(attachmentShape(["application/pdf"],body),false);
+});

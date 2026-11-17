@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {assessSarif} from "../scripts/check-security-sarif.js";
+import {assessSarif,readBoundedSarif} from "../scripts/check-security-sarif.js";
+import {mkdtempSync,writeFileSync,symlinkSync,rmSync,truncateSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 const doc=(results=[],rules=[])=>({version:"2.1.0",runs:[{tool:{driver:{name:"CodeQL",rules}},results,invocations:[{executionSuccessful:true}]}]});
 test("security gate detects high severity and does not echo finding payloads",()=>{
  assert.deepEqual(assessSarif(doc()),{total:0,blocking:[]});
@@ -17,4 +20,13 @@ test("CodeQL rules contributed by extension packs retain their severity",()=>{
  delete d.runs[0].tool.driver.rules;
  d.runs[0].tool.extensions=[{rules:[{id:"js/extension",properties:{"security-severity":"9.5"}}]}];
  assert.equal(assessSarif(d).blocking.length,1);
+});
+
+test("SARIF reads a bounded regular file through one descriptor and rejects symbolic links",()=>{
+ const dir=mkdtempSync(join(tmpdir(),"pp-sarif-"));try{
+ const file=join(dir,"valid.sarif"),link=join(dir,"link.sarif");
+ writeFileSync(file,JSON.stringify(doc()));assert.deepEqual(readBoundedSarif(file),doc());
+ symlinkSync(file,link);assert.throws(()=>readBoundedSarif(link));assert.throws(()=>readBoundedSarif(dir));
+ truncateSync(file,64*1024*1024+1);assert.throws(()=>readBoundedSarif(file),/Invalid SARIF file/);
+ }finally{rmSync(dir,{recursive:true,force:true});}
 });

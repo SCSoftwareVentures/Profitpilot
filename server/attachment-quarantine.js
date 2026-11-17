@@ -13,12 +13,12 @@ function syntheticOnly(req,res,next){
 export function registerAttachmentQuarantineRoutes(app,membership){
  const base="/v1/tenants/:tenantId/imports/:batchId/quarantine";
  app.post(base,membership,syntheticOnly,requirePermission("imports.rows.write"),requireStepUp(),(req,res,next)=>{
-  if(!uuid.test(req.params.batchId))return res.status(400).json({error:"Invalid batch ID"});
+  if(typeof req.params.batchId!=="string"||!uuid.test(req.params.batchId))return res.status(400).json({error:"Invalid batch ID"});
   const type=req.is(permitted);if(!type)return res.status(415).json({error:"Unsupported attachment media"});
   try{independentAttachmentKey(process.env);}catch{return res.status(503).json({error:"Attachment encryption unavailable"});}
   req.attachmentType=type;next();
  },express.raw({type:permitted,limit:MAX_ATTACHMENT_BYTES,inflate:false}),async(req,res,next)=>{try{
-  if(!attachmentShape(req.attachmentType,req.body))return res.status(422).json({error:"Invalid attachment signature or size"});
+  if(!(req.body instanceof Buffer)||typeof req.attachmentType!=="string"||!attachmentShape(req.attachmentType,req.body))return res.status(422).json({error:"Invalid attachment signature or size"});
   const {key,keyId}=independentAttachmentKey(process.env);
   const meta={tenantId:req.membership.tenantId.toLowerCase(),batchId:req.params.batchId.toLowerCase(),userId:req.membership.userId.toLowerCase(),id:randomUUID(),type:req.attachmentType,keyId,size:req.body.length};
   const sealed=sealAttachment(req.body,meta,key);
@@ -31,7 +31,7 @@ export function registerAttachmentQuarantineRoutes(app,membership){
  }catch(e){next(e);}finally{if(Buffer.isBuffer(req.body))req.body.fill(0);}});
  app.post(base+"/:attachmentId/discard",membership,syntheticOnly,requirePermission("imports.rows.write"),requireStepUp(),async(req,res,next)=>{try{
   const {batchId,attachmentId}=req.params;
-  if(!uuid.test(batchId)||!uuid.test(attachmentId)||req.body?.discardQuarantineOnly!==true)return res.status(400).json({error:"Explicit quarantine discard required"});
+  if(typeof batchId!=="string"||typeof attachmentId!=="string"||!uuid.test(batchId)||!uuid.test(attachmentId)||req.body?.discardQuarantineOnly!==true)return res.status(400).json({error:"Explicit quarantine discard required"});
   const result=await withPrivacyStepUp(req.membership,req.identity,batchId,"discard_quarantined_attachment:"+attachmentId.toLowerCase(),async(c,proof)=>{
    const r=await c.query("SELECT private.discard_quarantined_attachment($1,$2,$3,$4,$5) AS result",[req.membership.tenantId,batchId,attachmentId,req.identity.authTime,proof]);return r.rows[0].result;
   });
