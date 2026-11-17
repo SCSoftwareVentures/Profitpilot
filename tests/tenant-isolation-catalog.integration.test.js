@@ -117,6 +117,8 @@ test("all public tables require explicit security classification and restrictive
    const {rows:[access]}=await admin.query("SELECT has_schema_privilege('profitpilot_app',$1,'CREATE') AS allowed",[schema]);
    assert.equal(access.allowed,false,"runtime cannot shadow schema objects: "+schema);
   }
+  const {rows:[rawAccess]}=await admin.query("SELECT has_column_privilege('profitpilot_app','public.raw_import_rows','payload','SELECT') AS payload_read,has_column_privilege('profitpilot_app','public.raw_import_rows','payload','INSERT') AS payload_insert");
+  assert.deepEqual(rawAccess,{payload_read:false,payload_insert:false},"raw financial payloads require controlled read and stage functions");
   const {rows:[defaults]}=await admin.query([
    "SELECT count(*)::integer AS unsafe FROM pg_default_acl d",
    "JOIN pg_namespace ns ON ns.oid=d.defaclnamespace",

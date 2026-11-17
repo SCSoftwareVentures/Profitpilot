@@ -1,5 +1,5 @@
 import pg from "pg";
-import {createHmac,randomBytes,randomUUID} from "node:crypto";
+import {createHmac,createHash,randomBytes,randomUUID} from "node:crypto";
 import {validRuntimeRole} from "./production-config.js";
 import {releaseCleanConnection} from "./pool-safety.js";
 const {Pool}=pg;
@@ -138,6 +138,22 @@ export async function revokeAuthSession(jti,identity){
   const body=["profitpilot-privacy-step-up-v1",membership.tenantId.toLowerCase(),membership.userId.toLowerCase(),batchId.toLowerCase(),"source_read:"+purpose,String(authTime),ctx.nonce].join("\n");
   const proof=createHmac("sha256",Buffer.from(process.env.TENANT_CONTEXT_HMAC_SECRET,"hex")).update(body).digest("hex");
   return [membership.tenantId,batchId,purpose,authTime,proof];
+ }
+
+ export async function stageSourceRows(client,membership,identity,batchId,rows,{csv=false,checksum=null}={}){
+  const body=JSON.stringify({mode:csv?"csv":"json",rows,checksum:csv?checksum:null});
+  let authTime=0;
+  if(csv){
+   const now=Math.floor(Date.now()/1000),maxAge=Number(process.env.AUTH_STEP_UP_MAX_AGE_SECONDS??300);
+   if(!Number.isInteger(maxAge)||maxAge<30||maxAge>900||!Number.isSafeInteger(identity?.authTime)||identity.authTime>now||now-identity.authTime>maxAge||!process.env.AUTH_STEP_UP_ACR||identity.acr!==process.env.AUTH_STEP_UP_ACR||!identity.amr?.includes("mfa"))throw Object.assign(new Error("Recent CSV staging MFA required"),{status:403});
+   authTime=identity.authTime;
+  }
+  const action="source_stage:"+(csv?"csv":"json")+":"+createHash("sha256").update(body).digest("hex");
+  const {rows:[ctx]}=await client.query("SELECT current_setting('app.tenant_nonce',true) AS nonce");
+  const evidence=["profitpilot-privacy-step-up-v1",membership.tenantId.toLowerCase(),membership.userId.toLowerCase(),batchId.toLowerCase(),action,String(authTime),ctx.nonce].join("\n");
+  const proof=createHmac("sha256",Buffer.from(process.env.TENANT_CONTEXT_HMAC_SECRET,"hex")).update(evidence).digest("hex");
+  const {rows:[out]}=await client.query("SELECT private.stage_verified_source_rows($1,$2,$3,$4,$5) AS result",[membership.tenantId,batchId,body,authTime,proof]);
+  return out.result;
  }
 
  // Only trusted server code can attest an exact audit event in its signed transaction.

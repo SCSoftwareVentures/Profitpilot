@@ -35,7 +35,7 @@ test("independent payroll decisions, exact source reconciliation and maker-check
  process.env.AUTH_JWKS_URL="http://127.0.0.1:"+jwks.address().port+"/.well-known/jwks.json";
  const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL});
  const {default:app}=await import("../server/index.js");
- const {pool:appPool,withTenant,withFinancialStepUp,sourceReadProof}=await import("../server/db.js");
+ const {pool:appPool,withTenant,withFinancialStepUp,sourceReadProof,stageSourceRows}=await import("../server/db.js");
  const api=createServer(app);
  await new Promise(resolve=>api.listen(0,"127.0.0.1",resolve));
  const base="http://127.0.0.1:"+api.address().port;
@@ -95,6 +95,10 @@ test("independent payroll decisions, exact source reconciliation and maker-check
   });
   assert.equal(batchCreate.status,201);
   const batchId=(await batchCreate.json()).batch.id;
+  await assert.rejects(()=>withTenant(tenantA,"ci-payroll-importer",c=>c.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,'{}')",[tenantA,batchId])),/permission denied/i);
+  await assert.rejects(()=>withTenant(tenantA,"ci-payroll-importer",c=>c.query("SELECT private.stage_verified_source_rows($1,$2,$3,0,$4)",[tenantA,batchId,JSON.stringify({mode:"json",rows:[{source_ref:"synthetic"}]}),"0".repeat(64)])),/attestation/i);
+  const forbidden=await withTenant(tenantA,"ci-payroll-importer",c=>stageSourceRows(c,{tenantId:tenantA,userId:importer},{subject:"ci-payroll-importer"},batchId,[{employee_name:"synthetic-private"}]));
+  assert.equal(forbidden.status,422,"database field minimisation must reject even signed unsupported source fields");
   const rows=[
    {source_ref:"SYNTHETIC-SOURCE-A",cost_component:"gross_wages",amount:"60.00",currency:"AUD",period_start:"2026-02-01",period_end:"2026-02-14"},
    {source_ref:"SYNTHETIC-SOURCE-B",cost_component:"gross_wages",amount:"40.00",currency:"AUD",period_start:"2026-02-01",period_end:"2026-02-14"},

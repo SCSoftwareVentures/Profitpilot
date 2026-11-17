@@ -13,7 +13,7 @@ test("synthetic encrypted quarantine rejects wrong actors, direct reads and unsa
  await new Promise(r=>jwks.listen(0,"127.0.0.1",r));
  const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL});
  Object.assign(process.env,{NODE_ENV:"test",DATABASE_URL:process.env.TEST_APP_DATABASE_URL,AUTH_ISSUER:issuer,AUTH_AUDIENCE:audience,AUTH_STEP_UP_ACR:"urn:profitpilot:step-up",AUTH_JWKS_URL:"http://127.0.0.1:"+jwks.address().port+"/jwks",ATTACHMENT_ENCRYPTION_KEY:key,ATTACHMENT_ENCRYPTION_KEY_ID:"synthetic-quarantine"});
- const [{default:app},{pool,withTenant}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);
+ const [{default:app},{pool,withTenant,stageSourceRows}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);
  const api=createServer(app);await new Promise(r=>api.listen(0,"127.0.0.1",r));
  const base="http://127.0.0.1:"+api.address().port,root="/v1/tenants/"+tenant+"/imports/"+batch+"/quarantine";
  const bytes=Buffer.from("%PDF-1.7\nSYNTHETIC QUARANTINE BODY\n");
@@ -65,7 +65,8 @@ test("synthetic encrypted quarantine rejects wrong actors, direct reads and unsa
   const newImport={sourceType:"payroll",fileName:"restricted.csv",sha256:randomBytes(32).toString("hex"),permissionReference:"Synthetic only",periodStart:"2026-02-01",periodEnd:"2026-02-28"};
   assert.equal((await json("/v1/tenants/"+tenant+"/imports","quarantine-ci-user",newImport)).status,409);
   assert.equal((await req(root,"quarantine-ci-user")).status,409);
-  await assert.rejects(()=>withTenant(tenant,"quarantine-ci-user",c=>c.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,'{}')",[tenant,batch])),/Source ingestion is restricted/i);
+  await assert.rejects(()=>withTenant(tenant,"quarantine-ci-user",c=>c.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,'{}')",[tenant,batch])),/permission denied/i);
+  await assert.rejects(()=>withTenant(tenant,"quarantine-ci-user",c=>stageSourceRows(c,{tenantId:tenant,userId:user},{subject:"quarantine-ci-user"},batch,[{source_ref:"synthetic"}])),/Source ingestion is restricted/i);
   await assert.rejects(()=>withTenant(tenant,"quarantine-ci-user",c=>c.query("SELECT * FROM private.source_ingestion_restrictions")),/permission denied/i);
   const release=await reviewedRestriction();
   const releaseBody={mode:"release",acknowledgeLimitedScope:true};

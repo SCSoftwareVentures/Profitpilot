@@ -5,7 +5,7 @@ import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
 import {randomUUID,createHash} from "node:crypto";
-import {withTenant,health,assertRuntimeDatabaseRole,listAuthSessions,revokeAuthSession,revokeAllAuthSessions,withPrivacyStepUp,withFinancialStepUp,sourceReadProof,appendAudit} from "./db.js";
+import {withTenant,health,assertRuntimeDatabaseRole,listAuthSessions,revokeAuthSession,revokeAllAuthSessions,withPrivacyStepUp,withFinancialStepUp,sourceReadProof,stageSourceRows,appendAudit} from "./db.js";
 import {assertProductionConfig} from "./production-config.js";
 import {authRequired,requirePermission,requireStepUp} from "./auth.js";
 import {parseCsv,validateInvoiceRows,validatePayrollRows,isIsoDate} from "../src/engine.js";
@@ -318,22 +318,8 @@ async function stageFinancialRows(req,res,next,{csv=false}={}){try{
     rows=checked.rows;
    }
    if(!importPayloadAllowed(batch.rows[0].source_type,rows))return {status:422,error:"Source rows contain unsupported fields, nested values or excessive lengths; remove unnecessary personal data before submitting"};
-   const readArgs=await sourceReadProof(client,req.membership,req.identity,req.params.batchId,"compare");
-   const prior=(await client.query("SELECT count(*)::int AS n, COALESCE(jsonb_agg(payload ORDER BY row_number)=$6::jsonb,false) AS identical FROM private.read_source_rows($1,$2,$3,$4,$5)",[...readArgs,JSON.stringify(rows)])).rows[0];
-   if(prior.n>0){
-    if(!prior.identical)return {status:409,error:"Source batch already contains different rows; create a new batch and reconcile independently"};
-    if(csv)return {status:409,error:"Batch already staged; file submission cannot replace or certify a previous upload"};
-    return {status:201,inserted:0,received:rows.length,duplicates:rows.length};
-   }
   }
-  let inserted=0;
-  for(let i=0;i<rows.length;i++){
-   const row=await client.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,$3,$4) ON CONFLICT(batch_id,row_number) DO NOTHING RETURNING id",[req.membership.tenantId,req.params.batchId,i+1,JSON.stringify(rows[i])]);
-   inserted+=row.rowCount;
-  }
-  await client.query("UPDATE import_batches SET status='review' WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
-  if(csv)await appendAudit(client,req.membership,"import_csv_staged","import_batch",req.params.batchId,"CSV bytes matched declared source checksum",{sha256:batch.rows[0].file_sha256,rowCount:rows.length,rawFilePersisted:false});
-  return {status:201,inserted,received:rows.length,duplicates:rows.length-inserted};
+  return stageSourceRows(client,req.membership,req.identity,req.params.batchId,rows,{csv,checksum:csv?batch.rows[0].file_sha256:null});
  });
  if(result.error)return res.status(result.status).json({error:result.error});
  res.status(result.status).json({batchId:req.params.batchId,inserted:result.inserted,received:result.received,duplicates:result.duplicates,...(csv?{checksumVerified:true,rawFilePersisted:false}:{})});
