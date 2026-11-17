@@ -127,6 +127,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/044_account_compromise_containment.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/045_transaction_bound_tenant_context.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/046_restrict_runtime_database_creation.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/047_audit_and_key_restore_anchors.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:
@@ -171,6 +172,7 @@ jobs:
           set -eu
           umask 077
           trap 'rm -f "$RUNNER_TEMP/privacy-before.dump" "$RUNNER_TEMP/privacy-after.dump" "$RUNNER_TEMP/privacy-after.sealed" "$RUNNER_TEMP/privacy-after.verified.dump"; dropdb -h localhost -U profitpilot_admin --if-exists privacy_restore_old_ci; dropdb -h localhost -U profitpilot_admin --if-exists privacy_restore_new_ci' EXIT
+          psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c "BEGIN ISOLATION LEVEL REPEATABLE READ; SELECT private.capture_audit_restore_anchors(); COMMIT;"
           docker exec -e PGPASSWORD "$PG_CI_CONTAINER" pg_dump -h 127.0.0.1 -U profitpilot_admin -Fc profitpilot > "$RUNNER_TEMP/privacy-after.dump"
           node tests/encrypted-backup-drill.js "$RUNNER_TEMP/privacy-after.dump" "$RUNNER_TEMP/privacy-after.sealed" "$RUNNER_TEMP/privacy-after.verified.dump"
           createdb -h localhost -U profitpilot_admin privacy_restore_old_ci

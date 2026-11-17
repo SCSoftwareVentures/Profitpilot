@@ -774,6 +774,30 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const analystCalculation=await request(`/v1/tenants/${tenantA}/calculations`,{subject:"ci-api-analyst",method:"POST",body:{}});
     assert.equal(analystCalculation.status,400,"analysts may initiate calculations subject to valid inputs");
 
+    {
+     await assert.rejects(()=>appPool.query("SELECT private.capture_audit_restore_anchors()"),/permission denied/i);
+     await assert.rejects(()=>appPool.query("SELECT * FROM private.audit_restore_anchors"),/permission denied/i);
+     const anchorClient=await admin.connect();
+     try{
+      await anchorClient.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+      const captured=(await anchorClient.query("SELECT private.capture_audit_restore_anchors() AS n")).rows[0].n;
+      assert.ok(captured>=1);
+      assert.equal((await anchorClient.query("SELECT private.capture_audit_restore_anchors() AS n")).rows[0].n,0,"capture is idempotent for the same audit head");
+      await anchorClient.query("COMMIT");
+      const st=(await anchorClient.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;
+      assert.deepEqual(st.violations,[]);
+      assert.ok(st.markers.some(m=>m.kind==="audit_restore_anchor"&&m.tenantId===tenantA));
+      assert.ok(st.markers.some(m=>m.kind==="signing_key_retired"));
+      assert.equal(JSON.stringify(st.markers).includes(primarySecret),false);
+      await assert.rejects(()=>anchorClient.query("DELETE FROM private.audit_restore_anchors"),/must be retained/i);
+      await anchorClient.query("BEGIN");
+      await anchorClient.query("ALTER TABLE public.audit_events DISABLE TRIGGER audit_events_immutable_before_change");
+      await anchorClient.query("UPDATE public.audit_events SET reason='synthetic tamper' WHERE tenant_id=$1 AND chain_position=1",[tenantA]);
+      const tampered=(await anchorClient.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;
+      assert.ok(tampered.violations.some(v=>v.kind==="audit_chain_inconsistent"&&v.id===tenantA));
+      await anchorClient.query("ROLLBACK");
+     }finally{await anchorClient.query("ROLLBACK");anchorClient.release();}
+    }
     await admin.query("UPDATE tenant_memberships SET status='revoked' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);
     const revoked=await request(`/v1/tenants/${tenantA}/contracts`,{subject:"ci-api-analyst"});
     assert.equal(revoked.status,403,"revoked memberships must lose access immediately");

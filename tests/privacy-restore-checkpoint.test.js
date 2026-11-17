@@ -91,3 +91,18 @@ test("containment and recovery checkpoints independently bind incident evidence"
  assert.throws(()=>verifyCheckpoint(signed,{markers:[contained,{...recovered,evidence:"ef".repeat(32)}],violations:[]},options),/missing or has changed/);
  assert.throws(()=>verifyCheckpoint(signed,{...full,violations:[{kind:"account_containment_state_mismatch"}]},options),/inconsistent/);
 });
+
+test("audit prefixes and retired signing keys are independently bound into recovery checkpoints",()=>{
+ const anchor={kind:"audit_restore_anchor",id:uuid(13),tenantId:uuid(14),position:"9",eventHash:"aa".repeat(32),at:"1794873600.123456"};
+ const retired={kind:"signing_key_retired",id:"bb".repeat(32),fingerprint:"cc".repeat(32),at:"1794873601.123456"};
+ const st={markers:[anchor,retired],violations:[]};
+ const signed=signCheckpoint(st,{key,deploymentId,now});
+ const options={...opt,expectedDigest:checkpointDigest(signed)};
+ assert.equal(verifyCheckpoint(signed,st,options).requiredMarkers,2);
+ assert.throws(()=>verifyCheckpoint(signed,{markers:[anchor],violations:[]},options),/missing or has changed/);
+ assert.throws(()=>verifyCheckpoint(signed,{markers:[{...anchor,eventHash:"dd".repeat(32)},retired],violations:[]},options),/missing or has changed/);
+ assert.throws(()=>verifyCheckpoint(signed,{...st,violations:[{kind:"audit_chain_inconsistent"}]},options),/inconsistent/);
+ for(const position of ["0","-1","1.5","9223372036854775808"])assert.throws(()=>signCheckpoint({markers:[{...anchor,position}],violations:[]},{key,deploymentId,now}),/Invalid audit anchor/);
+ assert.throws(()=>signCheckpoint({markers:[{...retired,fingerprint:"raw-secret"}],violations:[]},{key,deploymentId,now}),/Invalid retired signing key/);
+ assert.equal(verifyCheckpoint(signed,{markers:[anchor,retired,{...anchor,id:uuid(15),position:"10",eventHash:"ef".repeat(32)}],violations:[]},options).verified,true);
+});

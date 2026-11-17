@@ -39,6 +39,14 @@ const incidentCheckpoint=signCheckpoint({markers:incidents,violations:[]},option
 const incidentVerify={...options,expectedDigest:checkpointDigest(incidentCheckpoint)};
 assert.throws(()=>verifyCheckpoint(incidentCheckpoint,old,incidentVerify),/missing or has changed/);
 assert.equal(verifyCheckpoint(incidentCheckpoint,fresh,incidentVerify).verified,true);
+for(const kind of ["audit_restore_anchor","signing_key_retired"]){
+ const markers=live.markers.filter(m=>m.kind===kind);
+ assert.ok(markers.length>=1,"physical restore drill missing "+kind);
+ const anchored=signCheckpoint({markers,violations:[]},options);
+ const anchoredOptions={...options,expectedDigest:checkpointDigest(anchored)};
+ assert.throws(()=>verifyCheckpoint(anchored,old,anchoredOptions),/missing or has changed/);
+ assert.equal(verifyCheckpoint(anchored,fresh,anchoredOptions).verified,true);
+}
 const checkpoint=signCheckpoint(live,options);
 const verify={...options,expectedDigest:checkpointDigest(checkpoint)};
 assert.throws(()=>verifyCheckpoint(checkpoint,old,verify),/missing or has changed/);

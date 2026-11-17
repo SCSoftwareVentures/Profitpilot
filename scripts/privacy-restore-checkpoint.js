@@ -15,6 +15,20 @@ function cleanState(state){
  const seen=new Set();
  return state.markers.map(m=>{
   // Global account security markers intentionally have no tenant or provider identifier.
+  if(m?.kind==="signing_key_retired"){
+   if(typeof m.id!=="string"||!hex.test(m.id)||typeof m.fingerprint!=="string"||!hex.test(m.fingerprint)||typeof m.at!=="string"||!/^\d+(\.\d+)?$/.test(m.at))throw Error("Invalid retired signing key marker");
+   const index=m.kind+":"+m.id;
+   if(seen.has(index))throw Error("Duplicate privacy marker");
+   seen.add(index);
+   return {kind:m.kind,id:m.id,fingerprint:m.fingerprint,at:m.at};
+  }
+  if(m?.kind==="audit_restore_anchor"){
+   if(!uuid.test(m.id)||!uuid.test(m.tenantId)||typeof m.position!=="string"||!/^[1-9]\d{0,18}$/.test(m.position)||BigInt(m.position)>9223372036854775807n||typeof m.eventHash!=="string"||!hex.test(m.eventHash)||typeof m.at!=="string"||!/^\d+(\.\d+)?$/.test(m.at))throw Error("Invalid audit anchor marker");
+   const index=m.kind+":"+m.id;
+   if(seen.has(index))throw Error("Duplicate privacy marker");
+   seen.add(index);
+   return {kind:m.kind,id:m.id,tenantId:m.tenantId,position:m.position,eventHash:m.eventHash,at:m.at};
+  }
   if(["account_contained","account_recovered"].includes(m?.kind)){
    if(!uuid.test(m.id)||!uuid.test(m.userId)||typeof m.at!=="string"||!/^\d+(\.\d+)?$/.test(m.at)||!hex.test(m.evidence||""))throw Error("Invalid account incident marker");
    const index=m.kind+":"+m.id;
@@ -109,10 +123,18 @@ export function restorePoolOptions(connectionString){
   throw Error("Operator PostgreSQL URL must not contain query parameters or fragments");
  return {connectionString,ssl:{rejectUnauthorized:true},max:1,connectionTimeoutMillis:5000,statement_timeout:15000};
 }
-async function readState(){
+async function readState({capture=false}={}){
  const pool=new pg.Pool(restorePoolOptions(process.env.PRIVACY_ADMIN_DATABASE_URL));
- try{return (await pool.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;}
- finally{await pool.end();}
+ const client=await pool.connect();
+ try{
+  await client.query(capture?"BEGIN ISOLATION LEVEL REPEATABLE READ":"BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY");
+  if(capture)await client.query("SELECT private.capture_audit_restore_anchors()");
+  const state=(await client.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;
+  cleanState(state);
+  await client.query("COMMIT");
+  return state;
+ }catch(error){try{await client.query("ROLLBACK");}catch{}throw error;}
+ finally{client.release();await pool.end();}
 }
 async function main(){
  const [mode,file]=process.argv.slice(2);
@@ -125,7 +147,7 @@ async function main(){
  }
  const options={key:process.env.PRIVACY_CHECKPOINT_KEY,deploymentId:process.env.PRIVACY_DEPLOYMENT_ID};
  if(mode==="capture"){
-  const doc=signCheckpoint(await readState(),options);
+  const doc=signCheckpoint(await readState({capture:true}),options);
   await writeFile(file,JSON.stringify(doc),{flag:"wx",mode:0o600});
   console.log(JSON.stringify({sha256:checkpointDigest(doc),markers:doc.payload.markers.length}));
  }else{
