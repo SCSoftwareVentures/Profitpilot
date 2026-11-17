@@ -12,3 +12,5 @@
 
 ## Release conditions
 Both operator groups are NOLOGIN and empty by default. Provision individual authenticated operators under separate controlled identity and network policies; never share credentials or grant both groups to one operator. Database superusers are an exceptional privileged boundary and not ordinary responders. No live identity provider, operator MFA, outreach, monitoring, evidence store or incident exercise has been configured. Do not use the synthetic CI fixture identities or evidence hashes in production.
+
+Migration 052 checks the admitted token again at each HTTP tenant transaction and uses row locks for read-write transactions. A successful revocation serialises with those writes rather than silently racing new transactions. Snapshot reads and in-flight work admitted earlier remain a boundary; drain traffic and investigate if immediate incident isolation of all in-flight operations is needed.

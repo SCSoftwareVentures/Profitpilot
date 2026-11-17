@@ -2,6 +2,7 @@ import pg from "pg";
 import {createHmac,createHash,randomBytes,randomUUID} from "node:crypto";
 import {validRuntimeRole} from "./production-config.js";
 import {releaseCleanConnection} from "./pool-safety.js";
+import {currentRequestIdentity} from "./request-identity.js";
 const {Pool}=pg;
 const production=process.env.NODE_ENV==="production";
 const databaseSslEnabled=process.env.DATABASE_SSL==="true";
@@ -24,6 +25,9 @@ export async function withTenant(tenantId,subject,fn,{repeatableRead=false}={}){
  if(typeof subject!=="string"||!subject||subject.length>512||subject.trim()!==subject||/[\x00-\x1f\x7f]/.test(subject))throw new Error("Verified identity subject is required for tenant context");
  if(typeof tenantId!=="string"||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tenantId))throw new Error("Valid tenant identifier required");
  tenantId=tenantId.toLowerCase();
+ const requestIdentity=currentRequestIdentity();
+ if((production&&!requestIdentity)||(requestIdentity&&requestIdentity.subject!==subject))
+  throw Object.assign(new Error("Verified request identity mismatch"),{status:401});
  const secret=process.env.TENANT_CONTEXT_HMAC_SECRET||"";
  const keyId=process.env.TENANT_CONTEXT_HMAC_KEY_ID||"primary";
  if(!/^[A-Za-z0-9._-]{1,128}$/.test(keyId)||secret.length%2!==0||!/^[a-f0-9]{64,256}$/i.test(secret))throw new Error("Tenant context signing configuration is invalid");
@@ -37,6 +41,12 @@ export async function withTenant(tenantId,subject,fn,{repeatableRead=false}={}){
   const payload=["profitpilot-tenant-context-v2",ctx.tx,ctx.pid,tenantId,subject,expires,nonce,keyId].join("\n");
   const signature=createHmac("sha256",Buffer.from(secret,"hex")).update(payload).digest("hex");
   await client.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.tenant_subject',$2,true),set_config('app.tenant_expires',$3,true),set_config('app.tenant_nonce',$4,true),set_config('app.tenant_key_id',$5,true),set_config('app.tenant_signature',$6,true)",[tenantId,subject,expires,nonce,keyId,signature]);
+  if(requestIdentity){
+   const body=JSON.stringify({tenantId,subject:requestIdentity.subject,issuer:requestIdentity.issuer,jti:requestIdentity.jti,issuedAt:requestIdentity.issuedAt,expiresAt:requestIdentity.expiresAt,authTime:requestIdentity.authTime??null});
+   const proof=createHmac("sha256",Buffer.from(secret,"hex")).update(["profitpilot-tenant-session-v1",ctx.tx,ctx.pid,nonce,body].join("\n")).digest("hex");
+   const {rows:[session]}=await client.query("SELECT private.assert_admitted_tenant_session($1,$2) AS accepted",[body,proof]);
+   if(session?.accepted!==true)throw Object.assign(new Error("Session revoked or unavailable"),{status:401});
+  }
   const result=await fn(client,{nonce});
   await client.query("COMMIT");
   return result;

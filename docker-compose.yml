@@ -64,6 +64,7 @@ services:
       - ./database/migrations/049_financial_step_up_boundary.sql:/docker-entrypoint-initdb.d/051-financial-step-up-boundary.sql:ro
       - ./database/migrations/050_source_payload_read_isolation.sql:/docker-entrypoint-initdb.d/052-source-payload-read-isolation.sql:ro
       - ./database/migrations/051_verified_source_staging.sql:/docker-entrypoint-initdb.d/053-verified-source-staging.sql:ro
+      - ./database/migrations/052_transaction_session_continuity.sql:/docker-entrypoint-initdb.d/054-transaction-session-continuity.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s

@@ -1,6 +1,7 @@
 import {createRemoteJWKSet, jwtVerify} from "jose";
 import {withTenant,registerAndCheckAuthSession} from "./db.js";
 import {validAccessClaims} from "../src/access-claims.js";
+import {withVerifiedRequestIdentity} from "./request-identity.js";
 
 let jwks;
 let jwksUrl;
@@ -73,7 +74,7 @@ export function authRequired(){
   }
   if(revoked)return res.status(401).json({error:"Session revoked or unavailable"});
   req.identity={subject:payload.sub,email:typeof payload.email==="string"?payload.email:null,emailVerified:payload.email_verified===true,issuedAt:payload.iat,expiresAt:payload.exp,issuer:c.issuer,jti:payload.jti,authTime,acr:typeof payload.acr==="string"?payload.acr:null,amr:Array.isArray(payload.amr)&&payload.amr.every(v=>typeof v==="string")?payload.amr:[]};
-  return next();
+  return withVerifiedRequestIdentity(req.identity,next);
  };
 }
 

@@ -134,6 +134,13 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(revokeResponse.status,200,"a user must be able to revoke another one of their own sessions");
     const revokedSessionUse=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+revocableSessionToken}});
     assert.equal(revokedSessionUse.status,401,"a revoked access session must be rejected on its next request");
+    const {withVerifiedRequestIdentity}=await import("../server/request-identity.js");
+    const staleIdentity={subject:sessionPayload.sub,issuer:sessionPayload.iss,jti:sessionPayload.jti,issuedAt:sessionPayload.iat,expiresAt:sessionPayload.exp,authTime:sessionPayload.auth_time};
+    for(const repeatableRead of [false,true]){
+     await assert.rejects(()=>withVerifiedRequestIdentity(staleIdentity,()=>withTenant(tenantA,staleIdentity.subject,c=>c.query("SELECT id FROM contracts"),{repeatableRead})),/Session revoked or unavailable/i,"session revoked after HTTP admission cannot start a new transaction");
+    }
+    await assert.rejects(()=>withVerifiedRequestIdentity(staleIdentity,()=>withTenant(tenantA,"ci-api-owner",c=>c.query("SELECT id FROM contracts"))),/identity mismatch/i);
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("SELECT private.assert_admitted_tenant_session($1,$2)",[JSON.stringify(staleIdentity),"0".repeat(64)])),/attestation/i);
     const singleEvidence=(await admin.query("SELECT id FROM private.individual_session_revocation_receipts WHERE token_fingerprint=public.digest(convert_to($1,'UTF8'),'sha256')",[sessionPayload.jti])).rows[0];
     assert.ok(singleEvidence);
     await assert.rejects(()=>appPool.query("SELECT * FROM private.individual_session_revocation_receipts"),/permission denied/i);
