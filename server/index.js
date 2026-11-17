@@ -174,6 +174,15 @@ app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/correct-local-email"
  res.status(200).json(result.item);
 }catch(e){next(e);}});
 const privacyRequestIdValid=id=>typeof id==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
+app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/source-ingestion-restriction",membership,requirePermission("privacy.requests.submit"),requireStepUp(),async(req,res,next)=>{try{
+ const id=req.params.requestId,{mode,acknowledgeLimitedScope}=req.body||{};
+ if(!privacyRequestIdValid(id)||!["activate","release"].includes(mode)||acknowledgeLimitedScope!==true)return res.status(400).json({error:"Explicit limited source ingestion restriction action required"});
+ const result=await withPrivacyStepUp(req.membership,req.identity,id,"source_ingestion_restriction:"+mode,async(c,proof)=>{
+  const r=await c.query("SELECT private.apply_source_ingestion_restriction($1,$2,$3,$4,$5) AS result",[req.membership.tenantId,id,mode,req.identity.authTime,proof]);return r.rows[0].result;
+ });
+ if(result.error)return res.status(result.status).json({error:result.error});
+ res.json(result.item);
+}catch(e){next(e);}});
 app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/confirm-account",membership,requirePermission("privacy.requests.submit"),requireStepUp(),async(req,res,next)=>{try{
  const id=req.params.requestId;
  if(!privacyRequestIdValid(id))return res.status(400).json({error:"Invalid request ID"});
@@ -461,7 +470,7 @@ app.get("/v1/tenants/:tenantId/calculations/:runId",membership,requirePermission
 
 registerPayrollRoutes(app,membership);
 
-app.use((err,req,res,next)=>{const id=randomUUID();const status=err.code==="23505"?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);const safeCode=typeof err.code==="string"&&/^[A-Z0-9_]{1,32}$/.test(err.code)?err.code:undefined;process.stderr.write(JSON.stringify({event:"request_error",reference:id,status,method:req.method,errorCode:safeCode,timestamp:new Date().toISOString()})+"\n");const publicErrors={400:"Invalid request",401:"Authentication required",403:"Request denied",404:"Resource not found",409:"Conflicting record; refresh and review the current state",413:"Request too large",415:"Unsupported media type",422:"Request could not be processed",429:"Too many requests"};res.status(status).json({error:publicErrors[status]||"Internal server error",reference:id});});
+app.use((err,req,res,next)=>{const id=randomUUID();const status=["23505","PPR01"].includes(err.code)?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);const safeCode=typeof err.code==="string"&&/^[A-Z0-9_]{1,32}$/.test(err.code)?err.code:undefined;process.stderr.write(JSON.stringify({event:"request_error",reference:id,status,method:req.method,errorCode:safeCode,timestamp:new Date().toISOString()})+"\n");const publicErrors={400:"Invalid request",401:"Authentication required",403:"Request denied",404:"Resource not found",409:"Conflicting record; refresh and review the current state",413:"Request too large",415:"Unsupported media type",422:"Request could not be processed",429:"Too many requests"};res.status(status).json({error:publicErrors[status]||"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
 if(process.env.NODE_ENV!=="test"){
  const server=app.listen(port,()=>process.stdout.write("ProfitPilot API listening on "+port+"\n"));

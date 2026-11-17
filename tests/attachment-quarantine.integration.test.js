@@ -42,6 +42,46 @@ test("synthetic encrypted quarantine rejects wrong actors, direct reads and unsa
   assert.deepEqual(openQuarantinedAttachment(row,{tenantId:tenant,batchId:batch,userId:user,id:receipt.id,type:row.media_type,keyId:row.key_id,size:row.byte_count},key),bytes);
   await assert.rejects(()=>withTenant(tenant,"quarantine-ci-user",c=>c.query("SELECT ciphertext FROM private.quarantined_attachments")),/permission denied/i);
   assert.equal((await req(root+"/"+receipt.id,"quarantine-ci-user",{method:"GET"})).status,404);
+  const privacyRoot="/v1/tenants/"+tenant+"/privacy/requests";
+  const json=(path,subject,body,mfa=true)=>req(path,subject,{type:"application/json",body:JSON.stringify(body),mfa});
+  async function reviewedRestriction(){
+   const created=await json(privacyRoot,"quarantine-ci-user",{requestType:"restriction",details:"Reviewed synthetic source ingestion control"});
+   assert.equal(created.status,201,await created.clone().text());
+   const id=(await created.json()).id,uri=privacyRoot+"/"+id;
+   assert.equal((await json(uri+"/decision","quarantine-ci-owner",{action:"verify_identity",reason:"Begin reviewed restriction"})).status,200);
+   assert.equal((await json(uri+"/confirm-account","quarantine-ci-user",{})).status,200);
+   assert.equal((await json(uri+"/decision","quarantine-ci-owner",{action:"begin_review",reason:"Independent source ingestion review"})).status,200);
+   await new Promise(r=>setTimeout(r,1100));
+   return {id,uri};
+  }
+  const activate=await reviewedRestriction();
+  const restriction=activate.uri+"/source-ingestion-restriction",action={mode:"activate",acknowledgeLimitedScope:true};
+  assert.equal((await json(restriction,"quarantine-ci-user",action,false)).status,403);
+  assert.equal((await json(restriction,"quarantine-ci-owner",action)).status,404);
+  const changed=await json(restriction,"quarantine-ci-user",action);
+  assert.equal(changed.status,200,await changed.clone().text());
+  assert.equal((await changed.json()).completeProcessingRestriction,false);
+  assert.equal((await json(restriction,"quarantine-ci-user",action)).status,409);
+  const newImport={sourceType:"payroll",fileName:"restricted.csv",sha256:randomBytes(32).toString("hex"),permissionReference:"Synthetic only",periodStart:"2026-02-01",periodEnd:"2026-02-28"};
+  assert.equal((await json("/v1/tenants/"+tenant+"/imports","quarantine-ci-user",newImport)).status,409);
+  assert.equal((await req(root,"quarantine-ci-user")).status,409);
+  await assert.rejects(()=>withTenant(tenant,"quarantine-ci-user",c=>c.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,'{}')",[tenant,batch])),/Source ingestion is restricted/i);
+  await assert.rejects(()=>withTenant(tenant,"quarantine-ci-user",c=>c.query("SELECT * FROM private.source_ingestion_restrictions")),/permission denied/i);
+  const release=await reviewedRestriction();
+  const releaseBody={mode:"release",acknowledgeLimitedScope:true};
+  await admin.query("INSERT INTO private.privacy_retention_holds(tenant_id,subject_user_id,authority_reference) VALUES($1,$2,'Synthetic restriction hold')",[tenant,user]);
+  assert.equal((await json(release.uri+"/source-ingestion-restriction","quarantine-ci-user",releaseBody)).status,409);
+  await admin.query("DELETE FROM private.privacy_retention_holds WHERE tenant_id=$1 AND subject_user_id=$2",[tenant,user]);
+  assert.equal((await json(release.uri+"/source-ingestion-restriction","quarantine-ci-user",releaseBody)).status,200);
+  assert.equal((await json("/v1/tenants/"+tenant+"/imports","quarantine-ci-user",newImport)).status,201);
+  assert.equal((await json(release.uri+"/source-ingestion-restriction","quarantine-ci-user",releaseBody)).status,409);
+  await assert.rejects(()=>admin.query("DELETE FROM private.source_ingestion_restrictions WHERE request_id=$1",[activate.id]),/receipts must be retained/i);
+  const restrictionState=(await admin.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;
+  assert.ok(restrictionState.markers.some(m=>m.kind==="source_ingestion_restricted"&&m.id===activate.id));
+  assert.ok(restrictionState.markers.some(m=>m.kind==="source_ingestion_released"&&m.id===release.id));
+  // Close the scoped requests by requester withdrawal; outstanding requests intentionally block quarantine discard.
+  for(const item of [activate,release])assert.equal((await json(item.uri+"/withdraw","quarantine-ci-user",{reason:"Synthetic scope review concluded"})).status,200);
+
   const discard=root+"/"+receipt.id+"/discard",discardOptions={type:"application/json",body:JSON.stringify({discardQuarantineOnly:true})};
   assert.equal((await req(discard,"quarantine-ci-owner",discardOptions)).status,404);
   await admin.query("INSERT INTO private.privacy_retention_holds(tenant_id,subject_user_id,authority_reference) VALUES($1,$2,'Synthetic hold')",[tenant,user]);

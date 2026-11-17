@@ -49,6 +49,7 @@ services:
       - ./database/migrations/034_signing_key_lifecycle.sql:/docker-entrypoint-initdb.d/036-signing-key-lifecycle.sql:ro
       - ./database/migrations/035_local_profile_correction.sql:/docker-entrypoint-initdb.d/037-local-profile-correction.sql:ro
       - ./database/migrations/036_encrypted_attachment_quarantine.sql:/docker-entrypoint-initdb.d/038-encrypted-attachment-quarantine.sql:ro
+      - ./database/migrations/037_source_ingestion_restriction.sql:/docker-entrypoint-initdb.d/039-source-ingestion-restriction.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s

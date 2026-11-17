@@ -92,6 +92,31 @@ paths:
         "200": { description: Scoped local correction receipt }
         "403": { description: Missing verified claim or authority }
         "409": { description: Review, hold, eligibility or replay conflict }
+  /tenants/{tenantId}/privacy/requests/{requestId}/source-ingestion-restriction:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Apply or release a reviewed limited source ingestion restriction
+      description: Requester-only fresh MFA after independent review. A release requires a separate subsequent restriction request and no active hold. This does not restrict all processing of existing personal data.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode, acknowledgeLimitedScope]
+              properties:
+                mode: { type: string, enum: [activate, release] }
+                acknowledgeLimitedScope: { type: boolean, const: true }
+      responses:
+        "200": { description: Limited restriction changed and audited }
+        "403": { description: Permission or MFA required }
+        "404": { description: Request not found }
+        "409": { description: Scope, review, hold or state conflict }
   /tenants/{tenantId}/privacy/requests/{requestId}/confirm-account:
     parameters:
       - $ref: '#/components/parameters/TenantId'
