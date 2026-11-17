@@ -34,6 +34,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
   process.env.DATABASE_URL=process.env.TEST_APP_DATABASE_URL;
   process.env.AUTH_ISSUER=issuer;
   process.env.AUTH_AUDIENCE=audience;
+  process.env.AUTH_STEP_UP_ACR="urn:profitpilot:step-up";
   process.env.AUTH_JWKS_URL=`http://127.0.0.1:${jwksAddress.port}/.well-known/jwks.json`;
   if(!process.env.TENANT_CONTEXT_HMAC_SECRET)throw new Error("CI tenant context signing key is required");
   const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL});
@@ -48,8 +49,9 @@ test("authenticated API enforces tenant membership, role permissions and import 
       .setIssuer(issuer).setAudience(audience).setSubject(subject)
       .setIssuedAt().setExpirationTime("5m").sign(privateKey);
   }
-  async function customToken(subject,{issuedAt=Math.floor(Date.now()/1000),expiresAt=Math.floor(Date.now()/1000)+300,includeIssuedAt=true,includeExpiry=true}={}){
-    let jwt=new SignJWT({email:subject+"@example.invalid"}).setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(issuer).setAudience(audience).setSubject(subject);
+  async function customToken(subject,{issuedAt=Math.floor(Date.now()/1000),expiresAt=Math.floor(Date.now()/1000)+300,includeIssuedAt=true,includeExpiry=true,authTime,acr}={}){
+    const claims={email:subject+"@example.invalid"};if(authTime!==undefined)claims.auth_time=authTime;if(acr!==undefined)claims.acr=acr;
+    let jwt=new SignJWT(claims).setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(issuer).setAudience(audience).setSubject(subject);
     if(includeIssuedAt)jwt=jwt.setIssuedAt(issuedAt);
     if(includeExpiry)jwt=jwt.setExpirationTime(expiresAt);
     return jwt.sign(privateKey);
