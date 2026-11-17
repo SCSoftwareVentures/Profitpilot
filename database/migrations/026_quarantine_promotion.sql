@@ -140,6 +140,8 @@ BEGIN
  OR private.quarantine_rows_digest(p_rows) IS DISTINCT FROM manifest.rows_hash
  OR q.scan_state IS DISTINCT FROM 'clean' OR q.content_state IS DISTINCT FROM 'validated' OR q.ciphertext IS NULL
  OR q.created_at<=clock_timestamp()-interval '24 hours' OR b.status IS DISTINCT FROM 'registered'
+ OR b.file_sha256 IS DISTINCT FROM q.file_sha256
+ OR EXISTS(SELECT 1 FROM private.identity_session_cutoffs c WHERE c.user_id=p.approved_by AND c.revoked_through>=floor(extract(epoch FROM p.approved_at))::bigint)
  OR b.source_type NOT IN ('customer_invoice','supplier_invoice')
  OR EXISTS(SELECT 1 FROM private.import_disposal_controls WHERE tenant_id=p_tenant AND batch_id=p_batch AND hold_active)
  OR EXISTS(SELECT 1 FROM public.raw_import_rows WHERE tenant_id=p_tenant AND batch_id=p_batch)
