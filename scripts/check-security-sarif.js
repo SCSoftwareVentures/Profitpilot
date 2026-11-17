@@ -7,9 +7,18 @@ export function assessSarif(doc){
  const blocking=[];let total=0;
  for(const run of doc.runs){
   const driver=run.tool?.driver;
-  if(typeof driver?.name!=="string"||!driver.name.toLowerCase().includes("codeql")||!Array.isArray(run.results)||!Array.isArray(driver.rules))throw Error("Unrecognised CodeQL evidence");
+  if(typeof driver?.name!=="string"||!driver.name.toLowerCase().includes("codeql")||!Array.isArray(run.results)||driver.rules!==undefined&&!Array.isArray(driver.rules)||run.tool.extensions!==undefined&&!Array.isArray(run.tool.extensions))throw Error("Unrecognised CodeQL evidence");
   if(run.invocations?.some(i=>i.executionSuccessful!==true))throw Error("Incomplete CodeQL invocation");
-  const rules=new Map(driver.rules.map(r=>[r.id,r]));
+  const rules=new Map();
+  for(const component of [driver,...(run.tool.extensions??[])]){
+   if(component.rules!==undefined&&!Array.isArray(component.rules))throw Error("Invalid CodeQL rule metadata");
+   for(const rule of component.rules??[]){
+    if(typeof rule.id!=="string")throw Error("Invalid CodeQL rule metadata");
+    const old=rules.get(rule.id);
+    if(old&&JSON.stringify(old)!==JSON.stringify(rule))throw Error("Conflicting CodeQL rule metadata");
+    rules.set(rule.id,rule);
+   }
+  }
   for(const result of run.results){
    total++;
    const rule=rules.get(result.ruleId);
@@ -35,4 +44,4 @@ function main(){
  console.log(JSON.stringify({reports:files.length,findings:total,blocking}));
  if(blocking.length)process.exitCode=1;
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)try{main();}catch{console.error("Static security evidence invalid or unavailable.");process.exitCode=1;}
+if(process.argv[1]&&import.meta.url===pathToFileURL(process.argv[1]).href)try{main();}catch(e){const known=new Set(["CodeQL evidence directory required","CodeQL produced no SARIF","Oversized SARIF","Missing SARIF analysis","Unrecognised CodeQL evidence","Incomplete CodeQL invocation","Invalid CodeQL rule metadata","Conflicting CodeQL rule metadata","Unclassified static analysis finding"]);console.error(known.has(e?.message)?e.message:"Static security evidence invalid or unavailable.");process.exitCode=1;}

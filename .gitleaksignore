@@ -1,0 +1,3 @@
+# Reviewed historical synthetic localhost integration-test fixture; no live credential.
+# Scope: exactly one immutable commit/path/rule/line; all current files and other historical entries remain scanned.
+78f84e0174f57ff927702ea3f9a17c01fb74c9e6:tests/api.integration.test.js:generic-api-key:36

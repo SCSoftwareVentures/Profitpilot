@@ -11,3 +11,10 @@ test("security gate detects high severity and does not echo finding payloads",()
 test("security gate rejects missing, fake, unclassified or unsuccessful reports",()=>{
  for(const d of [{},{version:"2.1.0",runs:[]},doc([{ruleId:"unknown"}]),{...doc(),runs:[{...doc().runs[0],invocations:[{executionSuccessful:false}]}]}, {version:"2.1.0",runs:[{tool:{driver:{name:"Other",rules:[]}},results:[]}]}])assert.throws(()=>assessSarif(d));
 });
+
+test("CodeQL rules contributed by extension packs retain their severity",()=>{
+ const d=doc([{ruleId:"js/extension"}]);
+ delete d.runs[0].tool.driver.rules;
+ d.runs[0].tool.extensions=[{rules:[{id:"js/extension",properties:{"security-severity":"9.5"}}]}];
+ assert.equal(assessSarif(d).blocking.length,1);
+});
