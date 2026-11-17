@@ -54,8 +54,10 @@ test("worker distinguishes malware verdict from content rejection and clears pla
   let claims=0,recorded,plaintext;
   const db={query:async(sql,args)=>{
    if(sql.includes("claim"))return {rows:claims++===0?[row]:[]};
-   assert.match(sql,/finish_quarantine_scan_with_content/);
-   recorded=args.slice(3);return {rows:[{recorded:true}]};
+   assert.match(sql,/finish_quarantine_manifest/);
+   recorded=args.slice(3,5);
+   if(args[4]==="validated")assert.deepEqual(JSON.parse(args[5]),[{invoice_id:"INV-1",site:"Site A",date:"2026-02-28",amount:"30.50"}]);else assert.equal(args[5],null);
+   return {rows:[{recorded:true}]};
   }};
   await runQuarantineCycle(db,{keyId,secret,scan:async plain=>{plaintext=plain;return malware;}});
   assert.deepEqual(recorded,expected);
