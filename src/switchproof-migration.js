@@ -12,7 +12,7 @@ const format=value=>{const negative=value<0n,absolute=negative?-value:value;retu
 export function profileMigration({manifest,mappings,requiredTargets,rows}={}){
   if(!manifest||typeof manifest!=="object"||Array.isArray(manifest))throw new TypeError("A source manifest is required.");
   if(!ID.test(manifest.sourceSystem||"")||!SHA.test(manifest.sourceSha256||"")||!ID.test(manifest.permissionReference||"")||
-     !Number.isSafeInteger(manifest.expectedRowCount)||manifest.expectedRowCount<1||manifest.expectedRowCount>10000||
+     !Number.isSafeInteger(manifest.expectedRowCount)||manifest.expectedRowCount<1||manifest.expectedRowCount>10000||typeof manifest.mappingVersion!=="string"||!ID.test(manifest.mappingVersion)||
      !/^[A-Z]{3}$/.test(manifest.currency||"")||!["gst_inclusive","gst_exclusive","no_gst","unknown"].includes(manifest.taxBasis)||
      !isIsoDate(manifest.periodStart)||!isIsoDate(manifest.periodEnd)||manifest.periodEnd<manifest.periodStart){
     throw new TypeError("Source manifest identity, permission, checksum, row count, currency, tax basis and period must be explicit.");
@@ -24,7 +24,7 @@ export function profileMigration({manifest,mappings,requiredTargets,rows}={}){
   }
   const mapping=new Map();
   for(const item of mappings){
-    if(!item||typeof item!=="object"||Array.isArray(item)||!ID.test(item.target||"")||!ID.test(item.source||"")||mapping.has(item.target)){
+    if(!item||typeof item!=="object"||Array.isArray(item)||typeof item.target!=="string"||!ID.test(item.target)||typeof item.source!=="string"||!ID.test(item.source)||mapping.has(item.target)){
       throw new TypeError("Each mapping must contain unique safe target and source field identifiers.");
     }
     mapping.set(item.target,item.source);
@@ -52,7 +52,7 @@ export function profileMigration({manifest,mappings,requiredTargets,rows}={}){
     const amount=cents(row[mapping.get("amount")]);
     if(amount===null)exceptions.push({rowNumber:index+1,code:"invalid_amount"});
     else{parsedTotal+=amount;validAmountRows++;}
-    if(!isIsoDate(row[mapping.get("date")]))exceptions.push({rowNumber:index+1,code:"invalid_date"});
+    if(!isIsoDate(row[mapping.get("date")]))exceptions.push({rowNumber:index+1,code:"invalid_date"});\n    else if(row[mapping.get("date")]<manifest.periodStart||row[mapping.get("date")]>manifest.periodEnd)exceptions.push({rowNumber:index+1,code:"date_outside_manifest_period"});
     if(row[mapping.get("currency")]!==manifest.currency)exceptions.push({rowNumber:index+1,code:"currency_mismatch"});
   }
   const countMatches=rows.length===manifest.expectedRowCount;
@@ -64,7 +64,7 @@ export function profileMigration({manifest,mappings,requiredTargets,rows}={}){
   return {
     sourceSystem:manifest.sourceSystem,
     sourceSha256:manifest.sourceSha256.toLowerCase(),
-    mappingVersion:manifest.mappingVersion&&ID.test(manifest.mappingVersion)?manifest.mappingVersion:null,
+    mappingVersion:manifest.mappingVersion,
     expectedRowCount:manifest.expectedRowCount,
     receivedRowCount:rows.length,
     validAmountRows,
