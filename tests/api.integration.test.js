@@ -48,6 +48,12 @@ test("authenticated API enforces tenant membership, role permissions and import 
       .setIssuer(issuer).setAudience(audience).setSubject(subject)
       .setIssuedAt().setExpirationTime("5m").sign(privateKey);
   }
+  async function customToken(subject,{issuedAt=Math.floor(Date.now()/1000),expiresAt=Math.floor(Date.now()/1000)+300,includeIssuedAt=true,includeExpiry=true}={}){
+    let jwt=new SignJWT({email:subject+"@example.invalid"}).setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(issuer).setAudience(audience).setSubject(subject);
+    if(includeIssuedAt)jwt=jwt.setIssuedAt(issuedAt);
+    if(includeExpiry)jwt=jwt.setExpirationTime(expiresAt);
+    return jwt.sign(privateKey);
+  }
   async function request(path,{subject,method="GET",body}={}){
     const headers={};
     if(subject)headers.authorization="Bearer "+await token(subject);
@@ -69,6 +75,13 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.ok(healthResponse.headers.get("x-content-type-options"),"Helmet security headers must be present");
     const noToken=await request("/v1/me");
     assert.equal(noToken.status,401,"requests without a bearer token must be rejected");
+    const noExpiry=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+await customToken("ci-api-analyst",{includeExpiry:false})}});
+    assert.equal(noExpiry.status,401,"JWTs without an expiry claim must be rejected");
+    const staleToken=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+await customToken("ci-api-analyst",{issuedAt:Math.floor(Date.now()/1000)-3600,expiresAt:Math.floor(Date.now()/1000)+60})}});
+    assert.equal(staleToken.status,401,"access tokens older than the configured maximum age must be rejected");
+    const expiredToken=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+await customToken("ci-api-analyst",{issuedAt:Math.floor(Date.now()/1000)-600,expiresAt:Math.floor(Date.now()/1000)-30})}});
+    assert.equal(expiredToken.status,401,"expired access tokens must be rejected");
+
     assert.equal(noToken.headers.get("cache-control"),"no-store","unauthenticated API responses must not be cached");
     const malformed=await fetch(base+"/v1/me",{method:"POST",headers:{"content-type":"application/json"},body:"{"});
     assert.equal(malformed.status,400,"malformed JSON must be rejected");
