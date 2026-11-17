@@ -32,6 +32,13 @@ const individualCheckpoint=signCheckpoint({markers:individual,violations:[]},opt
 const individualVerify={...options,expectedDigest:checkpointDigest(individualCheckpoint)};
 assert.throws(()=>verifyCheckpoint(individualCheckpoint,old,individualVerify),/missing or has changed/);
 assert.equal(verifyCheckpoint(individualCheckpoint,fresh,individualVerify).verified,true);
+const incidents=live.markers.filter(m=>["account_contained","account_recovered"].includes(m.kind));
+assert.ok(incidents.some(m=>m.kind==="account_contained"));
+assert.ok(incidents.some(m=>m.kind==="account_recovered"));
+const incidentCheckpoint=signCheckpoint({markers:incidents,violations:[]},options);
+const incidentVerify={...options,expectedDigest:checkpointDigest(incidentCheckpoint)};
+assert.throws(()=>verifyCheckpoint(incidentCheckpoint,old,incidentVerify),/missing or has changed/);
+assert.equal(verifyCheckpoint(incidentCheckpoint,fresh,incidentVerify).verified,true);
 const checkpoint=signCheckpoint(live,options);
 const verify={...options,expectedDigest:checkpointDigest(checkpoint)};
 assert.throws(()=>verifyCheckpoint(checkpoint,old,verify),/missing or has changed/);

@@ -28,14 +28,17 @@ export async function withTenant(tenantId,subject,fn,{repeatableRead=false}={}){
  const payload=[tenantId,subject,expires,nonce,keyId].join("\n");
  const signature=createHmac("sha256",Buffer.from(secret,"hex")).update(payload).digest("hex");
  const client=await pool.connect();
+ let discard;
  try{
   await client.query(repeatableRead?"BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY":"BEGIN");
   await client.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.tenant_subject',$2,true),set_config('app.tenant_expires',$3,true),set_config('app.tenant_nonce',$4,true),set_config('app.tenant_key_id',$5,true),set_config('app.tenant_signature',$6,true)",[tenantId,subject,expires,nonce,keyId,signature]);
   const result=await fn(client,{nonce});
   await client.query("COMMIT");
   return result;
- }catch(error){await client.query("ROLLBACK");throw error;}
- finally{client.release();}
+ }catch(error){
+  try{await client.query("ROLLBACK");}catch(rollbackError){discard=rollbackError;}
+  throw error;
+ }finally{client.release(discard);}
 }
 export async function health(){const r=await pool.query("SELECT 1 AS ok");return r.rows[0].ok===1;}
 
@@ -46,6 +49,7 @@ async function verifiedSessionOperation(action,{jti,subject,issuer,issuedAt,expi
  if(!/^[A-Za-z0-9._-]{1,128}$/.test(keyId)||secret.length%2!==0||!/^[a-f0-9]{64,256}$/i.test(secret))throw Error("Session signing configuration is invalid");
  const body=JSON.stringify({action,jti,subject,issuer,issuedAt,expiresAt,authTime:authTime??null,target,stepUpVerified});
  const client=await pool.connect();
+ let discard;
  try{
   await client.query("BEGIN");
   const {rows:[ctx]}=await client.query("SELECT txid_current()::text AS tx,pg_backend_pid()::text AS pid");
@@ -53,8 +57,10 @@ async function verifiedSessionOperation(action,{jti,subject,issuer,issuedAt,expi
   const result=await client.query("SELECT private.verified_session_operation($1,$2,$3) AS result",[keyId,body,proof]);
   await client.query("COMMIT");
   return result.rows[0]?.result;
- }catch(error){await client.query("ROLLBACK");throw error;}
- finally{client.release();}
+ }catch(error){
+  try{await client.query("ROLLBACK");}catch(rollbackError){discard=rollbackError;}
+  throw error;
+ }finally{client.release(discard);}
 }
 export async function registerAndCheckAuthSession(identity){
  const result=await verifiedSessionOperation("admit",identity);

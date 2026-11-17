@@ -79,3 +79,15 @@ test("individual revocation receipts detect rollback and fingerprint or expiry s
  assert.throws(()=>signCheckpoint({markers:[{...receipt,tokenFingerprint:"raw-token"}],violations:[]},{key,deploymentId,now}),/Invalid individual session revocation marker/);
  assert.equal(JSON.stringify(signed).includes("subject"),false);
 });
+
+test("containment and recovery checkpoints independently bind incident evidence",()=>{
+ const contained={kind:"account_contained",id:uuid(11),userId:uuid(12),at:"1794873600.1",evidence:"ab".repeat(32)};
+ const recovered={...contained,kind:"account_recovered",at:"1794873601.1",evidence:"cd".repeat(32)};
+ const full={markers:[contained,recovered],violations:[]};
+ const signed=signCheckpoint(full,{key,deploymentId,now});
+ const options={...opt,expectedDigest:checkpointDigest(signed)};
+ assert.equal(verifyCheckpoint(signed,full,options).requiredMarkers,2);
+ assert.throws(()=>verifyCheckpoint(signed,{markers:[contained],violations:[]},options),/missing or has changed/);
+ assert.throws(()=>verifyCheckpoint(signed,{markers:[contained,{...recovered,evidence:"ef".repeat(32)}],violations:[]},options),/missing or has changed/);
+ assert.throws(()=>verifyCheckpoint(signed,{...full,violations:[{kind:"account_containment_state_mismatch"}]},options),/inconsistent/);
+});

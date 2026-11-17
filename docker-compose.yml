@@ -56,6 +56,7 @@ services:
       - ./database/migrations/041_account_session_revocation.sql:/docker-entrypoint-initdb.d/043-account-session-revocation.sql:ro
       - ./database/migrations/042_session_revocation_restore_integrity.sql:/docker-entrypoint-initdb.d/044-session-revocation-restore-integrity.sql:ro
       - ./database/migrations/043_individual_session_restore_integrity.sql:/docker-entrypoint-initdb.d/045-individual-session-restore-integrity.sql:ro
+      - ./database/migrations/044_account_compromise_containment.sql:/docker-entrypoint-initdb.d/046-account-compromise-containment.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s

@@ -49,9 +49,9 @@ test("authenticated API enforces tenant membership, role permissions and import 
       .setIssuer(issuer).setAudience(audience).setSubject(subject)
       .setIssuedAt().setExpirationTime("5m").setJti(randomBytes(16).toString("hex")).sign(privateKey);
   }
-  async function customToken(subject,{issuedAt=Math.floor(Date.now()/1000),expiresAt=Math.floor(Date.now()/1000)+300,includeIssuedAt=true,includeExpiry=true,authTime,acr,amr,jti=randomBytes(16).toString("hex")}={}){
+  async function customToken(subject,{issuedAt=Math.floor(Date.now()/1000),expiresAt=Math.floor(Date.now()/1000)+300,includeIssuedAt=true,includeExpiry=true,authTime,acr,amr,typ,jti=randomBytes(16).toString("hex")}={}){
     const claims={email:subject+"@example.invalid"};if(authTime!==undefined)claims.auth_time=authTime;if(acr!==undefined)claims.acr=acr;if(amr!==undefined)claims.amr=amr;
-    let jwt=new SignJWT(claims).setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(issuer).setAudience(audience).setSubject(subject);
+    let jwt=new SignJWT(claims).setProtectedHeader({alg:"RS256",kid:jwk.kid,...(typ===undefined?{}:{typ})}).setIssuer(issuer).setAudience(audience).setSubject(subject);
     if(includeIssuedAt)jwt=jwt.setIssuedAt(issuedAt);
     if(includeExpiry)jwt=jwt.setExpirationTime(expiresAt);
     jwt=jwt.setJti(jti);
@@ -199,6 +199,51 @@ test("authenticated API enforces tenant membership, role permissions and import 
      assert.ok(inconsistent.violations.some(v=>v.kind==="revoked_session_reinstated"&&v.id===incidentId));
     }finally{await probe.query("ROLLBACK");probe.release();}
 
+    // Exercise separation of duties with actual SQL session identities (CI superuser fixture only).
+    const compromiseId="deadbeef-2222-4222-8222-222222222222",compromiseSubject="ci-api-compromise";
+    await admin.query("INSERT INTO users(id,auth_subject,email,status,auth_issuer) VALUES($1,$2,'compromise@example.invalid','active',$3)",[compromiseId,compromiseSubject,issuer]);
+    await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'analyst','active')",[tenantA,compromiseId]);
+    const compromisedToken=await token(compromiseSubject);
+    assert.equal((await useToken(compromisedToken)).status,200);
+    await admin.query("CREATE ROLE ci_containment_operator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE; CREATE ROLE ci_recovery_operator LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE; GRANT profitpilot_incident_containment TO ci_containment_operator; GRANT profitpilot_incident_recovery TO ci_recovery_operator");
+    let incidentCase;
+    const operatorClient=await admin.connect();
+    try{
+     await operatorClient.query("SET SESSION AUTHORIZATION ci_containment_operator");
+     incidentCase=(await operatorClient.query("SELECT private.contain_compromised_account($1,$2) AS id",[compromiseId,"a".repeat(64)])).rows[0].id;
+     await assert.rejects(()=>operatorClient.query("SELECT private.recover_contained_account($1,$2,$3)",[incidentCase,"b".repeat(64),"c".repeat(64)]),/permission denied/i);
+     await operatorClient.query("RESET SESSION AUTHORIZATION");
+     assert.equal((await useToken(compromisedToken)).status,401);
+     assert.equal((await useToken(await token(compromiseSubject))).status,401,"new provider authentication cannot bypass local containment");
+     await assert.rejects(()=>admin.query("UPDATE users SET status='active' WHERE id=$1",[compromiseId]),/independent recovery/i);
+     await assert.rejects(()=>appPool.query("SELECT private.recover_contained_account($1,$2,$3)",[incidentCase,"b".repeat(64),"c".repeat(64)]),/permission denied/i);
+     await assert.rejects(()=>appPool.query("SELECT * FROM private.account_security_incidents"),/permission denied/i);
+     assert.equal((await withTenant(tenantA,compromiseSubject,c=>c.query("SELECT private.current_tenant_id() AS tenant"))).rows[0].tenant,null);
+     await operatorClient.query("SET SESSION AUTHORIZATION ci_recovery_operator");
+     await assert.rejects(()=>operatorClient.query("SELECT private.recover_contained_account($1,$2,$3)",[incidentCase,"b".repeat(64),"b".repeat(64)]),/Separate identity/i);
+     await assert.rejects(()=>operatorClient.query("SELECT private.recover_contained_account($1,$2,$3)",[incidentCase,"a".repeat(64),"c".repeat(64)]),/new evidence/i);
+     assert.equal((await operatorClient.query("SELECT private.recover_contained_account($1,$2,$3) AS ok",[incidentCase,"b".repeat(64),"c".repeat(64)])).rows[0].ok,true);
+     await assert.rejects(()=>operatorClient.query("SELECT private.recover_contained_account($1,$2,$3)",[incidentCase,"b".repeat(64),"c".repeat(64)]),/Recoverable contained account/i);
+     await operatorClient.query("RESET SESSION AUTHORIZATION");
+    }finally{await operatorClient.query("RESET SESSION AUTHORIZATION");operatorClient.release();}
+    await admin.query("DROP ROLE ci_containment_operator; DROP ROLE ci_recovery_operator");
+    assert.equal((await useToken(compromisedToken)).status,401);
+    await new Promise(resolve=>setTimeout(resolve,1100));
+    assert.equal((await useToken(await token(compromiseSubject))).status,200);
+    const incidentState=(await admin.query("SELECT private.privacy_restore_state() AS state")).rows[0].state;
+    assert.ok(incidentState.markers.some(m=>m.kind==="account_contained"&&m.id===incidentCase));
+    assert.ok(incidentState.markers.some(m=>m.kind==="account_recovered"&&m.id===incidentCase));
+    assert.deepEqual(incidentState.violations,[]);
+
+    process.env.AUTH_REQUIRE_ACCESS_TOKEN_TYPE="true";
+    try{
+     for(const typ of [undefined,"JWT","id+jwt","refresh+jwt"]){
+      assert.equal((await useToken(await customToken("ci-api-analyst",{typ}))).status,401,"non-access JWT type rejected");
+     }
+     for(const typ of ["at+jwt","application/at+jwt"]){
+      assert.equal((await useToken(await customToken("ci-api-analyst",{typ}))).status,200);
+     }
+    }finally{delete process.env.AUTH_REQUIRE_ACCESS_TOKEN_TYPE;}
     const noToken=await request("/v1/me");
     assert.equal(noToken.status,401,"requests without a bearer token must be rejected");
     const noExpiry=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+await customToken("ci-api-analyst",{includeExpiry:false})}});

@@ -58,6 +58,9 @@ export function authRequired(){
     requiredClaims:["exp","iat","sub","jti"],
     clockTolerance:5
    });
+   // In production accept only explicit RFC 9068 access-token media types.
+   // Generic JWT/ID-token profiles must not be accepted as access tokens.
+   if((process.env.NODE_ENV==="production"||process.env.AUTH_REQUIRE_ACCESS_TOKEN_TYPE==="true")&&!["at+jwt","application/at+jwt"].includes(verified.protectedHeader.typ?.toLowerCase()))return res.status(401).json({error:"Invalid access token type"});
    payload=verified.payload;
    if(!validAccessClaims(payload))return res.status(401).json({error:"Invalid or expired access token"});
   }catch{return res.status(401).json({error:"Invalid or expired access token"});}
