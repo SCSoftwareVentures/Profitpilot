@@ -14,7 +14,7 @@
 | TEN-02 | PostgreSQL RLS | Forced RLS and restricted runtime role | PostgreSQL migration/RLS tests; cross-tenant read/write negatives | Implemented for tested schema/routes | Exhaustive table, view, function, job and endpoint audit |
 | PRIV-01 | Privacy request subject isolation | Migration 012 subject-level SELECT/INSERT/UPDATE policies | Direct runtime SQL tests and API integration tests in CI #1046 | CI verified in run #1046 | Expand tests for all roles and edge cases; independent review |
 | PRIV-02 | Privacy request workflow | Submit, own-list, manager queue, identity review, legal hold, rejection, withdrawal | API integration tests in CI #1046 | Partially implemented / CI verified | Production privacy centre and verified requestor identity process |
-| PRIV-03 | Prevent false fulfilment | Later API change returns 409 when fulfilment executor is absent | Fresh CI pending at this revision | Implemented in code; verification pending | Build real export/correction/restriction/deletion executors and test them |
+| PRIV-03 | Prevent false fulfilment | Later API change returns 409 when fulfilment executor is absent | Authenticated API integration test and complete CI run #1058 passed | Implemented / CI verified in run #1058 | Build real export/correction/restriction/deletion executors and test them |
 | PRIV-04 | Data access/export | No automated export generator or secure delivery path established | Not implemented | Not implemented | Build field-scoped export, requester verification, expiry, access logging and secure delivery |
 | PRIV-05 | Correction/restriction | No general correction or restriction executor established | Not implemented | Not implemented | Define field-level correction, downstream propagation, legal holds and proof |
 | PRIV-06 | Deletion/de-identification | No verified deletion engine or dependency/backup propagation | Not implemented | Not implemented | Data map, retention schedule, legal exceptions, deletion executor, backup expiry and restore tests |
@@ -32,7 +32,8 @@
 
 ## Evidence references
 
-- CI run #1046: https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44002838128
+- CI run #1046 (privacy subject-isolation milestone): https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44002838128
+- CI run #1058 (fail-closed privacy fulfilment and current buyer-pack commit): https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44004207499
 - Threat model: [THREAT_MODEL.md](THREAT_MODEL.md)
 - Trust/security/privacy standard: [TRUST_SECURITY_PRIVACY_STANDARD.md](TRUST_SECURITY_PRIVACY_STANDARD.md)
 - Privacy engineering baseline: [PRIVACY_ENGINEERING_BASELINE.md](PRIVACY_ENGINEERING_BASELINE.md)
