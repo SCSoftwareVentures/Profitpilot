@@ -248,3 +248,10 @@ The earlier pending statement is superseded. CI run **#43983962328** passed on e
 - payroll confirmation reviewer must match the signed actor.
 
 The same run passed the 20-table tenant/FK catalogue audit, restricted-role RLS, trusted-CA TLS connection, untrusted-CA rejection and production-mode API health check. This is automated prototype evidence, not independent penetration testing or production assurance.
+
+
+## Latest hardening PR-head verification — 17 November 2026
+
+GitHub Actions run **#43984181421 (run #684)** passed on exact current PR head `5988ba408eae176cf5c69def1a9b5f4106e954c1`. Both Node.js 22 and PostgreSQL 16 jobs succeeded. PostgreSQL applied migrations through 014, passed the 20-table tenant/FK audit, restricted-role RLS and authenticated API integration (including signed reviewer identity, evidence/final-decision immutability and same-transaction audit tests), built the production image, accepted the trusted CA, rejected an untrusted CA and passed production-mode database health. Node.js passed 56 tests with 0 failures and 3 DB-dependent skips, which are exercised in the PostgreSQL job.
+
+This is automated CI evidence only. It does not satisfy full financial acceptance, independent security/accounting/legal review or the customer and production release gates.
