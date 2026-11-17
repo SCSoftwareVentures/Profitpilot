@@ -9,7 +9,7 @@ function evaluate(identity, config={}){
   process.env.AUTH_STEP_UP_ACR=config.requiredAcr??"urn:profitpilot:mfa";
   process.env.AUTH_STEP_UP_MAX_AGE_SECONDS=config.maxAge??"300";
   const result={status:null,body:null,allowed:false};
-  const req={identity};
+  const req={identity:{amr:["mfa"],...identity}};
   const res={status(code){result.status=code;return this;},json(body){result.body=body;return this;}};
   requireStepUp()(req,res,()=>{result.allowed=true;});
   return result;
@@ -35,5 +35,11 @@ test("step-up denies missing, stale and future authentication times",()=>{
 test("step-up denies unsafe freshness configuration",()=>{
  for(const maxAge of ["","29","901","NaN","1.5"]){
   assert.equal(evaluate({authTime:now(),acr:"urn:profitpilot:mfa"},{maxAge}).status,403);
+ }
+});
+
+test("step-up denies missing MFA method evidence even with matching ACR",()=>{
+ for(const amr of [undefined,[],["pwd"],["otp"],"mfa"]){
+  assert.equal(evaluate({authTime:now(),acr:"urn:profitpilot:mfa",amr}).status,403);
  }
 });
