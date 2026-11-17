@@ -14,6 +14,7 @@ import {reconcileSharedOverhead} from "../src/shared-overhead.js";
 import {registerInvoiceRoutes} from "./invoices.js";
 import {registerSourceReconciliationRoutes} from "./source-reconciliation.js";
 import {importPayloadAllowed} from "../src/import-privacy.js";
+import {parseFinancialCsv} from "../src/secure-csv.js";
 
 const app=express();
 app.disable("x-powered-by");
@@ -262,21 +263,29 @@ app.post("/v1/tenants/:tenantId/imports",membership,requirePermission("imports.c
   res.status(201).json({batch:result.rows[0]});
  }catch(e){next(e);}
 });
-app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requirePermission("imports.rows.write"),async(req,res,next)=>{try{
- const rows=req.body?.rows;
+async function stageFinancialRows(req,res,next,{csv=false}={}){try{
+ let rows=csv?null:req.body?.rows;
  if(!privacyRequestIdValid(req.params.batchId))return res.status(400).json({error:"Invalid batch ID"});
- if(!Array.isArray(rows)||rows.length<1||rows.length>200||rows.some(x=>!x||typeof x!=="object"||Array.isArray(x)))return res.status(400).json({error:"Provide 1–200 row objects"});
+ if(!csv&&(!Array.isArray(rows)||rows.length<1||rows.length>200||rows.some(x=>!x||typeof x!=="object"||Array.isArray(x))))return res.status(400).json({error:"Provide 1–200 row objects"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const batch=await client.query("SELECT id,status,source_type,created_by FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.batchId,req.membership.tenantId]);
+  const batch=await client.query("SELECT id,status,source_type,created_by,file_sha256,file_name FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.batchId,req.membership.tenantId]);
   if(!batch.rowCount)return {status:404,error:"Import batch not found"};
   if(!["uploaded","review","validating"].includes(batch.rows[0].status))return {status:409,error:"Import batch is not open for row ingestion"};
   // All financial batches are complete single submissions; the declared importer must upload them.
   {
    if(batch.rows[0].created_by!==req.membership.userId)return {status:403,error:"Only the original batch importer may submit its source rows"};
+   if(csv){
+    if(!/^[^\/\\\x00-\x1f\x7f]{1,250}\.csv$/i.test(batch.rows[0].file_name))return {status:422,error:"Registered source filename must be a CSV basename"};
+    const checked=parseFinancialCsv(req.body,batch.rows[0].source_type);
+    if(checked.error)return {status:422,error:checked.error};
+    if(checked.sha256!==batch.rows[0].file_sha256)return {status:409,error:"CSV checksum differs from the registered source"};
+    rows=checked.rows;
+   }
    if(!importPayloadAllowed(batch.rows[0].source_type,rows))return {status:422,error:"Source rows contain unsupported fields, nested values or excessive lengths; remove unnecessary personal data before submitting"};
    const prior=(await client.query("SELECT count(*)::int AS n, COALESCE(jsonb_agg(payload ORDER BY row_number)=$3::jsonb,false) AS identical FROM raw_import_rows WHERE batch_id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId,JSON.stringify(rows)])).rows[0];
    if(prior.n>0){
     if(!prior.identical)return {status:409,error:"Source batch already contains different rows; create a new batch and reconcile independently"};
+    if(csv)return {status:409,error:"Batch already staged; file submission cannot replace or certify a previous upload"};
     return {status:201,inserted:0,received:rows.length,duplicates:rows.length};
    }
   }
@@ -286,11 +295,16 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requirePermiss
    inserted+=row.rowCount;
   }
   await client.query("UPDATE import_batches SET status='review' WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
+  if(csv)await appendAudit(client,req.membership,"import_csv_staged","import_batch",req.params.batchId,"CSV bytes matched declared source checksum",{sha256:batch.rows[0].file_sha256,rowCount:rows.length,rawFilePersisted:false});
   return {status:201,inserted,received:rows.length,duplicates:rows.length-inserted};
  });
  if(result.error)return res.status(result.status).json({error:result.error});
- res.status(result.status).json({batchId:req.params.batchId,inserted:result.inserted,received:result.received,duplicates:result.duplicates});
- }catch(e){next(e);}});
+ res.status(result.status).json({batchId:req.params.batchId,inserted:result.inserted,received:result.received,duplicates:result.duplicates,...(csv?{checksumVerified:true,rawFilePersisted:false}:{})});
+ }catch(e){next(e);}finally{if(csv&&Buffer.isBuffer(req.body))req.body.fill(0);}}
+app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requirePermission("imports.rows.write"),(req,res,next)=>stageFinancialRows(req,res,next));
+app.post("/v1/tenants/:tenantId/imports/:batchId/rows/csv",membership,requirePermission("imports.rows.write"),requireStepUp(),(req,res,next)=>{
+ if(!req.is("text/csv"))return res.status(415).json({error:"Only text/csv is supported"});next();
+},express.raw({type:"text/csv",limit:"100kb",inflate:false}),(req,res,next)=>stageFinancialRows(req,res,next,{csv:true}));
 
 // Decision-only import review: never return raw payroll, financial or personal source payloads.
 app.get("/v1/tenants/:tenantId/imports/:batchId/review",membership,requirePermission("imports.validate"),async(req,res,next)=>{

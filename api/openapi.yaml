@@ -309,6 +309,25 @@ paths:
         "404": { description: Batch not found }
         "409": { description: Conflicting replay or closed batch }
         "422": { description: Unsupported or excessive source fields }
+  /tenants/{tenantId}/imports/{batchId}/rows/csv:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    post:
+      summary: Stage a bounded UTF-8 CSV after verifying the declared source checksum
+      description: Original importer and fresh MFA required. Only raw text/csv, maximum 100 KiB and 200 rows. The original file is not stored; no archive, executable content or arbitrary attachment storage.
+      requestBody:
+        required: true
+        content:
+          text/csv:
+            schema: { type: string }
+      responses:
+        "201": { description: Checksum verified and minimized rows staged }
+        "403": { description: Permission, importer identity or MFA failure }
+        "409": { description: Already staged or checksum mismatch }
+        "413": { description: Size limit exceeded }
+        "415": { description: Unsupported media type or encoding }
+        "422": { description: Unsupported or malformed CSV }
   /tenants/{tenantId}/imports/{batchId}/review:
     parameters:
       - $ref: '#/components/parameters/TenantId'

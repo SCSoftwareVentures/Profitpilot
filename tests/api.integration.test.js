@@ -317,6 +317,28 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const reviewerImport=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-reviewer",method:"POST",body:{...importBody,sha256:"e".repeat(64)}});
     assert.equal(reviewerImport.status,403,"reviewers must not create source imports");
 
+    {
+     const csv="source_ref,cost_component,amount,currency,period_start,period_end\r\nSYNTHETIC-CSV,gross_wages,10.00,AUD,2026-02-01,2026-02-28\r\n";
+     const {createHash}=await import("node:crypto");
+     const sha256=createHash("sha256").update(csv).digest("hex");
+     const createdCsv=await request("/v1/tenants/"+tenantA+"/imports",{subject:"ci-api-analyst",method:"POST",body:{...importBody,sourceType:"payroll",fileName:"synthetic.csv",sha256}});
+     assert.equal(createdCsv.status,201);
+     const csvBatch=(await createdCsv.json()).batch.id;
+     const endpoint="/v1/tenants/"+tenantA+"/imports/"+csvBatch+"/rows/csv";
+     const uploadCsv=async(subject,body,contentType="text/csv")=>fetch(base+endpoint,{method:"POST",headers:{authorization:"Bearer "+await token(subject),"content-type":contentType},body});
+     assert.equal((await uploadCsv("ci-api-analyst",csv,"application/octet-stream")).status,415);
+     assert.equal((await uploadCsv("ci-api-owner",csv)).status,403);
+     assert.equal((await uploadCsv("ci-api-analyst",csv.replace("10.00","11.00"))).status,409);
+     assert.equal((await admin.query("SELECT count(*)::int AS n FROM raw_import_rows WHERE batch_id=$1",[csvBatch])).rows[0].n,0);
+     const stagedCsv=await uploadCsv("ci-api-analyst",csv);
+     assert.equal(stagedCsv.status,201,await stagedCsv.clone().text());
+     assert.equal((await stagedCsv.json()).checksumVerified,true);
+     assert.equal((await uploadCsv("ci-api-analyst",csv)).status,409);
+     const stored=(await admin.query("SELECT payload FROM raw_import_rows WHERE batch_id=$1",[csvBatch])).rows[0].payload;
+     assert.equal(stored.amount,"10.00");assert.equal(stored.source_ref,"SYNTHETIC-CSV");
+     const receipt=await admin.query("SELECT metadata FROM audit_events WHERE object_id=$1 AND action='import_csv_staged'",[csvBatch]);
+     assert.equal(receipt.rowCount,1);assert.equal(receipt.rows[0].metadata.sha256,sha256);
+    }
     const permissionView=await request(`/v1/tenants/${tenantA}/security/permissions`,{subject:"ci-api-owner"});
     assert.equal(permissionView.status,200,"tenant owners must be able to inspect the permission catalogue and overrides");
     assert.ok((await permissionView.json()).catalogue.some(x=>x.permission_key==="security.audit.read"));
