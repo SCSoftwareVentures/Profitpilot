@@ -134,7 +134,7 @@ app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/decision",membership
   if(!current.rowCount)return {status:404,error:"Privacy request not found"};
   const transitions={
    verify_identity:{requested:"identity_verification"},
-   begin_review:{requested:"under_review",identity_verification:"under_review"},
+   begin_review:{identity_verification:"under_review"},
    place_legal_hold:{under_review:"legal_hold"},
    release_legal_hold:{legal_hold:"under_review"},
    reject:{requested:"rejected",identity_verification:"rejected",under_review:"rejected"}
