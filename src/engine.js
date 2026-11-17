@@ -96,7 +96,7 @@ export function validateInvoiceRows(rows){
     return {rowNumber:r.__rowNumber||i+2,record:r,errors,status:errors.length?"held":"pending_review"};
   });
 }
-export function allocatePayroll({pool,direct=[],approved=[],nonSite="0.00",excluded="0.00"}={}){
+export function allocatePayroll({pool,direct,approved,nonSite,excluded}={}){
   const directRows=Array.isArray(direct)?direct:null;
   const approvedRows=Array.isArray(approved)?approved:null;
   const rowAmounts=rows=>rows===null?null:sumCents(rows.map(x=>x&&typeof x==="object"&&!Array.isArray(x)?x.amount:null));
