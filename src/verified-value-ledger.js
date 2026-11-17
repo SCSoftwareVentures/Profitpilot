@@ -14,12 +14,12 @@ const format=value=>{const negative=value<0n,absolute=negative?-value:value;retu
 export function appendValueEvent({events=[],event}={}){
   if(!Array.isArray(events)||events.length>20000)throw new TypeError("Value events must be an array of at most 20,000 entries.");
   if(!event||typeof event!=="object"||Array.isArray(event))throw new TypeError("A value event object is required.");
-  const valueId=clean(event.valueId,128),eventId=clean(event.eventId,128),actorId=clean(event.actorId,128);
+  const valueId=clean(event.valueId,128),eventId=clean(event.eventId,128),actorId=clean(event.actorId,128),scopeRef=clean(event.scopeRef,128);
   const type=clean(event.type,40),sourceRef=clean(event.sourceRef,128),currency=clean(event.currency,3),taxBasis=clean(event.taxBasis,32);
   const amount=cents(event.amount),periodStart=event.periodStart,periodEnd=event.periodEnd;
   const reason=clean(event.reason,1000);
   const evidenceRefs=Array.isArray(event.evidenceRefs)?event.evidenceRefs.filter(x=>typeof x==="string"&&ID.test(x.trim())).map(x=>x.trim()).slice(0,50):[];
-  if(!ID.test(valueId)||!ID.test(eventId)||!ID.test(actorId)||!ID.test(sourceRef))throw new TypeError("Value, event, actor and source identifiers must be safe non-empty IDs.");
+  if(!ID.test(valueId)||!ID.test(eventId)||!ID.test(actorId)||!ID.test(scopeRef)||!ID.test(sourceRef))throw new TypeError("Value, event, actor and source identifiers must be safe non-empty IDs.");
   if(!TYPES.includes(type))throw new TypeError("Unsupported value event type.");
   if(amount===null||amount<=0n)throw new TypeError("Value event amount must be a positive canonical decimal string.");
   if(!/^[A-Z]{3}$/.test(currency)||!TAX_BASES.has(taxBasis))throw new TypeError("Value event currency and tax basis must be explicit.");
@@ -30,7 +30,7 @@ export function appendValueEvent({events=[],event}={}){
   if(events.some(x=>x.eventId===eventId))throw new Error("Duplicate value event ID.");
   const previous=events.at(-1);
   if(previous&&Date.parse(event.occurredAt)<Date.parse(previous.occurredAt))throw new Error("Value events must be appended in chronological order.");
-  const appended={valueId,eventId,actorId,type,amount:format(amount),currency,taxBasis,periodStart,periodEnd,sourceRef,occurredAt:event.occurredAt,reason,evidenceRefs};
+  const appended={valueId,eventId,actorId,scopeRef,type,amount:format(amount),currency,taxBasis,periodStart,periodEnd,sourceRef,occurredAt:event.occurredAt,reason,evidenceRefs};
   const nextEvents=events.map(x=>({...x,evidenceRefs:[...(x.evidenceRefs||[])]}));
   nextEvents.push(appended);
   return {valueId,events:nextEvents,latestEvent:{...appended,evidenceRefs:[...evidenceRefs]}};
@@ -41,7 +41,7 @@ export function summariseValueEvents(events=[]){
   const groups=new Map();
   for(const event of events){
     if(!event||typeof event!=="object"||!ID.test(event.valueId||"")||!TYPES.includes(event.type))throw new TypeError("Value event history contains an invalid event.");
-    const key=[event.currency,event.taxBasis,event.periodStart,event.periodEnd].join("|");
+    const scopeRef=clean(event.scopeRef,128);\n    if(!ID.test(scopeRef))throw new TypeError("Value event scope reference is missing or invalid.");\n    const key=[scopeRef,event.currency,event.taxBasis,event.periodStart,event.periodEnd].join("|");
     if(!/^[A-Z]{3}$/.test(event.currency||"")||!TAX_BASES.has(event.taxBasis)||!isIsoDate(event.periodStart)||!isIsoDate(event.periodEnd)||event.periodEnd<event.periodStart)throw new TypeError("Value event dimensions are missing or invalid.");
     const amount=cents(event.amount);if(amount===null||amount<=0n)throw new TypeError("Value event amount is invalid.");
     if(!groups.has(key))groups.set(key,{currency:event.currency,taxBasis:event.taxBasis,period:{start:event.periodStart,end:event.periodEnd},totals:Object.fromEntries(TYPES.map(type=>[type,0n])),eventCount:0});
