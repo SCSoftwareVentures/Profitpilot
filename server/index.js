@@ -17,7 +17,7 @@ app.use(express.json({limit:"100kb"}));
 // Additional write throttling limits abuse of evidence ingestion and review endpoints.
 // This in-process store is suitable for a single API instance only; production
 // horizontal scaling requires a shared external rate-limit store.
-const mutationLimiter=rateLimit({windowMs:60_000,limit:20,standardHeaders:true,legacyHeaders:false,message:{error:"Too many write requests; retry later"}});
+const mutationLimiter=rateLimit({windowMs:60_000,limit:60,standardHeaders:true,legacyHeaders:false,message:{error:"Too many write requests; retry later"}});
 app.use("/v1/tenants/:tenantId",(req,res,next)=>req.method==="POST"?mutationLimiter(req,res,next):next());
 app.get("/health",async(req,res)=>{try{await health();res.json({status:"ok",database:"connected"});}catch{res.status(503).json({status:"unavailable"});}});
 // Never allow authenticated tenant responses to be cached by browsers or shared proxies.
