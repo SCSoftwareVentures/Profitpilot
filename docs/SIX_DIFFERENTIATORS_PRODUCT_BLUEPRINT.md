@@ -208,3 +208,10 @@ For implementation, definition of done includes code, tests, migrations/rollback
 A first synthetic/test-only domain implementation is provided in `src/job-readiness.js` with unit coverage in `tests/job-readiness.test.js`. It evaluates a versioned checklist using explicit satisfied, missing, conflicting, unverified and permitted not-applicable states. A satisfied check that requires evidence cannot pass without a safe evidence reference. Missing answers remain unverified. The result is either blocked or ready for a human decision; the engine never grants approval or claims a safety/profitability guarantee.
 
 This is a domain foundation only. It is not yet integrated with persisted jobs, site templates, permissions, attachments, audit history or a user-facing workflow. Those remain separate implementation tasks.
+
+
+## Implementation record — Promise Ledger foundation
+
+A synthetic/test-only state-machine implementation is provided in `src/promise-ledger.js`, with transition and evidence tests in `tests/promise-ledger.test.js`. The prototype enforces a proposed → communicated → accepted progression, explicit evidence for material state changes, unique event IDs, timezone-aware timestamps, chronological append order and terminal fulfilled/cancelled states. It does not send communications or treat a sent message as proof of customer acceptance.
+
+The browser demonstration includes a synthetic Promise Ledger timeline. Persistence, authenticated actor attribution, event-store/database enforcement, customer notification integrations, search, due-date workflows and a complete user-facing review process remain unimplemented.
