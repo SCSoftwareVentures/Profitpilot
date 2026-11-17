@@ -24,6 +24,7 @@ The most important recent improvement is database-enforced privacy-request subje
 
 ### Tenant and database isolation
 - A non-superuser runtime PostgreSQL role is configured without BYPASSRLS.
+- Production startup now fails closed unless `DATABASE_SSL=true`; the PostgreSQL client is configured with `rejectUnauthorized: true` so certificate validation is required. CI tests both the production rejection path and the TLS-enabled configuration path.
 - Tenant context is signed and transaction-scoped. The runtime role cannot read the private tenant-context signing-key table.
 - PostgreSQL RLS is enabled and forced for protected tables covered by the migrations.
 - Integration tests cover cross-tenant denial, invalid or forged tenant context, membership checks and pooled-connection context cleanup.
@@ -84,6 +85,8 @@ The latest confirmed passing CI run for the current buyer-pack commit is [run #1
 
 Run #1058 includes the fail-closed privacy fulfilment change, its regression test, the preliminary privacy inventory and the buyer-pack documentation.
 
+The subsequent database-TLS hardening is covered by CI run [#1066](https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44005751530): production configuration with `DATABASE_SSL=false` is rejected, and the TLS-enabled configuration imports successfully. The CI PostgreSQL service itself is plaintext, so the container health smoke test runs in test mode; a real certificate-validated TLS handshake against a TLS-enabled PostgreSQL deployment remains unverified.
+
 CI is not a penetration test. It does not establish production security, exhaustive isolation coverage, legal compliance, availability, secure backups or resistance to a determined attacker.
 
 ## 5. Material limitations and residual risks
@@ -100,6 +103,7 @@ CI is not a penetration test. It does not establish production security, exhaust
 10. No independent penetration test, remediation retest or security certification has been performed.
 11. The browser demo uses synthetic data and is not connected to the API.
 12. The product remains a partial API/database scaffold and validation specification, not a production application.
+13. Production database TLS has a fail-closed configuration guard, but an end-to-end TLS handshake with a deployed PostgreSQL service and its actual certificate chain has not been performed.
 
 ## 6. Acquisition diligence and handover
 
