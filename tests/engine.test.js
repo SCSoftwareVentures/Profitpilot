@@ -30,9 +30,10 @@ test("invoice amount rejects non-decimal numeric syntax",()=>assert.equal(valida
 test("invoice amount rejects more than two fractional digits",()=>assert.equal(validateInvoiceRows([{invoice_id:"1",site:"A",date:"2026-11-01",amount:"1.234"}])[0].status,"held"));
 test("impossible calendar date is held",()=>assert.equal(validateInvoiceRows([{invoice_id:"1",site:"A",date:"2026-02-31",amount:"3"}])[0].status,"held"));
 test("payroll buckets reconcile",()=>assert.equal(allocatePayroll({pool:"1000.00",direct:[{site:"A",amount:"400.00"}],approved:[{site:"B",amount:"300.00"}],nonSite:"200.00",excluded:"50.00"}).reconciles,true));
-test("over-allocation is rejected",()=>assert.equal(allocatePayroll({pool:"100.00",direct:[{site:"A",amount:"101.00"}]}).reconciles,false));
-test("payroll site allocations require valid site identities and array-shaped rows",()=>{for(const site of [undefined,"","   "])assert.equal(allocatePayroll({pool:"10.00",direct:[{site,amount:"10.00"}]}).reconciles,false);assert.equal(allocatePayroll({pool:"10.00",direct:[null]}).reconciles,false);assert.equal(allocatePayroll({pool:"10.00",direct:[{site:"A"}]}).reconciles,false);assert.equal(allocatePayroll({pool:"10.00",direct:"not-an-array"}).reconciles,false);});
-test("negative allocation is rejected",()=>assert.equal(allocatePayroll({pool:"100.00",direct:[{site:"A",amount:"-1.00"}]}).reconciles,false));
+test("over-allocation is rejected",()=>assert.equal(allocatePayroll({pool:"100.00",direct:[{site:"A",amount:"101.00"}],approved:[],nonSite:"0.00",excluded:"0.00"}).reconciles,false));
+test("payroll reconciliation requires explicit source bucket inputs rather than assuming zero",()=>{const base={pool:"10.00",direct:[],approved:[],nonSite:"0.00",excluded:"0.00"};assert.equal(allocatePayroll(base).reconciles,true);for(const key of ["direct","approved","nonSite","excluded"]){const incomplete={...base};delete incomplete[key];assert.equal(allocatePayroll(incomplete).reconciles,false,key+" must be explicit");}});
+test("payroll site allocations require valid site identities and array-shaped rows",()=>{for(const site of [undefined,"","   "])assert.equal(allocatePayroll({pool:"10.00",direct:[{site,amount:"10.00"}],approved:[],nonSite:"0.00",excluded:"0.00"}).reconciles,false);assert.equal(allocatePayroll({pool:"10.00",direct:[null],approved:[],nonSite:"0.00",excluded:"0.00"}).reconciles,false);assert.equal(allocatePayroll({pool:"10.00",direct:[{site:"A"}],approved:[],nonSite:"0.00",excluded:"0.00"}).reconciles,false);assert.equal(allocatePayroll({pool:"10.00",direct:"not-an-array",approved:[],nonSite:"0.00",excluded:"0.00"}).reconciles,false);});
+test("negative allocation is rejected",()=>assert.equal(allocatePayroll({pool:"100.00",direct:[{site:"A",amount:"-1.00"}],approved:[],nonSite:"0.00",excluded:"0.00"}).reconciles,false));
 test("amount-only match remains low-confidence and unconfirmed",()=>{const r=matchInvoice({amount:"100.00"},{id:"c",periodStart:"2026-11-01",periodEnd:"2026-11-30"});assert.equal(r.confidence,"LOW");assert.equal(r.requiresHumanConfirmation,true);assert.equal(r.decision,"candidate");});
 test("match candidate always needs human confirmation",()=>assert.equal(matchInvoice({site:"A",date:"2026-11-05",amount:"100.00"},{id:"c",site:"A",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).requiresHumanConfirmation,true));
 test("metrics aggregate totals and margin only with explicit common reporting basis",()=>{const r=aggregateMetrics([{...BASIS,revenue:"1000.00",cost:"600.00"},{...BASIS,revenue:"500.00",cost:"250.00"}]);assert.deepEqual([r.revenue,r.cost,r.contribution,r.margin,r.complete],["1500.00","850.00","650.00","43.33",true]);});
@@ -47,7 +48,7 @@ test("money rejects non-string, non-canonical and out-of-range inputs",()=>{
   for(const value of ["not-money","1e3","01.00","1.234","1000000000000.00",1.25,Infinity]) assert.equal(Number.isNaN(money(value)),true);
 });
 test("payroll allocation sums decimal amounts without binary floating drift",()=>{
-  const result=allocatePayroll({pool:"0.30",direct:[{site:"A",amount:"0.10"},{site:"A",amount:"0.20"}]});
+  const result=allocatePayroll({pool:"0.30",direct:[{site:"A",amount:"0.10"},{site:"A",amount:"0.20"}],approved:[],nonSite:"0.00",excluded:"0.00"});
   assert.equal(result.reconciles,true);
   assert.equal(result.direct,"0.30");
   assert.equal(result.siteTotals.A,"0.30");
