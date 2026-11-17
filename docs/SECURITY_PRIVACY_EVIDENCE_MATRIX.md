@@ -48,3 +48,6 @@ A control is not “production-ready” merely because code exists or a CI test 
 
 ## Current engineering evidence checkpoint
 CI run #1138: https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44055916897 — both jobs passed, including authenticated API integration, PostgreSQL tenant RLS, synthetic backup recovery, TLS configuration and dependency audit. This verifies the exact tested commit, not subsequent changes or production deployment. The newer source ingestion minimisation guard is an API-layer control, not full content redaction.
+
+### Subsequent security branch implementation (CI unconfirmed)
+Migrations 039–045 add transaction-bound session operations, database permission-read isolation, global revocation watermarks, signed restore evidence for global and individual token revocation, operator-separated account containment/recovery, and transaction/backend-bound tenant HMACs. Production explicitly distinguishes access-token JWTs from generic JWTs. Operator evidence digests are attestations, not automated provider confirmation. These are development changes, not a new verified CI checkpoint or production approval.

@@ -280,17 +280,47 @@ test("authenticated API enforces tenant membership, role permissions and import 
     }finally{rawClient.release();}
     async function assertContextDenied({tenantId,subject,expires,nonce,signatureOverride}){
       const keyId="primary";
-      const payload=[tenantId,subject,expires,nonce,keyId].join("\n");
-      const signature=signatureOverride||createHmac("sha256",Buffer.from(process.env.TENANT_CONTEXT_HMAC_SECRET,"hex")).update(payload).digest("hex");
       const client=await appPool.connect();
       try{
         await client.query("BEGIN");
+        const {rows:[ctx]}=await client.query("SELECT txid_current()::text AS tx,pg_backend_pid()::text AS pid");
+        const payload=["profitpilot-tenant-context-v2",ctx.tx,ctx.pid,tenantId,subject,expires,nonce,keyId].join("\n");
+        const signature=signatureOverride||createHmac("sha256",Buffer.from(process.env.TENANT_CONTEXT_HMAC_SECRET,"hex")).update(payload).digest("hex");
         await client.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.tenant_subject',$2,true),set_config('app.tenant_expires',$3,true),set_config('app.tenant_nonce',$4,true),set_config('app.tenant_key_id',$5,true),set_config('app.tenant_signature',$6,true)",[tenantId,subject,expires,nonce,keyId,signature]);
         const result=await client.query("SELECT id FROM contracts");
         assert.equal(result.rowCount,0,"invalid tenant context must return no protected rows");
         await client.query("ROLLBACK");
       }finally{client.release();}
     }
+    const contextFields=["app.tenant_id","app.tenant_subject","app.tenant_expires","app.tenant_nonce","app.tenant_key_id","app.tenant_signature"];
+    const contextSet="SELECT set_config('app.tenant_id',$1,true),set_config('app.tenant_subject',$2,true),set_config('app.tenant_expires',$3,true),set_config('app.tenant_nonce',$4,true),set_config('app.tenant_key_id',$5,true),set_config('app.tenant_signature',$6,true)";
+    const replayClient=await appPool.connect(),otherClient=await appPool.connect();
+    try{
+     await replayClient.query("BEGIN");
+     const {rows:[ctx]}=await replayClient.query("SELECT txid_current()::text AS tx,pg_backend_pid()::text AS pid");
+     const fields=[tenantA,"ci-api-analyst",String(Math.floor(Date.now()/1000)+30),randomBytes(16).toString("hex"),"primary"];
+     const proof=createHmac("sha256",Buffer.from(process.env.TENANT_CONTEXT_HMAC_SECRET,"hex")).update(["profitpilot-tenant-context-v2",ctx.tx,ctx.pid,...fields].join("\n")).digest("hex");
+     const copied=[...fields,proof];
+     assert.equal(contextFields.length,copied.length);
+     await replayClient.query(contextSet,copied);
+     assert.equal((await replayClient.query("SELECT id FROM contracts")).rowCount,1,"valid transaction-bound context reads own tenant");
+     await otherClient.query("BEGIN");
+     await otherClient.query(contextSet,copied);
+     assert.equal((await otherClient.query("SELECT id FROM contracts")).rowCount,0,"captured signature must fail on another PostgreSQL backend");
+     await otherClient.query("ROLLBACK");
+     await replayClient.query("COMMIT");
+     await replayClient.query("BEGIN");
+     await replayClient.query(contextSet,copied);
+     assert.equal((await replayClient.query("SELECT id FROM contracts")).rowCount,0,"captured signature must fail in a new transaction on same backend");
+     const legacyProof=createHmac("sha256",Buffer.from(process.env.TENANT_CONTEXT_HMAC_SECRET,"hex")).update(fields.join("\n")).digest("hex");
+     await replayClient.query(contextSet,[...fields,legacyProof]);
+     assert.equal((await replayClient.query("SELECT id FROM contracts")).rowCount,0,"legacy replayable context format must not remain valid");
+    }finally{
+     await Promise.all([replayClient.query("ROLLBACK"),otherClient.query("ROLLBACK")]);
+     replayClient.release();otherClient.release();
+    }
+    const readOnlyContext=await withTenant(tenantA,"ci-api-analyst",c=>c.query("SELECT id FROM contracts"),{repeatableRead:true});
+    assert.equal(readOnlyContext.rowCount,1,"transaction context must work in read-only repeatable-read transactions");
     const future=String(Math.floor(Date.now()/1000)+30);
     const past=String(Math.floor(Date.now()/1000)-5);
     await assertContextDenied({tenantId:tenantA,subject:"ci-api-analyst",expires:future,nonce:randomBytes(16).toString("hex"),signatureOverride:"0".repeat(64)});

@@ -19,18 +19,21 @@ if(databaseSslEnabled){
 const ssl=databaseSslEnabled?{rejectUnauthorized:true}:false;
 export const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl,max:10,idleTimeoutMillis:30000,connectionTimeoutMillis:5000,statement_timeout:10000,lock_timeout:3000,idle_in_transaction_session_timeout:10000});
 export async function withTenant(tenantId,subject,fn,{repeatableRead=false}={}){
- if(typeof subject!=="string"||!subject)throw new Error("Verified identity subject is required for tenant context");
+ if(typeof subject!=="string"||!subject||subject.length>512||subject.trim()!==subject||/[\x00-\x1f\x7f]/.test(subject))throw new Error("Verified identity subject is required for tenant context");
+ if(typeof tenantId!=="string"||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(tenantId))throw new Error("Valid tenant identifier required");
+ tenantId=tenantId.toLowerCase();
  const secret=process.env.TENANT_CONTEXT_HMAC_SECRET||"";
  const keyId=process.env.TENANT_CONTEXT_HMAC_KEY_ID||"primary";
- if(secret.length%2!==0||!/^[a-f0-9]{64,}$/i.test(secret))throw new Error("Tenant context signing secret must be at least 32 bytes of hexadecimal data");
- const expires=String(Math.floor(Date.now()/1000)+30);
- const nonce=randomBytes(16).toString("hex");
- const payload=[tenantId,subject,expires,nonce,keyId].join("\n");
- const signature=createHmac("sha256",Buffer.from(secret,"hex")).update(payload).digest("hex");
+ if(!/^[A-Za-z0-9._-]{1,128}$/.test(keyId)||secret.length%2!==0||!/^[a-f0-9]{64,256}$/i.test(secret))throw new Error("Tenant context signing configuration is invalid");
  const client=await pool.connect();
  let discard;
  try{
   await client.query(repeatableRead?"BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY":"BEGIN");
+  const {rows:[ctx]}=await client.query("SELECT txid_current()::text AS tx,pg_backend_pid()::text AS pid");
+  const expires=String(Math.floor(Date.now()/1000)+30);
+  const nonce=randomBytes(16).toString("hex");
+  const payload=["profitpilot-tenant-context-v2",ctx.tx,ctx.pid,tenantId,subject,expires,nonce,keyId].join("\n");
+  const signature=createHmac("sha256",Buffer.from(secret,"hex")).update(payload).digest("hex");
   await client.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.tenant_subject',$2,true),set_config('app.tenant_expires',$3,true),set_config('app.tenant_nonce',$4,true),set_config('app.tenant_key_id',$5,true),set_config('app.tenant_signature',$6,true)",[tenantId,subject,expires,nonce,keyId,signature]);
   const result=await fn(client,{nonce});
   await client.query("COMMIT");
