@@ -236,3 +236,13 @@ The owner-authorised synthetic/test build now includes initial domain foundation
 Current safeguards include evidence-required readiness checks, human-only decisions, append-only-style promise events, explicit source references and timestamps, withholding of candidate financial exposure under incomplete coverage, separate value lifecycle totals with no silent credit netting, pre-migration control-total checks, and tenant/visibility/review-date rules for operational knowledge.
 
 The latest recorded full CI attempt before the final source corrections failed due literal escaped newline characters in two new modules and one test file. Those syntax defects have been corrected. The exact latest branch head has a new CI run pending; do not mark this work as CI-passed until that run completes successfully. No production persistence, real-data processing or deployment is implied.
+
+
+## Exact-head CI confirmation — 17 November 2026
+
+The hardening branch exact head `b9821de5ad84a223d8f43e0fc53a85b437b56d5e` passed GitHub Actions run **#43990160842 (run #931)**.
+
+- Node.js 22: 118 tests total; 115 passed, 0 failed, 3 database-dependent skips in this job.
+- PostgreSQL 16: migrations through 014, tenant/FK catalogue audit, restricted-role RLS, authenticated API integration, production API image build, trusted-CA acceptance, untrusted-CA rejection and production-mode TLS health: all passed.
+
+The three Node-job skips are database-dependent and are exercised in the PostgreSQL job. This is exact-head configured CI evidence. It does not constitute independent security certification, accounting/tax/legal approval, production readiness or completion of the full financial acceptance plan. The branch remains a draft, unmerged development candidate.
