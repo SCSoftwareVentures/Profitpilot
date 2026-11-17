@@ -207,6 +207,7 @@ jobs:
         run: |
           docker build --pull --build-arg PROFITPILOT_BUILD_REVISION="$GITHUB_SHA" -t profitpilot-api:ci .
           test "$(docker run --rm --entrypoint cat profitpilot-api:ci /app/BUILD_REVISION)" = "$GITHUB_SHA"
+          docker run --rm --entrypoint sh profitpilot-api:ci -ec 'test "$(id -u)" != 0; node --version; ! command -v npm; ! command -v npx; ! command -v yarn; test ! -d /usr/local/lib/node_modules; test ! -d /root/.npm'
 
       - name: Verify production image runs as non-root
         run: |
@@ -240,10 +241,10 @@ jobs:
           echo 'Container did not report a connected database after 60 seconds' >&2
           exit 1
 
-  security-static:
-    name: Static application and secret security gates
+  security-secrets:
+    name: Repository credential exposure gate
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:
@@ -252,15 +253,33 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Check repository history for credentials (fully redacted)
+      - name: Scan history and working tree; report metadata only
         env:
           GOTOOLCHAIN: auto
           GOSUMDB: sum.golang.org
         run: |
+          set -eu
+          umask 077
           export GOBIN="$RUNNER_TEMP/security-tools"
           go install github.com/zricethezav/gitleaks/v8@v8.30.0
-          "$GOBIN/gitleaks" git --redact=100 --no-banner --exit-code=1 --log-opts="--all" .
-          "$GOBIN/gitleaks" dir --redact=100 --no-banner --exit-code=1 .
+          trap 'rm -f "$RUNNER_TEMP/gitleaks-history.json" "$RUNNER_TEMP/gitleaks-tree.json"' EXIT
+          status=0
+          "$GOBIN/gitleaks" git --redact=100 --no-banner --exit-code=1 --report-format=json --report-path="$RUNNER_TEMP/gitleaks-history.json" --log-opts="--all" . || status=1
+          "$GOBIN/gitleaks" dir --redact=100 --no-banner --exit-code=1 --report-format=json --report-path="$RUNNER_TEMP/gitleaks-tree.json" . || status=1
+          node --input-type=module -e 'import fs from "node:fs";for(const kind of ["history","tree"]){const p=process.env.RUNNER_TEMP+"/gitleaks-"+kind+".json";if(!fs.existsSync(p))throw Error("Missing scan evidence: "+kind);const issues=JSON.parse(fs.readFileSync(p));if(!Array.isArray(issues))throw Error("Invalid report");console.log(JSON.stringify({scan:kind,count:issues.length,findings:issues.map(x=>({rule:x.RuleID,file:x.File,commit:x.Commit,line:x.StartLine,fingerprint:x.Fingerprint}))}));if(issues.length)process.exitCode=1;}'
+          exit "$status"
+
+  security-static:
+    name: Static application security gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
       - name: Initialise pinned CodeQL analysis
         uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066
         with:

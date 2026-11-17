@@ -28,3 +28,11 @@ test("Docker build context and local runtime privileges are constrained",()=>{
  const compose=read("docker-compose.yml");
  assert.match(compose,/api:\s+build: \.\s+read_only: true\s+cap_drop:\s+- ALL\s+security_opt:\s+- no-new-privileges:true/);
 });
+
+test("production runtime contains no package managers or their vulnerable build-time dependency layers",()=>{
+ const docker=read("Dockerfile");
+ assert.match(docker,/FROM node:22-alpine AS dependencies/);
+ assert.match(docker,/rm -rf \/usr\/local\/lib\/node_modules/);
+ assert.match(docker,/FROM scratch\nCOPY --from=dependencies \/ \//);
+ assert.match(read(".github/workflows/ci.yml"),/! command -v npm; ! command -v npx; ! command -v yarn/);
+});
