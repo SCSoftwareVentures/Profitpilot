@@ -68,17 +68,24 @@ export function detectProfitLeaks(input){
 
   if(invoices&&Array.isArray(invoices.rows)&&invoices.coverage==="complete"&&invoices.currency===basis.currency&&invoices.taxBasis===basis.taxBasis&&invoices.periodStart===basis.periodStart&&invoices.periodEnd===basis.periodEnd){
     for(const row of invoices.rows){
-      if(!row||typeof row!=="object"||Array.isArray(row))continue;
-      if(row.status==="unmatched"){
+      if(!row||typeof row!=="object"||Array.isArray(row)){
+        alerts.push(unknownAlert("invoice_row_status_unknown","An invoice row is malformed and cannot be classified."));
+        continue;
+      }
+      if(row.status==="matched"){
+        if(!textValue(row.evidenceRef))alerts.push(unknownAlert("invoice_row_status_unknown","A matched invoice row is missing its match evidence reference."));
+      }else if(row.status==="unmatched"){
         const amount=cents(row.amount);
         alerts.push(amount===null||!textValue(row.evidenceRef)
-          ?unknownAlert("unmatched_invoice_row","An unmatched invoice row lacks a valid exact amount or source evidence.",[row?.evidenceRef])
+          ?unknownAlert("unmatched_invoice_row","An unmatched invoice row lacks a valid exact amount or source evidence.",[row.evidenceRef])
           :candidateAlert("unmatched_invoice_row",money(row.amount),basis,"unmatched",[row.evidenceRef],"An invoice row remains unmatched to a confirmed contract/site/service-period record."));
       }else if(row.status==="duplicate_candidate"){
         const amount=cents(row.amount);
         alerts.push(amount===null||!textValue(row.evidenceRef)
-          ?unknownAlert("duplicate_invoice_candidate","A possible duplicate row lacks a valid exact amount or source evidence.",[row?.evidenceRef])
+          ?unknownAlert("duplicate_invoice_candidate","A possible duplicate row lacks a valid exact amount or source evidence.",[row.evidenceRef])
           :candidateAlert("duplicate_invoice_candidate",money(row.amount),basis,"possible_duplicate",[row.evidenceRef],"A source row is flagged as a duplicate candidate. Confirm invoice identity, credits and source lineage before any adjustment."));
+      }else{
+        alerts.push(unknownAlert("invoice_row_status_unknown","An invoice row has an unsupported or missing matching status.",[row.evidenceRef]));
       }
     }
   }else{
