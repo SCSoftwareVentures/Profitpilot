@@ -23,7 +23,7 @@ test("job readiness remains blocked when required answers are missing or unverif
   assert.equal(result.status,"blocked");
   assert.equal(result.approvalGranted,false);
   assert.equal(result.readinessCounts.required,3);
-  assert.equal(result.readinessCounts.satisfied,2);
+  assert.equal(result.readinessCounts.satisfied,1);assert.equal(result.readinessCounts.notApplicable,1);assert.equal(result.readinessCounts.complete,2);
   assert.equal(result.blockers.length,1);
   assert.equal(result.blockers[0].checkId,"access");
 });
