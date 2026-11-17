@@ -1,7 +1,12 @@
 import pg from "pg";
 import {createHmac,randomBytes} from "node:crypto";
 const {Pool}=pg;
-const ssl=process.env.DATABASE_SSL==="true"?{rejectUnauthorized:true}:false;
+const production=process.env.NODE_ENV==="production";
+const databaseSslEnabled=process.env.DATABASE_SSL==="true";
+if(production&&!databaseSslEnabled){
+ throw new Error("DATABASE_SSL=true is required in production; refusing an unencrypted PostgreSQL connection");
+}
+const ssl=databaseSslEnabled?{rejectUnauthorized:true}:false;
 export const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl,max:10,idleTimeoutMillis:30000,connectionTimeoutMillis:5000});
 export async function withTenant(tenantId,subject,fn){
  if(typeof subject!=="string"||!subject)throw new Error("Verified identity subject is required for tenant context");
