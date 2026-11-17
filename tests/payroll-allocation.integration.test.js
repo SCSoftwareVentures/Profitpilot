@@ -27,6 +27,7 @@ test("independent payroll decisions, exact source reconciliation and maker-check
  });
  await new Promise(resolve=>jwks.listen(0,"127.0.0.1",resolve));
  process.env.NODE_ENV="test";
+ process.env.ENABLE_SYNTHETIC_PAYROLL_UI="true";
  process.env.DATABASE_URL=process.env.TEST_APP_DATABASE_URL;
  process.env.AUTH_ISSUER=issuer;
  process.env.AUTH_AUDIENCE="profitpilot-api";
@@ -38,6 +39,14 @@ test("independent payroll decisions, exact source reconciliation and maker-check
  const api=createServer(app);
  await new Promise(resolve=>api.listen(0,"127.0.0.1",resolve));
  const base="http://127.0.0.1:"+api.address().port;
+ const ui=await fetch(base+"/dev/payroll");
+ assert.equal(ui.status,200);
+ assert.equal(ui.headers.get("cache-control"),"no-store");
+ assert.match(await ui.text(),/SYNTHETIC DATA ONLY/);
+ for(const asset of ["/dev/payroll.js","/dev/payroll.css","/dev/payroll-client.js"]){const response=await fetch(base+asset);assert.equal(response.status,200);assert.equal(response.headers.get("cache-control"),"no-store");}
+ assert.equal((await fetch(base+"/dev/.env")).status,404);
+ const {createPayrollClient}=await import("../src/payroll-client.js");
+ const browserClient=subject=>createPayrollClient({getAccessToken:opts=>credential(subject,{mfa:opts.fresh}),fetchImpl:(route,opts)=>fetch(base+route,opts)});
  async function credential(subject,{mfa=true}={}){
   const now=Math.floor(Date.now()/1000);
   const claims={email:subject+"@example.invalid",auth_time:now,acr:"urn:profitpilot:step-up",amr:mfa?["pwd","mfa"]:["pwd"]};
@@ -95,6 +104,9 @@ test("independent payroll decisions, exact source reconciliation and maker-check
   const validation=await send("POST",path(tenantA)+"/imports/"+batchId+"/validate","ci-payroll-importer",{});
   assert.equal(validation.status,200);
   assert.deepEqual([(await validation.json()).validCandidateRows], [2]);
+  const page=await browserClient("ci-payroll-importer").review(tenantA,batchId);
+  assert.equal(page.summary.total,3);
+  assert.equal(page.summary.held,1);
   const rowPath=n=>path(tenantA)+"/imports/"+batchId+"/payroll/rows/"+n+"/decision";
   const approve={decision:"accepted",reason:"Independent validation of synthetic source row"};
   assert.equal((await send("POST",rowPath(1),"ci-payroll-importer",approve)).status,403,
@@ -103,7 +115,7 @@ test("independent payroll decisions, exact source reconciliation and maker-check
    "fresh provider MFA required for financial source approval");
   assert.equal((await send("POST",rowPath(1),"ci-payroll-outside",approve)).status,403,
    "cross-tenant identity cannot approve rows");
-  assert.equal((await send("POST",rowPath(1),"ci-payroll-reviewer",approve)).status,200);
+  assert.equal((await browserClient("ci-payroll-reviewer").decide(tenantA,batchId,1,approve)).decision,"accepted");
   assert.equal((await send("POST",rowPath(2),"ci-payroll-reviewer",approve)).status,200);
   assert.equal((await send("POST",rowPath(3),"ci-payroll-reviewer",approve)).status,409,
    "structurally held source row cannot become accepted");
@@ -119,9 +131,7 @@ test("independent payroll decisions, exact source reconciliation and maker-check
    "fresh MFA required for pool reconciliation");
   assert.equal((await send("POST",poolPath,"ci-payroll-owner",{...poolBody,declaredTotal:"99.99"})).status,422,
    "declared source total must reconcile exactly in cents");
-  const createdPool=await send("POST",poolPath,"ci-payroll-owner",poolBody);
-  assert.equal(createdPool.status,201);
-  const pool=await createdPool.json();
+  const pool=await browserClient("ci-payroll-owner").reconcile(tenantA,batchId,poolBody);
   assert.equal(pool.totalAmount,"100.00");
   assert.equal(pool.externallyVerified,false);
   assert.equal(pool.acceptedRows,2);
@@ -144,9 +154,7 @@ test("independent payroll decisions, exact source reconciliation and maker-check
    "allocated amount cannot exceed source pool");
   assert.equal((await send("POST",draftPath,"ci-payroll-importer",{...body,lines:[{...lines[0],siteId:siteB}]})).status,422,
    "foreign site references must be rejected without exposing data");
-  const draft=await send("POST",draftPath,"ci-payroll-importer",body);
-  assert.equal(draft.status,201);
-  const allocation=await draft.json();
+  const allocation=await browserClient("ci-payroll-importer").draft(tenantA,pool.id,body);
   assert.equal(allocation.status,"review");
   assert.deepEqual([allocation.direct,allocation.approvedAllocated,allocation.nonSite,allocation.unallocated],
    ["60.00","20.00","10.00","10.00"]);
@@ -155,9 +163,8 @@ test("independent payroll decisions, exact source reconciliation and maker-check
    "SELECT COUNT(*)::int AS n FROM allocation_runs WHERE id=$1 AND status='confirmed'",
    [allocation.id]);
   assert.equal(before.rows[0].n,0,"draft must not enter confirmed financial calculations");
-  const ownDetail=await send("GET",detailPath,"ci-payroll-reviewer");
-  assert.equal(ownDetail.status,200);
-  const serialized=JSON.stringify(await ownDetail.json());
+  const ownDetail=await browserClient("ci-payroll-reviewer").readAllocation(tenantA,pool.id,allocation.id);
+  const serialized=JSON.stringify(ownDetail);
   for(const secret of ["SYNTHETIC-DIRECT-EVIDENCE","SYNTHETIC-NON-SITE","SYNTHETIC-SOURCE-A"])
    assert.equal(serialized.includes(secret),false,"approval view omits raw source references");
   assert.equal((await send("GET",path(tenantB)+"/payroll/pools/"+pool.id+"/allocations/"+allocation.id,"ci-payroll-outside")).status,404,
@@ -171,9 +178,8 @@ test("independent payroll decisions, exact source reconciliation and maker-check
    "provider MFA required for cost confirmation");
   assert.equal((await send("POST",path(tenantB)+"/payroll/pools/"+pool.id+"/allocations/"+allocation.id+"/confirm","ci-payroll-outside",confirmation)).status,404,
    "foreign tenant cannot confirm a known object ID");
-  const confirmed=await send("POST",confirmPath,"ci-payroll-reviewer",confirmation);
-  assert.equal(confirmed.status,200);
-  assert.equal((await confirmed.json()).status,"confirmed");
+  const confirmed=await browserClient("ci-payroll-reviewer").confirm(tenantA,pool.id,allocation.id,{...confirmation,acknowledged:true});
+  assert.equal(confirmed.status,"confirmed");
   assert.equal((await send("POST",confirmPath,"ci-payroll-reviewer",confirmation)).status,409);
   assert.equal((await send("POST",draftPath,"ci-payroll-importer",body)).status,409,
    "confirmed source pool cannot receive a second double-counted allocation");

@@ -1,0 +1,52 @@
+import {createPayrollClient,PayrollRequestError} from "./payroll-client.js";
+const $=id=>document.getElementById(id);
+const value=id=>$(id).value.trim();
+const PAGE=50;
+let offset=0,totalRows=0,busy=false,loaded=null,queue=null;
+const client=createPayrollClient({getAccessToken:async()=>{const token=value("token");$("token").value="";return token;}});
+const scope=()=>[value("tenant"),value("pool"),value("allocation")].join("|");
+function invalidate(){loaded=null;$("ack").checked=false;$("detail").textContent="";$("confirmButton").disabled=true;}
+function clearQueue(){queue=null;offset=0;totalRows=0;$("rows").replaceChildren();$("summary").textContent="";$("previous").disabled=true;$("next").disabled=true;}
+function status(message){$("status").textContent=message;}
+function sync(){for(const b of document.querySelectorAll("button"))b.disabled=busy;
+ $("previous").disabled=busy||!queue||offset===0;$("next").disabled=busy||!queue||offset+PAGE>=totalRows;
+ $("confirmButton").disabled=busy||loaded!==scope()||!$("ack").checked;
+}
+async function execute(action,write=false){
+ if(busy)return;busy=true;for(const el of document.querySelectorAll("input,select,textarea"))el.disabled=true;sync();
+ try{await action();}
+ catch(e){status(e instanceof PayrollRequestError?e.message:e instanceof TypeError?"Check the required IDs, amounts and evidence fields.":"Request failed. Review current server state before taking further action.");if(write)invalidate();}
+ finally{busy=false;for(const el of document.querySelectorAll("input,select,textarea"))el.disabled=false;sync();}
+}
+function showReview(r,requestedOffset){
+ clearQueue();offset=requestedOffset;totalRows=r.summary.total;queue={tenant:value("tenant"),batch:value("batch")};
+ $("summary").textContent=Object.entries(r.summary).map(([k,v])=>k+": "+v).join(" · ");
+ for(const item of r.items){const tr=document.createElement("tr");for(const cell of [item.rowNumber,item.decision,item.reason??"—"]){const td=document.createElement("td");td.textContent=String(cell);tr.append(td);}$("rows").append(tr);}
+ status("Review queue loaded. Structural validation is not approval.");
+}
+function review(page){return execute(async()=>{clearQueue();const r=await client.review(value("tenant"),value("batch"),{offset:page,limit:PAGE});showReview(r,page);});}
+$("review").addEventListener("click",()=>review(0));
+$("previous").addEventListener("click",()=>review(Math.max(0,offset-PAGE)));
+$("next").addEventListener("click",()=>review(offset+PAGE));
+for(const key of ["tenant","batch"]){$(key).addEventListener("input",()=>{clearQueue();invalidate();$("poolResult").textContent="";if(key==="tenant"){$("pool").value="";$("allocation").value="";}});}
+for(const key of ["pool","allocation"])$(key).addEventListener("input",invalidate);
+$("ack").addEventListener("change",sync);
+function form(id,action){$(id).addEventListener("submit",e=>{e.preventDefault();execute(action,true);});}
+form("decision",async()=>{const row=Number(value("row"));const choice=value("choice");await client.decide(value("tenant"),value("batch"),row,{decision:choice,reason:value("decisionReason")});clearQueue();$("decision").reset();status("Review decision recorded. Load the queue again using a new token.");});
+form("reconcile",async()=>{const r=await client.reconcile(value("tenant"),value("batch"),{declaredTotal:value("total"),sourceReference:value("source"),reason:value("reconcileReason")});$("pool").value=r.id;$("allocation").value="";invalidate();$("poolResult").textContent="Source-declared AUD "+r.totalAmount+" · externally verified: no";$("reconcile").reset();status("Source reconciled. Pool ID populated.");});
+function addLine(){if($("lines").children.length>=100)return;const box=document.createElement("fieldset");
+ const legend=document.createElement("legend");legend.textContent="Allocation line";box.append(legend);
+ const fields=[["bucketType","Cost bucket","select"],["siteId","Site ID (site costs only)","input"],["amount","Amount (AUD)","input"],["sourceReference","Synthetic evidence reference","input"]];
+ for(const [key,label,tag] of fields){const l=document.createElement("label");l.textContent=label;const input=document.createElement(tag);input.dataset.field=key;input.autocomplete="off";if(tag==="select"){for(const v of ["direct","approved_allocated","non_site","excluded"]){const opt=document.createElement("option");opt.value=v;opt.textContent=v.replaceAll("_"," ");input.append(opt);}}else if(key==="amount"){input.inputMode="decimal";input.required=true;}else if(key==="sourceReference"){input.maxLength=120;input.required=true;}l.append(input);box.append(l);}
+ const rm=document.createElement("button");rm.type="button";rm.textContent="Remove line";rm.addEventListener("click",()=>{if(!busy&&$("lines").children.length>1)box.remove();});box.append(rm);$("lines").append(box);
+}
+$("add").addEventListener("click",addLine);addLine();
+form("draft",async()=>{const lines=[...$("lines").children].map(box=>Object.fromEntries([...box.querySelectorAll("[data-field]")].map(el=>[el.dataset.field,el.value.trim()||null])));const r=await client.draft(value("tenant"),value("pool"),{lines,reason:value("draftReason")});$("allocation").value=r.id;invalidate();$("detail").textContent="Draft saved. Unallocated AUD "+r.unallocated+". Load details before approval.";status("Draft saved; no costs confirmed.");});
+$("inspect").addEventListener("click",()=>execute(async()=>{invalidate();const target=scope();const r=await client.readAllocation(value("tenant"),value("pool"),value("allocation"));const a=r.allocation;if(a.id!==value("allocation")||target!==scope())throw new TypeError("Mismatched allocation");
+ const rows=r.lines.map(l=>[l.bucketType,l.siteId??"No site","AUD "+l.amount].join(" | "));
+ $("detail").textContent=["Status: "+a.status,"Source-declared total: AUD "+a.total_amount,"Direct: AUD "+a.direct_amount,"Approved allocated: AUD "+a.allocated_amount,"Non-site: AUD "+a.non_site_amount,"Excluded: AUD "+a.excluded_amount,"Unallocated: AUD "+a.residual_amount,"External verification: no",...rows].join("\n");
+ if(a.status==="review")loaded=target;status("Allocation loaded. A different authorised approver must confirm.");
+}));
+form("confirm",async()=>{if(loaded!==scope()||!$("ack").checked)throw new TypeError("Read and acknowledge the specific allocation first");const r=await client.confirm(value("tenant"),value("pool"),value("allocation"),{reason:value("confirmReason"),acknowledged:true});invalidate();$("confirm").reset();status("Server returned "+r.status+". Reload allocation to verify current state.");});
+$("clear").addEventListener("click",()=>{for(const el of document.querySelectorAll("input,textarea")){if(el.type==="checkbox")el.checked=false;else el.value="";}for(const f of document.querySelectorAll("form"))f.reset();$("lines").replaceChildren();addLine();clearQueue();invalidate();$("poolResult").textContent="";status("Workspace cleared. Provider session revocation is separate.");sync();});
+sync();
