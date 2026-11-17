@@ -46,6 +46,19 @@ test("synthetic logical backup restores all source rows and preserves tenant bou
   for(const id of [tenant,"44444444-4444-4444-8444-444444444444"]){
    assert.equal((await restored.query("SELECT private.verify_audit_chain($1) AS ok",[id])).rows[0].ok,true,"restored audit chain integrity");
   }
+  // A session revoked on the source after the snapshot must remain revoked after replay.
+  const uid=(await source.query("SELECT id FROM public.users WHERE auth_subject=$1",[subject])).rows[0].id;
+  const authTime=String(Math.floor(Date.now()/1000)-10);
+  const issuedAt=String(Math.floor(Date.now()/1000));
+  const sessionHash=randomBytes(32).toString("hex");
+  const sessionArgs=[subject,authTime,issuedAt,sessionHash,expires,nonce,keyId];
+  const sessionSig=createHmac("sha256",secret).update(["profitpilot-session-v1",...sessionArgs].join("\n")).digest("hex");
+  const isSessionActive=async()=>(await runtime.query("SELECT private.session_authorized($1,$2,$3,$4,$5,$6,$7,$8) AS allowed",[...sessionArgs,sessionSig])).rows[0].allowed;
+  assert.equal(await isSessionActive(),true);
+  await source.query("SELECT private.revoke_identity_access($1,'revoke_session','CI_POST_SNAPSHOT',$2)",[uid,sessionHash]);
+  const revoked=(await source.query("SELECT session_digest FROM private.revoked_identity_sessions WHERE user_id=$1 AND session_digest=$2",[uid,sessionHash])).rows[0];
+  await restored.query("SELECT private.replay_identity_revocation($1,$2,NULL,$3,false,'CI_RECOVERY')",[uid,subject,revoked.session_digest]);
+  assert.equal(await isSessionActive(),false);
   // Snapshot predates disposal: authoritative source ledger is consulted after restore.
   const batch="f831ab34-efb8-48b4-9979-434711943ea2";
   assert.equal((await restored.query("SELECT id FROM public.import_batches WHERE tenant_id=$1 AND id=$2",[tenant,batch])).rowCount,1);
