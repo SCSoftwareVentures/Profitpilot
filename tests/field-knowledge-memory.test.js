@@ -14,7 +14,7 @@ test("knowledge entries require ownership, scope, source, review and expiry meta
 
 test("review-due and expired knowledge are visibly distinguished",()=>{
   assert.equal(createKnowledgeEntry({...base,reviewAt:"2026-11-01"}).state,"review_due");
-  assert.equal(createKnowledgeEntry({...base,expiresAt:"2026-11-01"}).state,"expired");
+  assert.equal(createKnowledgeEntry({...base,reviewAt:"2026-10-01",expiresAt:"2026-11-01"}).state,"expired");
 });
 
 test("verified knowledge requires evidence and customer-visible records require a customer scope",()=>{
