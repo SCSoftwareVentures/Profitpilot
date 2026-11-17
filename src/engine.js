@@ -38,6 +38,22 @@ export function validateInvoiceRows(rows){
     return {rowNumber:r.__rowNumber||i+2,record:r,errors,status:errors.length?"held":"pending_review"};
   });
 }
+// Structural payroll checks never authorise costs, allocate wages or infer statutory entitlements.
+export function validatePayrollRows(rows,{periodStart,periodEnd}={}){
+ return rows.map((input,i)=>{
+  const r=input&&typeof input==="object"&&!Array.isArray(input)?input:{};
+  const errors=[];
+  if(typeof r.source_ref!=="string"||!r.source_ref.trim()||r.source_ref.length>120)errors.push("source_ref must be 1–120 characters");
+  if(typeof r.cost_component!=="string"||!r.cost_component.trim()||r.cost_component.length>120)errors.push("cost_component must be 1–120 characters");
+  const amount=typeof r.amount==="string"?/^(0|[1-9][0-9]{0,11})(?:\.([0-9]{1,2}))?$/.exec(r.amount):null;
+  if(!amount||BigInt(amount[1])*100n+BigInt((amount[2]||"").padEnd(2,"0"))<=0n)errors.push("Amount must be a positive AUD decimal string, maximum two decimal places");
+  if(r.currency!=="AUD")errors.push("Only declared AUD currency is supported");
+  if(!isIsoDate(r.period_start)||!isIsoDate(r.period_end)||r.period_start>r.period_end)errors.push("Invalid pay period");
+  else if((periodStart&&r.period_start<periodStart)||(periodEnd&&r.period_end>periodEnd))errors.push("Pay period lies outside import batch period");
+  return {rowNumber:r.__rowNumber||i+2,record:r,errors,status:errors.length?"held":"pending_review"};
+ });
+}
+
 export function allocatePayroll({pool,direct=[],approved=[],nonSite=0,excluded=0}){
   const p=money(pool),d=money(direct.reduce((s,x)=>s+Number(x.amount||0),0)),a=money(approved.reduce((s,x)=>s+Number(x.amount||0),0)),n=money(nonSite),e=money(excluded);
   const residual=money(p-d-a-n-e);

@@ -277,7 +277,7 @@ paths:
       - $ref: '#/components/parameters/TenantId'
       - $ref: '#/components/parameters/BatchId'
     post:
-      summary: Persist parsed invoice row objects for a source batch
+      summary: Persist parsed invoice or payroll row objects for a source batch
       description: Accepts 1–200 JSON row objects per request. Client-side parsing only; raw file upload/storage is not implemented.
       responses:
         "201": { description: Rows persisted; duplicates are idempotently ignored }
@@ -291,7 +291,8 @@ paths:
     post:
       summary: Validate source rows and produce held/review candidates
       responses:
-        "202": { description: Invoice rows structurally validated into candidate/held states; payroll validation is not yet supported }
+        "200": { description: Invoice or payroll rows structurally validated into candidate/held states, never automatically accepted }
+        "422": { description: Unsupported source type or missing persisted rows }
         "403": { description: Not authorised }
         "404": { description: Batch not found in this tenant }
   /tenants/{tenantId}/matches/{matchId}/decision:

@@ -6,7 +6,7 @@ import rateLimit from "express-rate-limit";
 import {randomUUID,createHash} from "node:crypto";
 import {withTenant,health,listAuthSessions,revokeAuthSession,withPrivacyStepUp} from "./db.js";
 import {authRequired,requirePermission,requireStepUp} from "./auth.js";
-import {parseCsv,validateInvoiceRows,isIsoDate} from "../src/engine.js";
+import {parseCsv,validateInvoiceRows,validatePayrollRows,isIsoDate} from "../src/engine.js";
 
 const app=express();
 app.disable("x-powered-by");
@@ -245,21 +245,24 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requirePermiss
 
 app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requirePermission("imports.validate"),async(req,res,next)=>{try{
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const batch=await client.query("SELECT id,status,source_type FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.batchId,req.membership.tenantId]);
+  const batch=await client.query("SELECT id,status,source_type,source_period_start,source_period_end FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.batchId,req.membership.tenantId]);
   if(!batch.rowCount)return {status:404,error:"Import batch not found"};
   if(!["uploaded","review","validating"].includes(batch.rows[0].status))return {status:409,error:"Import batch is not open for validation"};
-  if(!["customer_invoice","supplier_invoice"].includes(batch.rows[0].source_type))return {status:422,error:"This validator currently supports invoice CSV rows only; payroll validation is not implemented."};
+  const payroll=batch.rows[0].source_type==="payroll";
+  if(!payroll&&!["customer_invoice","supplier_invoice"].includes(batch.rows[0].source_type))return {status:422,error:"Unsupported import source type"};
   const raw=await client.query("SELECT id,row_number,payload FROM raw_import_rows WHERE batch_id=$1 AND tenant_id=$2 ORDER BY row_number",[req.params.batchId,req.membership.tenantId]);
   if(!raw.rowCount)return {status:422,error:"No persisted import rows found. Ingest rows before validation."};
-  const checked=validateInvoiceRows(raw.rows.map(r=>({...r.payload,__rowNumber:String(r.row_number)})));
+  const input=raw.rows.map(r=>({...r.payload,__rowNumber:String(r.row_number)}));
+  const checked=payroll?validatePayrollRows(input,{periodStart:batch.rows[0].source_period_start,periodEnd:batch.rows[0].source_period_end}):validateInvoiceRows(input);
+  const targetType=payroll?"payroll_row":"invoice_row",methodVersion=payroll?"payroll-validator-0.1.0":"invoice-validator-0.1.0";
   let valid=0,held=0;
   for(let i=0;i<raw.rows.length;i++){
    const item=checked[i],row=raw.rows[i],decision=item.errors.length?"held":"candidate";
    if(decision==="held")held++;else valid++;
-   await client.query("INSERT INTO mapping_decisions(tenant_id,raw_row_id,target_type,target_id,decision,confidence,method_version,reason) VALUES($1,$2,'invoice_row',NULL,$3,'LOW','invoice-validator-0.1.0',$4) ON CONFLICT(tenant_id,raw_row_id,method_version) DO UPDATE SET decision=EXCLUDED.decision,reason=EXCLUDED.reason",[req.membership.tenantId,row.id,decision,item.errors.join("; ")||"Structural validation passed; requires mapping and human review"]);
+   await client.query("INSERT INTO mapping_decisions(tenant_id,raw_row_id,target_type,target_id,decision,confidence,method_version,reason) VALUES($1,$2,$3,NULL,$4,'LOW',$5,$6) ON CONFLICT(tenant_id,raw_row_id,method_version) DO UPDATE SET decision=EXCLUDED.decision,reason=EXCLUDED.reason WHERE mapping_decisions.decision IN ('candidate','held')",[req.membership.tenantId,row.id,targetType,decision,methodVersion,item.errors.join("; ")||"Structural validation only; requires human review; no automatic payroll allocation or acceptance"]);
   }
   await client.query("UPDATE import_batches SET status='review' WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
-  return {status:200,batchId:req.params.batchId,total:raw.rowCount,validCandidateRows:valid,heldRows:held,automaticallyAccepted:0};
+  return {status:200,batchId:req.params.batchId,sourceType:batch.rows[0].source_type,total:raw.rowCount,validCandidateRows:valid,heldRows:held,automaticallyAccepted:0};
  });
  if(result.error)return res.status(result.status).json({error:result.error});
  const {status,...body}=result;res.status(status).json(body);

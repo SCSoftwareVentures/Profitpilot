@@ -26,7 +26,7 @@ The Compose database initialization scripts run only when the named database vol
 - The placeholder API URL in OpenAPI is not a real service.
 - Browser prototype imports are local-only and do not call the API.
 - JSON row ingestion is implemented; raw file upload and secure object storage are not.
-- Invoice row validation is implemented; payroll import validation is not.
+- Invoice and payroll structural row validation are implemented; no payroll pool or financial allocation is created automatically. Payroll source rows require source_ref, cost_component, a positive decimal-string amount, currency AUD and valid period_start/period_end within the import period.
 - Do not use real personal, payroll or customer information in this prototype.
 
 The fresh local Compose volume applies migrations through 025. A Node.js regression test compares every ordered migration and bootstrap script in Docker Compose with GitHub CI, so a new migration cannot silently be omitted from local initialization. Compose is development-only; the local database connection uses no TLS and must never be exposed or used with real customer data. Existing volumes require an explicit, reviewed migration with a backup and rollback plan; do not erase them or assume editing Compose has upgraded an existing database. CI is the verification path, not a production deployment.

@@ -212,6 +212,31 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(duplicate.status,200);
     assert.equal((await duplicate.json()).idempotent,true);
 
+    // Payroll validation: candidate and held decisions are persisted without financial acceptance.
+    const testPayroll=[
+      {source_ref:"CI-PAY-1",cost_component:"gross_wages",amount:"1250.50",currency:"AUD",period_start:"2026-02-01",period_end:"2026-02-14"},
+      {source_ref:"CI-PAY-2",cost_component:"gross_wages",amount:"1e3",currency:"AUD",period_start:"2026-02-01",period_end:"2026-02-14"},
+      {source_ref:"CI-PAY-3",cost_component:"gross_wages",amount:"50.00",currency:"AUD",period_start:"2026-02-15",period_end:"2026-03-01"}
+    ];
+    const payrollId=createdBody.batch.id;
+    const upload=await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/rows",{subject:"ci-api-analyst",method:"POST",body:{rows:testPayroll}});
+    assert.equal(upload.status,201);
+    assert.equal((await upload.json()).inserted,3);
+    const validatePay=await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/validate",{subject:"ci-api-analyst",method:"POST",body:{}});
+    assert.equal(validatePay.status,200);
+    const outcome=await validatePay.json();
+    assert.deepEqual([outcome.sourceType,outcome.validCandidateRows,outcome.heldRows,outcome.automaticallyAccepted],["payroll",1,2,0]);
+    const decisions=await admin.query("SELECT md.decision,md.target_type,md.reason FROM mapping_decisions md JOIN raw_import_rows r ON r.id=md.raw_row_id WHERE r.batch_id=$1 ORDER BY r.row_number",[payrollId]);
+    assert.deepEqual(decisions.rows.map(x=>x.decision),["candidate","held","held"]);
+    assert.ok(decisions.rows.every(x=>x.target_type==="payroll_row"));
+    assert.match(decisions.rows[1].reason,/Amount/);
+    assert.match(decisions.rows[2].reason,/outside import batch period/);
+    assert.equal((await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/validate",{subject:"ci-api-analyst",method:"POST",body:{}})).status,200);
+    assert.equal((await admin.query("SELECT count(*)::int AS n FROM mapping_decisions md JOIN raw_import_rows r ON r.id=md.raw_row_id WHERE r.batch_id=$1",[payrollId])).rows[0].n,3,"revalidation is idempotent");
+    assert.equal((await admin.query("SELECT count(*)::int AS n FROM payroll_pools WHERE batch_id=$1",[payrollId])).rows[0].n,0,"structural validation must not create payroll pools");
+    assert.equal((await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/validate",{subject:"ci-api-reader",method:"POST",body:{}})).status,403);
+
+
     const readerWrite=await request(`/v1/tenants/${tenantA}/imports`,{
       subject:"ci-api-reader",method:"POST",
       body:{...importBody,sha256:"c".repeat(64)}
