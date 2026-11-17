@@ -69,6 +69,10 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.ok(healthResponse.headers.get("x-content-type-options"),"Helmet security headers must be present");
     const noToken=await request("/v1/me");
     assert.equal(noToken.status,401,"requests without a bearer token must be rejected");
+    assert.equal(noToken.headers.get("cache-control"),"no-store","unauthenticated API responses must not be cached");
+    const malformed=await fetch(base+"/v1/me",{method:"POST",headers:{"content-type":"application/json"},body:"{"});
+    assert.equal(malformed.status,400,"malformed JSON must be rejected");
+    assert.equal((await malformed.json()).error,"Invalid request","parser details must not be exposed to clients");
 
     const own=await request(`/v1/tenants/${tenantA}/contracts`,{subject:"ci-api-analyst"});
     assert.equal(own.status,200);
