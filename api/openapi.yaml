@@ -314,6 +314,17 @@ paths:
         "422": { description: Unsupported source type or missing persisted rows }
         "403": { description: Not authorised }
         "404": { description: Batch not found in this tenant }
+  /tenants/{tenantId}/imports/{batchId}/reconciliation:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    get:
+      summary: Compare sealed source rows, recorded amounts and approval evidence
+      description: Requires fresh MFA and both financial review and payroll read permissions. Single-batch reconciliation only; no external completeness or verification claim.
+      responses:
+        "200": { description: Source and approval status, aggregate amounts only }
+        "403": { description: Permission or MFA required }
+        "404": { description: Batch absent }
   /tenants/{tenantId}/imports/{batchId}/invoices/candidates:
     parameters:
       - $ref: '#/components/parameters/TenantId'

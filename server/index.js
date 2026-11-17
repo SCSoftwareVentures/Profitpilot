@@ -12,6 +12,7 @@ import {registerPayrollRoutes} from "./payroll.js";
 import {registerContributionRoutes} from "./contribution.js";
 import {reconcileSharedOverhead} from "../src/shared-overhead.js";
 import {registerInvoiceRoutes} from "./invoices.js";
+import {registerSourceReconciliationRoutes} from "./source-reconciliation.js";
 
 const app=express();
 app.disable("x-powered-by");
@@ -389,6 +390,7 @@ app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requirePer
  }catch(e){next(e);}});
 
 registerInvoiceRoutes(app,membership);
+registerSourceReconciliationRoutes(app,membership);
 registerContributionRoutes(app,membership);
 
 app.get("/v1/tenants/:tenantId/calculations/:runId",membership,requirePermission("calculations.read"),async(req,res,next)=>{try{

@@ -67,7 +67,7 @@ export function registerInvoiceRoutes(app,membership){
     }
    }
    await c.query("UPDATE import_batches SET status='accepted' WHERE tenant_id=$1 AND id=$2",[m.tenantId,batchId]);
-   await c.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'invoice_batch_prepared','import_batch',$3,$4,$5)",[m.tenantId,m.userId,batchId,reason.trim(),JSON.stringify({method:METHOD,invoiceCount:parsed.groups.length,rowCount:raw.length,externallyVerified:false})]);
+   await c.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'invoice_batch_prepared','import_batch',$3,$4,$5)",[m.tenantId,m.userId,batchId,reason.trim(),JSON.stringify({method:METHOD,invoiceCount:parsed.groups.length,rowCount:raw.length,manifest:parsed.groups.map(g=>({invoiceNumber:g.number,total:g.total,lineCount:g.lines.length})),externallyVerified:false})]);
    return {batchId,invoiceCount:parsed.groups.length,rowCount:raw.length,candidates,automaticallyConfirmed:0,externallyVerified:false};
   });
   if(result.error)return res.status(result.status).json({error:result.error});

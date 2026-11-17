@@ -98,6 +98,11 @@ export function createPayrollClient({getAccessToken,fetchImpl=globalThis.fetch}=
    }
    return request(root(tenant)+"/matches/"+id(matchId)+"/decision",{body,fresh:true,signal});
   },
+  async reconcileStoredSource(tenant,batchId,{signal}={}){
+   const result=await request(batch(tenant,batchId)+"/reconciliation",{fresh:true,signal});
+   if(result?.batchId!==batchId.toLowerCase()||result.externallyVerified!==false||result.completeSourceCoverage!==false)throw new PayrollRequestError(422);
+   return result;
+  },
   confirmDeliveryExpense(tenant,matchId,{reason,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,signal}={}){
    if(!["supplier","subcontractor","other_delivery"].includes(costCategory)||payrollOverlapReviewed!==true||duplicateExpenseReviewed!==true)throw new TypeError("Explicit cost category and overlap checks required");
    return request(root(tenant)+"/matches/"+id(matchId)+"/decision",{body:{decision:"confirmed",reason:text(reason,3,2000),costCategory,payrollOverlapReviewed:true,duplicateExpenseReviewed:true},fresh:true,signal});
