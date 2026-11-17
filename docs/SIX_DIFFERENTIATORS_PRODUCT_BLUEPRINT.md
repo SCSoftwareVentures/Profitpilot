@@ -149,7 +149,20 @@ The first demonstrable product should remain coherent around contract economics,
 
 **Validation:** test retrieval accuracy, freshness, user correction, time saved during repeat work and the rate of stale or unsafe instructions surfaced. A knowledge item is not authoritative merely because it was used previously.
 
-## 3. Shared platform foundations
+## 3. Current implementation status — 17 November 2026
+
+The first repository implementation slice is the **Job Readiness Engine**:
+- Versioned commercial-cleaning template v1.0.0.
+- Deterministic evaluation of explicit satisfied, missing, conflicting, unverified and not-applicable states.
+- Typed value validation and required evidence-reference checks.
+- Required missing/conflicting/unverified checks block readiness.
+- Not-applicable requires template permission and a reason.
+- Template identity/version and a completeness-only percentage are returned.
+- Synthetic dashboard demonstration exposes no override or approval action.
+
+This is an initial deterministic engine and synthetic UI demonstration, not a persisted job workflow, production authorisation system, safety assessment, compliance certification or customer-validated feature. The remaining five differentiators are not represented as implemented merely because they are specified below.
+
+## 4. Shared platform foundations
 
 The six capabilities should share common primitives rather than become six disconnected products:
 
@@ -162,7 +175,7 @@ The six capabilities should share common primitives rather than become six disco
 7. **Privacy by design:** data minimisation, explicit access scopes, purpose limitation, retention, export and deletion are part of each workflow.
 8. **Accessible UX:** target WCAG 2.2 AA; status must not rely on colour alone.
 
-## 4. Sequencing and dependencies
+## 5. Sequencing and dependencies
 
 This is a proposed sequence for validation and later authorised design, not a commitment to build all six at once.
 
@@ -177,7 +190,7 @@ This is a proposed sequence for validation and later authorised design, not a co
 
 Do not force these capabilities into the initial contract-economics release. Their order may change only when customer evidence demonstrates a stronger priority and the change is recorded.
 
-## 5. Product acceptance framework
+## 6. Product acceptance framework
 
 Before any feature advances beyond concept:
 - named user and material problem are evidenced;
@@ -192,7 +205,7 @@ Before any feature advances beyond concept:
 
 For implementation, definition of done includes code, tests, migrations/rollback, security/privacy controls, audit events, accessible mobile UX, error states, documentation and operational support. A specification is not implementation evidence.
 
-## 6. Decisions preserved
+## 7. Decisions preserved
 
 - The six differentiators are approved for inclusion in the long-term ProfitPilot product blueprint.
 - Permanent, searchable job and commitment records are a core requirement.
