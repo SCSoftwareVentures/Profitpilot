@@ -56,6 +56,10 @@ export function createPayrollClient({getAccessToken,fetchImpl=globalThis.fetch}=
   readAllocation(tenant,poolId,allocationId,{signal}={}){
    return request(allocation(tenant,poolId,allocationId),{signal});
   },
+  confirmDeliveryExpense(tenant,matchId,{reason,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,signal}={}){
+   if(!["supplier","subcontractor","other_delivery"].includes(costCategory)||payrollOverlapReviewed!==true||duplicateExpenseReviewed!==true)throw new TypeError("Explicit cost category and overlap checks required");
+   return request(root(tenant)+"/matches/"+id(matchId)+"/decision",{body:{decision:"confirmed",reason:text(reason,3,2000),costCategory,payrollOverlapReviewed:true,duplicateExpenseReviewed:true},fresh:true,signal});
+  },
   createContributionReport(tenant,{contractId,siteId,periodStart,periodEnd,signal}={}){
    if(![periodStart,periodEnd].every(v=>typeof v==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(v))||periodEnd<periodStart)throw new TypeError("Valid service period required");
    return request(root(tenant)+"/calculations",{body:{contractId:id(contractId),siteId:id(siteId),periodStart,periodEnd},signal});

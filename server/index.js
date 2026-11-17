@@ -316,17 +316,30 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requirePer
  }catch(e){next(e);}});
 
 app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requirePermission("matching.decide"),requireStepUp(),async(req,res,next)=>{try{
- const {decision,reason}=req.body||{};
+ const {decision,reason,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed}=req.body||{};
  if(!["confirmed","rejected","held"].includes(decision)||typeof reason!=="string"||reason.trim().length<3||reason.length>2000)return res.status(400).json({error:"Decision and reason are required"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const user=await client.query("SELECT id FROM users WHERE auth_subject=$1",[req.identity.subject]);
-  if(!user.rowCount)throw Object.assign(new Error("User identity is not provisioned in this tenant database"),{status:403});
-  const updated=await client.query("UPDATE match_reviews SET decision=$1,reviewer_id=$2,reviewed_at=now() WHERE id=$3 AND tenant_id=$4 AND decision IN ('candidate','held') RETURNING id,decision,reviewed_at",[decision,user.rows[0].id,req.params.matchId,req.membership.tenantId]);
+  const member=req.membership;
+  const candidate=await client.query("SELECT mr.id,mr.contract_id,mr.site_id,mr.service_period_start::text AS service_start,mr.service_period_end::text AS service_end,mr.confidence,i.direction,i.currency,i.tax_basis FROM match_reviews mr JOIN invoice_lines il ON il.id=mr.invoice_line_id AND il.tenant_id=mr.tenant_id JOIN invoices i ON i.id=il.invoice_id AND i.tenant_id=il.tenant_id WHERE mr.id=$1 AND mr.tenant_id=$2 AND mr.decision IN ('candidate','held') FOR UPDATE OF mr",[req.params.matchId,member.tenantId]);
+  if(!candidate.rowCount)return null;
+  const m=candidate.rows[0];
+  let expenseReview=null;
+  if(m.direction==="supplier"&&decision==="confirmed"){
+   if(!["supplier","subcontractor","other_delivery"].includes(costCategory)||payrollOverlapReviewed!==true||duplicateExpenseReviewed!==true)
+    return {error:"Confirm expense category, payroll-overlap review and duplicate-expense review",status:422};
+   if(!m.contract_id||!m.site_id||!m.service_start||!m.service_end||m.service_end<m.service_start||!["HIGH","MEDIUM"].includes(m.confidence)||m.currency!=="AUD"||!["gst_exclusive","no_gst"].includes(m.tax_basis))
+    return {error:"Supplier match evidence must be aligned, attributable and supported",status:422};
+   const pair=await client.query("SELECT 1 FROM contracts c JOIN sites s ON s.tenant_id=c.tenant_id AND s.business_id=c.business_id WHERE c.tenant_id=$1 AND c.id=$2 AND s.id=$3 AND c.status='active' AND s.status='active'",[member.tenantId,m.contract_id,m.site_id]);
+   if(!pair.rowCount)return {error:"Supplier match contract and site must belong to one business",status:422};
+   expenseReview={costCategory,payrollOverlapReviewed:true,duplicateExpenseReviewed:true};
+  }
+  const updated=await client.query("UPDATE match_reviews SET decision=$1,reviewer_id=$2,reviewed_at=now(),evidence=CASE WHEN $5::jsonb IS NULL THEN evidence ELSE (CASE WHEN jsonb_typeof(evidence)='object' THEN evidence ELSE '{}'::jsonb END) || jsonb_build_object('deliveryExpenseReview',$5::jsonb) END WHERE id=$3 AND tenant_id=$4 AND decision IN ('candidate','held') RETURNING id,decision,reviewed_at",[decision,member.userId,req.params.matchId,member.tenantId,expenseReview?JSON.stringify(expenseReview):null]);
   if(!updated.rowCount)return null;
-  await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'invoice_match_decision','match_review',$3,$4,$5)",[req.membership.tenantId,user.rows[0].id,req.params.matchId,reason.trim(),JSON.stringify({decision})]);
+  await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'invoice_match_decision','match_review',$3,$4,$5)",[member.tenantId,member.userId,req.params.matchId,reason.trim(),JSON.stringify({decision,...(expenseReview?{deliveryExpenseReview:expenseReview}:{})})]);
   return updated.rows[0];
  });
  if(!result)return res.status(404).json({error:"Review candidate not found or already finalised"});
+ if(result.error)return res.status(result.status).json({error:result.error});
  res.status(201).json({decision:result});
  }catch(e){next(e);}});
 

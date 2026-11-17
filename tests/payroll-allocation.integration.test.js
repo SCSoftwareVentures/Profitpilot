@@ -216,7 +216,7 @@ test("independent payroll decisions, exact source reconciliation and maker-check
   const reportPath=path(tenantA)+"/calculations";
   const reportBody={contractId:contract,siteId:siteA,periodStart:"2026-02-01",periodEnd:"2026-02-14"};
   const report=await browserClient("ci-payroll-importer").createContributionReport(tenantA,reportBody);
-  assert.equal(report.formulaVersion,"0.2.0");
+  assert.equal(report.formulaVersion,"0.3.0");
   assert.deepEqual([report.outputs.revenue,report.outputs.directLabour,report.outputs.approvedAllocatedLabour,report.outputs.contribution,report.outputs.marginPercent],["120.01","60.00","20.00","40.01",null]);
   assert.equal(report.outputs.poolContext.unallocated,"10.00");
   const savedReport=await browserClient("ci-payroll-reviewer").readContributionReport(tenantA,report.id);
@@ -226,6 +226,27 @@ test("independent payroll decisions, exact source reconciliation and maker-check
   assert.equal(JSON.stringify(savedReport).includes("SYNTHETIC-DIRECT-EVIDENCE"),false);
   assert.equal((await send("GET",path(tenantB)+"/calculations/"+report.id,"ci-payroll-outside")).status,404);
   assert.equal((await send("POST",reportPath,"ci-payroll-importer",{...reportBody,periodEnd:"2026-02-10"})).status,422);
+  // Reviewer classifies and explicitly attests overlap / duplicate checks for expenses.
+  const expenseMatches=[];
+  for(const [category,amount] of [["supplier","5.01"],["subcontractor","7.00"],["other_delivery","3.00"],["supplier","-0.01"]]){
+   const inv=randomUUID(),line=randomUUID(),candidate=randomUUID();
+   await admin.query("INSERT INTO invoices(id,tenant_id,direction,invoice_number,invoice_date,total_amount,currency,tax_basis,source_ref) VALUES($1,$2,'supplier',$3,'2026-03-01',$4,'AUD','gst_exclusive','SYNTHETIC-EXPENSE')",[inv,tenantA,"expense-"+randomUUID(),amount]);
+   await admin.query("INSERT INTO invoice_lines(id,tenant_id,invoice_id,line_number,description,amount) VALUES($1,$2,$3,1,'Synthetic expense',$4)",[line,tenantA,inv,amount]);
+   await admin.query("INSERT INTO match_reviews(id,tenant_id,invoice_line_id,contract_id,site_id,service_period_start,service_period_end,confidence,decision) VALUES($1,$2,$3,$4,$5,'2026-02-01','2026-02-14','HIGH','candidate')",[candidate,tenantA,line,contract,siteA]);
+   const p=path(tenantA)+"/matches/"+candidate+"/decision";
+   const body={decision:"confirmed",reason:"Reviewed synthetic supplier source and overlap",costCategory:category,payrollOverlapReviewed:true,duplicateExpenseReviewed:true};
+   assert.equal((await send("POST",p,"ci-payroll-importer",body)).status,403);
+   assert.equal((await send("POST",p,"ci-payroll-reviewer",{...body,payrollOverlapReviewed:false})).status,422);
+   assert.equal((await send("POST",p,"ci-payroll-reviewer",body,{mfa:false})).status,403);
+   await browserClient("ci-payroll-reviewer").confirmDeliveryExpense(tenantA,candidate,body);
+   expenseMatches.push(candidate);
+  }
+  const expanded=await browserClient("ci-payroll-importer").createContributionReport(tenantA,reportBody);
+  assert.deepEqual([expanded.outputs.supplierCost,expanded.outputs.subcontractorCost,expanded.outputs.otherDeliveryCost,expanded.outputs.deliveryCost,expanded.outputs.contribution,expanded.outputs.includedCostMarginPercent,expanded.outputs.marginPercent],["5.00","7.00","3.00","95.00","25.01","20.84",null]);
+  const expandedSaved=await browserClient("ci-payroll-reviewer").readContributionReport(tenantA,expanded.id);
+  assert.deepEqual(expandedSaved.inputs.expenseEvidence.map(e=>e.matchId).sort(),expenseMatches.sort());
+  assert.equal(JSON.stringify(expandedSaved).includes("SYNTHETIC-EXPENSE"),false);
+  assert.equal((await browserClient("ci-payroll-reviewer").readContributionReport(tenantA,report.id)).outputs.contribution,"40.01","prior immutable report keeps its original snapshot");
   await admin.query("INSERT INTO contracts(tenant_id,business_id,customer_name) VALUES($1,$2,'Competing contract')",[tenantA,businessA]);
   assert.equal((await send("POST",reportPath,"ci-payroll-importer",reportBody)).status,422,"shared business contract costs cannot be double-counted");
   const auditState=await admin.query("SELECT * FROM private.verify_audit_chain($1)",[tenantA]);

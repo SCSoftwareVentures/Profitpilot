@@ -50,16 +50,18 @@ $("inspect").addEventListener("click",()=>execute(async()=>{invalidate();const t
 form("confirm",async()=>{if(loaded!==scope()||!$("ack").checked)throw new TypeError("Read and acknowledge the specific allocation first");const r=await client.confirm(value("tenant"),value("pool"),value("allocation"),{reason:value("confirmReason"),acknowledged:true});invalidate();$("confirm").reset();status("Server returned "+r.status+". Reload allocation to verify current state.");});
 $("clear").addEventListener("click",()=>{for(const el of document.querySelectorAll("input,textarea")){if(el.type==="checkbox")el.checked=false;else el.value="";}for(const f of document.querySelectorAll("form"))f.reset();$("lines").replaceChildren();addLine();clearQueue();invalidate();$("poolResult").textContent="";status("Workspace cleared. Provider session revocation is separate.");sync();});
 
+form("expenseConfirm",async()=>{await client.confirmDeliveryExpense(value("tenant"),value("expenseMatch"),{reason:value("expenseReason"),costCategory:value("expenseCategory"),payrollOverlapReviewed:$("expensePayroll").checked,duplicateExpenseReviewed:$("expenseDuplicate").checked});$("expenseConfirm").reset();status("Expense match confirmed by server. Create a new report to include it.");});
 function clearReport(){$("reportResult").textContent="";}
 for(const key of ["tenant","reportContract","reportSite","reportStart","reportEnd"]){$(key).addEventListener("input",()=>{$("reportId").value="";clearReport();});}
 $("reportId").addEventListener("input",clearReport);
 $("clear").addEventListener("click",clearReport);
 function renderReport(r,withEvidence){
  const o=r.outputs;
- if((r.formulaVersion??r.formula_version)!=="0.2.0"||o?.reportType!=="partial_management_contribution"||o.completeness!=="incomplete"||o.marginPercent!==null)throw new TypeError("Unsupported report version");
- const lines=["PARTIAL MANAGEMENT CONTRIBUTION · INCOMPLETE","Report: "+r.id,"Formula: 0.2.0","Currency: AUD · "+o.taxBasis,
+ const version=r.formulaVersion??r.formula_version;
+ if(!["0.2.0","0.3.0"].includes(version)||o?.reportType!=="partial_management_contribution"||o.completeness!=="incomplete"||o.marginPercent!==null)throw new TypeError("Unsupported report version");
+ const lines=["PARTIAL MANAGEMENT CONTRIBUTION · INCOMPLETE","Report: "+r.id,"Formula: "+version,"Currency: AUD · "+o.taxBasis,
   "Confirmed customer revenue: AUD "+o.revenue,"Direct labour: AUD "+o.directLabour,"Approved allocated labour: AUD "+o.approvedAllocatedLabour,
-  "Included labour: AUD "+o.deliveryCost,"Partial contribution: AUD "+o.contribution,"Definitive margin: unavailable",
+  ...(version==="0.3.0"?["Included labour: AUD "+o.includedLabour,"Supplier expenses: AUD "+o.supplierCost,"Subcontractor expenses: AUD "+o.subcontractorCost,"Other direct delivery expenses: AUD "+o.otherDeliveryCost,"Confirmed expense lines: "+o.expenseLineCount,"Expense evidence: "+o.expenseEvidenceStatus,"Included delivery costs: AUD "+o.deliveryCost,"Included-cost margin only: "+(o.includedCostMarginPercent===null?"unavailable":o.includedCostMarginPercent+"%")]:["Included labour: AUD "+o.deliveryCost,"Historical labour-only report"]),"Partial contribution: AUD "+o.contribution,"Definitive margin: unavailable",
   "Confirmed invoice lines: "+o.invoiceLineCount,"Confirmed allocation lines: "+o.allocationLineCount,
   "Whole selected payroll pools (not additional contract costs):","Source-declared total: AUD "+o.poolContext.sourceDeclaredTotal,
   "Non-site: AUD "+o.poolContext.nonSite,"Excluded: AUD "+o.poolContext.excluded,"Unallocated: AUD "+o.poolContext.unallocated,

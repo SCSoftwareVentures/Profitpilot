@@ -403,7 +403,7 @@ paths:
         schema: { type: string, format: uuid }
     post:
       summary: Record a human invoice-match decision
-      description: Candidate scores never auto-confirm a match. Append reviewer, reason and timestamp.
+      description: Candidate scores never auto-confirm a match. Supplier confirmation requires a direct delivery cost category and affirmative human review of payroll overlap and duplicate expenses. Fresh MFA required.
       requestBody:
         required: true
         content:
@@ -414,8 +414,12 @@ paths:
               properties:
                 decision: { type: string, enum: [confirmed, rejected, held] }
                 reason: { type: string, minLength: 3, maxLength: 2000 }
+                costCategory: { type: string, enum: [supplier, subcontractor, other_delivery] }
+                payrollOverlapReviewed: { type: boolean }
+                duplicateExpenseReviewed: { type: boolean }
       responses:
         "201": { description: Decision appended }
+        "422": { description: Supplier cost review lacks required evidence }
         "403": { description: Reviewer role required }
         "409": { description: Match state changed; refresh required }
   /tenants/{tenantId}/calculations:
@@ -423,7 +427,7 @@ paths:
       - $ref: '#/components/parameters/TenantId'
     post:
       summary: Create a versioned contract/site/period calculation run
-      description: Version 0.2.0 captures confirmed service-period invoice matches and approved site payroll in one evidence snapshot. Single-contract businesses only; exact AUD decimal strings, incomplete partial contribution, margin suppressed. No client-supplied totals.
+      description: Version 0.3.0 captures confirmed customer invoices, approved site payroll and reviewed supplier delivery expenses in one service-period snapshot. Single-contract businesses only; exact AUD decimal strings, partial contribution and included-cost ratio only. Definitive margin suppressed. No client-supplied totals.
       responses:
         "201": { description: Calculation run created }
         "422": { description: Insufficient or unreconciled source evidence }

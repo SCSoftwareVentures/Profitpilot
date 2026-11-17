@@ -85,3 +85,11 @@ test("contribution reports use fixed tenant routes and server-calculated inputs 
  assert.equal(calls[1].path,`/v1/tenants/${tenant}/calculations/${run}`);
  assert.equal(calls[1].opts.cache,"no-store");assert.deepEqual(tokens,[false,false]);
 });
+
+test("expense confirmation requires explicit classification, duplicate review and fresh MFA",async()=>{
+ const {client,calls,tokens}=fixture();
+ assert.throws(()=>client.confirmDeliveryExpense(tenant,run,{reason:"Reviewed",costCategory:"supplier",payrollOverlapReviewed:true}),TypeError);
+ await client.confirmDeliveryExpense(tenant,run,{reason:"Reviewed",costCategory:"supplier",payrollOverlapReviewed:true,duplicateExpenseReviewed:true});
+ assert.equal(calls[0].path,`/v1/tenants/${tenant}/matches/${run}/decision`);
+ assert.deepEqual(tokens,[true]);assert.deepEqual(JSON.parse(calls[0].opts.body),{decision:"confirmed",reason:"Reviewed",costCategory:"supplier",payrollOverlapReviewed:true,duplicateExpenseReviewed:true});
+});
