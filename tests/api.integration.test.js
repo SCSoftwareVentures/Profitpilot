@@ -43,7 +43,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
   const apiAddress=api.address();
   const base=`http://127.0.0.1:${apiAddress.port}`;
   async function token(subject){
-    return new SignJWT({email:subject+"@example.invalid"})
+    return new SignJWT({email:subject+"@example.invalid",auth_time:Math.floor(Date.now()/1000),acr:"urn:profitpilot:step-up"})
       .setProtectedHeader({alg:"RS256",kid:jwk.kid})
       .setIssuer(issuer).setAudience(audience).setSubject(subject)
       .setIssuedAt().setExpirationTime("5m").sign(privateKey);
@@ -201,11 +201,22 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(analystDecision.status,403,"analysts must not finalise match-review decisions");
     const readerDecision=await request(`/v1/tenants/${tenantA}/matches/${matchId}/decision`,{subject:"ci-api-reader",method:"POST",body:{decision:"confirmed",reason:"CI role test"}});
     assert.equal(readerDecision.status,403,"read-only members must not finalise match-review decisions");
+    const staleStepUp=await fetch(base+`/v1/tenants/${tenantA}/matches/${matchId}/decision`,{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+await customToken("ci-api-reviewer",{authTime:Math.floor(Date.now()/1000)-600,acr:"urn:profitpilot:step-up"})},body:JSON.stringify({decision:"confirmed",reason:"CI stale step-up test"})});
+    assert.equal(staleStepUp.status,403,"sensitive decisions must reject stale step-up authentication");
+    const missingStepUp=await fetch(base+`/v1/tenants/${tenantA}/matches/${matchId}/decision`,{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+await customToken("ci-api-reviewer")},body:JSON.stringify({decision:"confirmed",reason:"CI missing step-up test"})});
+    assert.equal(missingStepUp.status,403,"sensitive decisions must reject tokens without step-up claims");
     const reviewerDecision=await request(`/v1/tenants/${tenantA}/matches/${matchId}/decision`,{subject:"ci-api-reviewer",method:"POST",body:{}});
     assert.equal(reviewerDecision.status,400,"reviewers must pass role authorisation before decision payload validation");
 
     const reviewerImport=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-reviewer",method:"POST",body:{...importBody,sha256:"e".repeat(64)}});
     assert.equal(reviewerImport.status,403,"reviewers must not create source imports");
+    await admin.query("INSERT INTO tenant_membership_permission_overrides(tenant_id,user_id,permission_key,effect,reason,granted_by) VALUES ($1,$2,'imports.create','grant','Temporary CI override grant',$2)",[tenantA,userD]);
+    const overriddenReviewerImport=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-reviewer",method:"POST",body:{...importBody,sha256:"f".repeat(64)}});
+    assert.equal(overriddenReviewerImport.status,201,"an explicit tenant-scoped member grant must override the role default");
+    await admin.query("UPDATE tenant_membership_permission_overrides SET effect='deny',reason='Temporary CI override denial' WHERE tenant_id=$1 AND user_id=$2 AND permission_key='imports.create'",[tenantA,userD]);
+    const deniedReviewerImport=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-reviewer",method:"POST",body:{...importBody,sha256:"a".repeat(64)}});
+    assert.equal(deniedReviewerImport.status,403,"an explicit tenant-scoped member denial must override a role grant");
+    await admin.query("DELETE FROM tenant_membership_permission_overrides WHERE tenant_id=$1 AND user_id=$2 AND permission_key='imports.create'",[tenantA,userD]);
     const reviewerRows=await request(`/v1/tenants/${tenantA}/imports/${matchId}/rows`,{subject:"ci-api-reviewer",method:"POST",body:{rows:[{invoice:"CI"}]}});
     assert.equal(reviewerRows.status,403,"reviewers must not ingest source rows");
     const analystRows=await request(`/v1/tenants/${tenantA}/imports/${matchId}/rows`,{subject:"ci-api-analyst",method:"POST",body:{rows:[{invoice:"CI"}]}});
