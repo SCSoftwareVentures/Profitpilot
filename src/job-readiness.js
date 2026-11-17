@@ -51,6 +51,7 @@ export function evaluateJobReadiness({template,answers}={}){
     };
   });
   const requiredCount=checks.filter(x=>x.required).length;
+  if(requiredCount===0)throw new TypeError("At least one required readiness check is required.");
   const satisfiedCount=checks.filter(x=>x.required&&x.state==="satisfied").length;
   const notApplicableCount=checks.filter(x=>x.required&&x.state==="not_applicable").length;
   const blockers=checks.filter(x=>x.blocking).map(x=>({
