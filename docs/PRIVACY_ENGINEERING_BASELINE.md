@@ -51,6 +51,8 @@ The product must provide documented workflows for:
 
 Deletion must cover primary records, derived records, search indexes, object storage, caches and downstream processors where applicable. Backup expiry and restoration procedures must be documented so deleted data is not silently reintroduced. Legal holds and statutory retention exceptions must be explicit and auditable.
 
+The privacy-request API records requests and review states, but does not execute access exports, corrections, restrictions or deletions. The API now fails closed if an administrator attempts to mark a request fulfilled. A workflow status must not be treated as evidence that a data subject request has been completed.
+
 No fixed retention period is asserted by this baseline. Retention periods must be approved against the actual purpose, applicable Australian Privacy Act obligations and any other jurisdictions in which the product operates before production launch.
 
 ## 6. Logging, analytics and AI
