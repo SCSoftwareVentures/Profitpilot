@@ -282,7 +282,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(fulfilPrivacy.status,409,"the API must not claim fulfilment when export and deletion execution are not implemented");
     const stillUnderReview=await request(`/v1/tenants/${tenantA}/privacy/requests/manage`,{subject:"ci-api-owner"});
     assert.equal(stillUnderReview.status,200);
-    assert.equal(stillUnderReview.items[0].status,"under_review","a rejected fulfilment attempt must leave the request open for genuine completion");
+    assert.equal(stillUnderReview.items.find(item=>item.id===privacyItem.id)?.status,"under_review","a rejected fulfilment attempt must leave the request open for genuine completion");
     const privacyAudit=await request(`/v1/tenants/${tenantA}/security/audit?limit=100`,{subject:"ci-api-owner"});
     assert.equal((await privacyAudit.json()).integrity.is_valid,true,"privacy request events must remain verifiable in the audit chain");
     const privacyOtherTenant=await request(`/v1/tenants/${tenantB}/privacy/requests/manage`,{subject:"ci-api-tenant-b-only"});
