@@ -107,6 +107,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/018_import_disposal_controls.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/019_calculation_export.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/020_private_file_quarantine.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/021_quarantine_scanner_lifecycle.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
 
       - name: Audit every tenant-scoped table and tenant-to-tenant foreign key
@@ -150,6 +151,12 @@ jobs:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/import-disposal.integration.test.js
+
+      - name: Verify isolated scanner protocol, leases and hold-aware expiry
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
+        run: |
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/quarantine-scanner.test.js
 
       - name: Verify encrypted private file quarantine and database authorization
         env:
@@ -276,6 +283,6 @@ jobs:
             echo "## ProfitPilot security CI gate"
             echo "- Commit: \`$TESTED_SHA\`"
             echo "- Node.js application checks: $VERIFY_RESULT"
-            echo "- PostgreSQL, tenant RLS, authenticated API, distributed limits, key lifecycle, invoice privacy boundary, retention/holds/disposal, MFA-gated export, encrypted file quarantine, encrypted synthetic recovery and tombstone replay, TLS and container checks: $DATABASE_RESULT"
+            echo "- PostgreSQL, tenant RLS, authenticated API, distributed limits, key lifecycle, invoice privacy boundary, retention/holds/disposal, MFA-gated export, encrypted file quarantine, scanner protocol and expiry, encrypted synthetic recovery and tombstone replay, TLS and container checks: $DATABASE_RESULT"
             echo "- Scope: automated repository CI only; not penetration testing or production certification"
           } >> "$GITHUB_STEP_SUMMARY"
