@@ -65,10 +65,12 @@ test("authenticated API enforces tenant membership, role permissions and import 
   }
   try{
     const userD="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
-    await admin.query("INSERT INTO users(id,auth_subject,email,status) VALUES ($1,'ci-api-analyst','analyst@example.invalid','active'),($2,'ci-api-reader','reader@example.invalid','active'),($3,'ci-api-tenant-b-only','tenant-b@example.invalid','active'),($4,'ci-api-reviewer','reviewer@example.invalid','active') ON CONFLICT(auth_subject) DO UPDATE SET status='active'",[userA,userB,userC,userD]);
+    const userE="cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    await admin.query("INSERT INTO users(id,auth_subject,email,status) VALUES ($1,'ci-api-analyst','analyst@example.invalid','active'),($2,'ci-api-reader','reader@example.invalid','active'),($3,'ci-api-tenant-b-only','tenant-b@example.invalid','active'),($4,'ci-api-reviewer','reviewer@example.invalid','active'),($5,'ci-api-owner','owner@example.invalid','active') ON CONFLICT(auth_subject) DO UPDATE SET status='active'",[userA,userB,userC,userD,userE]);
     await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES ($1,$2,'analyst','active'),($1,$3,'read_only','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status='active'",[tenantA,userA,userB]);
     await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES ($1,$2,'analyst','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status='active'",[tenantB,userC]);
     await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES ($1,$2,'reviewer','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status='active'",[tenantA,userD]);
+    await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES ($1,$2,'owner','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status='active'",[tenantA,userE]);
     await admin.query("INSERT INTO businesses(id,tenant_id,name) VALUES ($1,$2,'CI Business A') ON CONFLICT(id) DO NOTHING",[businessA,tenantA]);
     await admin.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'CI Customer A','active') ON CONFLICT(id) DO NOTHING",[contractA,tenantA,businessA]);
     await admin.query("INSERT INTO businesses(id,tenant_id,name) VALUES ($1,$2,'CI Business B') ON CONFLICT(id) DO NOTHING",[businessB,tenantB]);
@@ -229,6 +231,28 @@ test("authenticated API enforces tenant membership, role permissions and import 
 
     const reviewerImport=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-reviewer",method:"POST",body:{...importBody,sha256:"e".repeat(64)}});
     assert.equal(reviewerImport.status,403,"reviewers must not create source imports");
+
+    const permissionView=await request(`/v1/tenants/${tenantA}/security/permissions`,{subject:"ci-api-owner"});
+    assert.equal(permissionView.status,200,"tenant owners must be able to inspect the permission catalogue and overrides");
+    assert.ok((await permissionView.json()).catalogue.some(x=>x.permission_key==="security.audit.read"));
+    const ownerGrant=await request(`/v1/tenants/${tenantA}/security/permissions/overrides`,{subject:"ci-api-owner",method:"POST",body:{userId:userD,permissionKey:"imports.create",effect:"grant",reason:"Temporary delegated import authority"}});
+    assert.equal(ownerGrant.status,201,"an owner may create a step-up-protected member permission override");
+    const grantedImport=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-reviewer",method:"POST",body:{...importBody,sha256:"1".repeat(64)}});
+    assert.equal(grantedImport.status,201,"a member grant must take effect on subsequent API requests");
+    const ownerDeny=await request(`/v1/tenants/${tenantA}/security/permissions/overrides`,{subject:"ci-api-owner",method:"POST",body:{userId:userD,permissionKey:"imports.create",effect:"deny",reason:"Remove temporary import authority"}});
+    assert.equal(ownerDeny.status,201,"an owner may replace a grant with an explicit denial");
+    const deniedImport=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-reviewer",method:"POST",body:{...importBody,sha256:"2".repeat(64)}});
+    assert.equal(deniedImport.status,403,"an explicit member denial must override role defaults and prior grants");
+    const removedOverride=await fetch(base+`/v1/tenants/${tenantA}/security/permissions/overrides/${userD}/imports.create`,{method:"DELETE",headers:{"content-type":"application/json",authorization:"Bearer "+await token("ci-api-owner")},body:JSON.stringify({reason:"Return to default role permissions"})});
+    assert.equal(removedOverride.status,200,"an owner may remove a member override with a recorded reason");
+    const auditView=await request(`/v1/tenants/${tenantA}/security/audit?limit=20`,{subject:"ci-api-owner"});
+    assert.equal(auditView.status,200,"tenant owners must be able to inspect security audit events");
+    const auditBody=await auditView.json();
+    assert.equal(auditBody.integrity.is_valid,true,"the tenant audit hash chain must verify");
+    assert.ok(auditBody.integrity.event_count>=3,"permission changes must be recorded in the append-only audit chain");
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-owner",client=>client.query("UPDATE audit_events SET reason='tampered' WHERE tenant_id=$1",[tenantA])),/permission denied/i,"the runtime role must not update append-only audit events");
+    const memberCannotManage=await request(`/v1/tenants/${tenantA}/security/permissions/overrides`,{subject:"ci-api-reviewer",method:"POST",body:{userId:userA,permissionKey:"imports.create",effect:"grant",reason:"Must be denied"}});
+    assert.equal(memberCannotManage.status,403,"non-owners must not manage member permission overrides");
     await admin.query("INSERT INTO tenant_membership_permission_overrides(tenant_id,user_id,permission_key,effect,reason,granted_by) VALUES ($1,$2,'imports.create','grant','Temporary CI override grant',$2)",[tenantA,userD]);
     const overriddenReviewerImport=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-reviewer",method:"POST",body:{...importBody,sha256:"f".repeat(64)}});
     assert.equal(overriddenReviewerImport.status,201,"an explicit tenant-scoped member grant must override the role default");
