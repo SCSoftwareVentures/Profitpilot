@@ -389,3 +389,10 @@ The integration suite verifies direct-SQL reviewer permission, analyst denial, r
 **Latest exact-head CI:** run **#43983962328** passed on `6b98299006d9aa620f494ec4fe52d095e82947c4`. Node.js 22: 56 passed, 0 failed, 3 database-dependent tests skipped in the standalone job. PostgreSQL 16: migrations through 014, 20-table tenant/FK catalogue, restricted-role RLS, authenticated API integration, image build, trusted-CA TLS connection, untrusted-CA rejection and production-mode API health all passed.
 
 PR #28 remains draft and unmerged, based on PR #27's integration branch. The product remains NOT COMPLETE: full financial acceptance, private file lifecycle, production operations, independent assurance, customer evidence and G5 authorisation remain outstanding. No merge, deployment, real-data intake or payment activity is authorised.
+
+
+### 24. Latest PR #28 exact-head verification — 17 November 2026
+
+GitHub Actions run **#43984181421 (run #684)** passed on exact PR head `5988ba408eae176cf5c69def1a9b5f4106e954c1`. Node.js 22 and PostgreSQL 16 jobs both succeeded. The PostgreSQL job applied migrations 002–014, passed the 20-table tenant/FK audit, restricted-role RLS and authenticated API integration including migration-014 reviewer/audit controls, built the production image, verified trusted-CA TLS, rejected an untrusted CA and passed production-mode API health. The Node-only job reported 56 passed, 0 failed and 3 DB-dependent skips (covered by PostgreSQL integration).
+
+This closes the exact-head CI verification item for PR #28. It does not close the product completion register: full financial acceptance, private file lifecycle, production operations, independent assurance, customer validation G0–G4 and signed G5 GO remain outstanding. PR #28 remains draft and unmerged.
