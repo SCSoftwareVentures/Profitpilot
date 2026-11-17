@@ -41,6 +41,7 @@ services:
       - ./database/migrations/026_payroll_allocation_approval.sql:/docker-entrypoint-initdb.d/028-payroll-approval.sql:ro
       - ./database/migrations/027_shared_overhead_immutability.sql:/docker-entrypoint-initdb.d/029-shared-overhead.sql:ro
       - ./database/migrations/028_shared_overhead_proposals.sql:/docker-entrypoint-initdb.d/030-shared-proposals.sql:ro
+      - ./database/migrations/029_exact_access_session_binding.sql:/docker-entrypoint-initdb.d/031-exact-session-binding.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s

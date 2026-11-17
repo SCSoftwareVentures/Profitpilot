@@ -1,5 +1,6 @@
 import {createRemoteJWKSet, jwtVerify} from "jose";
 import {withTenant,registerAndCheckAuthSession} from "./db.js";
+import {validAccessClaims} from "../src/access-claims.js";
 
 let jwks;
 let jwksUrl;
@@ -17,7 +18,8 @@ function config(){
   error.code="AUTH_CONFIG_INVALID";
   throw error;
  }
- const localHttp=url.protocol==="http:"&&["localhost","127.0.0.1","::1"].includes(url.hostname);
+ const localHttp=url.protocol==="http:"&&["localhost","127.0.0.1","[::1]"].includes(url.hostname);
+ if(process.env.NODE_TLS_REJECT_UNAUTHORIZED==="0")throw Object.assign(new Error("TLS verification disabled"),{code:"AUTH_CONFIG_INVALID"});
  if(url.protocol!=="https:"&&!(process.env.NODE_ENV!=="production"&&localHttp)){
   const error=new Error("Authentication JWKS endpoint must use HTTPS");
   error.code="AUTH_CONFIG_INVALID";
@@ -57,10 +59,7 @@ export function authRequired(){
     clockTolerance:5
    });
    payload=verified.payload;
-   const now=Date.now()/1000;
-   if(typeof payload.iat!=="number"||!Number.isFinite(payload.iat)||payload.iat>now+5||now-payload.iat>900)return res.status(401).json({error:"Invalid or expired access token"});
-   if(typeof payload.exp!=="number"||!Number.isFinite(payload.exp)||typeof payload.jti!=="string"||payload.jti.length<16||payload.jti.length>128)return res.status(401).json({error:"Invalid access token"});
-   if(typeof payload.sub!=="string"||!payload.sub.trim())return res.status(401).json({error:"Invalid access token"});
+   if(!validAccessClaims(payload))return res.status(401).json({error:"Invalid or expired access token"});
   }catch{return res.status(401).json({error:"Invalid or expired access token"});}
   let revoked;
   try{

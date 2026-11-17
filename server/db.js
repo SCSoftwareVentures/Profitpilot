@@ -43,10 +43,9 @@ export async function registerAndCheckAuthSession({jti,subject,issuer,issuedAt,e
  const client=await pool.connect();
  try{
   await client.query("BEGIN");
-  await client.query("SELECT private.register_bound_auth_session($1,$2,$3,to_timestamp($4),to_timestamp($5))",[jti,subject,issuer,issuedAt,expiresAt]);
-  const result=await client.query("SELECT private.is_bound_auth_session_revoked($1,$2,$3) AS revoked",[jti,subject,issuer]);
+  const result=await client.query("SELECT private.accept_bound_access_session($1,$2,$3,to_timestamp($4),to_timestamp($5)) AS accepted",[jti,subject,issuer,issuedAt,expiresAt]);
   await client.query("COMMIT");
-  return result.rows[0].revoked===true;
+  return result.rows[0]?.accepted!==true;
  }catch(error){await client.query("ROLLBACK");throw error;}
  finally{client.release();}
 }

@@ -49,12 +49,12 @@ test("authenticated API enforces tenant membership, role permissions and import 
       .setIssuer(issuer).setAudience(audience).setSubject(subject)
       .setIssuedAt().setExpirationTime("5m").setJti(randomBytes(16).toString("hex")).sign(privateKey);
   }
-  async function customToken(subject,{issuedAt=Math.floor(Date.now()/1000),expiresAt=Math.floor(Date.now()/1000)+300,includeIssuedAt=true,includeExpiry=true,authTime,acr,amr}={}){
+  async function customToken(subject,{issuedAt=Math.floor(Date.now()/1000),expiresAt=Math.floor(Date.now()/1000)+300,includeIssuedAt=true,includeExpiry=true,authTime,acr,amr,jti=randomBytes(16).toString("hex")}={}){
     const claims={email:subject+"@example.invalid"};if(authTime!==undefined)claims.auth_time=authTime;if(acr!==undefined)claims.acr=acr;if(amr!==undefined)claims.amr=amr;
     let jwt=new SignJWT(claims).setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(issuer).setAudience(audience).setSubject(subject);
     if(includeIssuedAt)jwt=jwt.setIssuedAt(issuedAt);
     if(includeExpiry)jwt=jwt.setExpirationTime(expiresAt);
-    jwt=jwt.setJti(randomBytes(16).toString("hex"));
+    jwt=jwt.setJti(jti);
     return jwt.sign(privateKey);
   }
   async function request(path,{subject,method="GET",body}={}){
@@ -99,6 +99,19 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const trackedSessionToken=await token("ci-api-analyst");
     const trackedSessionResponse=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+trackedSessionToken}});
     assert.equal(trackedSessionResponse.status,200,"valid jti-bearing tokens must register a server-side session");
+    // A valid provider signature cannot reuse a JTI with a different token lifetime or subject.
+    const now=Math.floor(Date.now()/1000), collisionId=randomBytes(16).toString("hex");
+    const collisionClaims={issuedAt:now,expiresAt:now+300,jti:collisionId};
+    const original=await customToken("ci-api-analyst",collisionClaims);
+    const useToken=async v=>fetch(base+"/v1/me",{headers:{authorization:"Bearer "+v}});
+    assert.equal((await useToken(original)).status,200);
+    assert.equal((await useToken(await customToken("ci-api-analyst",{...collisionClaims,expiresAt:now+301}))).status,401);
+    assert.equal((await useToken(await customToken("ci-api-analyst",{...collisionClaims,issuedAt:now-1}))).status,401);
+    assert.equal((await useToken(await customToken("ci-api-owner",collisionClaims))).status,401);
+    assert.equal((await useToken(original)).status,200);
+    assert.equal((await useToken(await customToken("ci-api-analyst",{expiresAt:now+3600}))).status,401);
+    assert.equal((await useToken(await customToken("ci-api-analyst",{jti:"invalid session identifier"}))).status,401);
+    await assert.rejects(()=>appPool.query("SELECT private.is_bound_auth_session_revoked($1,$2,$3)",[collisionId,"ci-api-analyst",issuer]),/permission denied/i);
     const revocableSessionToken=await token("ci-api-analyst");
     const revocableSessionResponse=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+revocableSessionToken}});
     assert.equal(revocableSessionResponse.status,200);
