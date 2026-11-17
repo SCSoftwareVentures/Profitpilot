@@ -196,6 +196,55 @@ paths:
         "401": { description: Unauthenticated }
         "403": { description: Tenant membership not authorised }
         "404": { description: Run not found in this tenant }
+  /tenants/{tenantId}/calculations/{runId}/export:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: runId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Export a single minimized management calculation
+      description: Requires an active owner or admin and issuer-attested MFA within five minutes. Returns only allowlisted financial summary fields, records an audit event, and creates no persistent download file or public link. Incomplete results remain explicitly incomplete; authoritative contribution and margin are withheld.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [purpose]
+              properties:
+                purpose: { type: string, enum: [internal_review, customer_reporting, accountant_review] }
+      responses:
+        "200":
+          description: Audited JSON summary attachment with no-store cache control
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [exportId, calculationId, contractId, siteId, periodStart, periodEnd, completeness, currency, revenue, deliveryCost, indicativeContribution, contribution, marginPercent, notice]
+                properties:
+                  exportId: { type: string, format: uuid }
+                  calculationId: { type: string, format: uuid }
+                  contractId: { type: string, format: uuid }
+                  siteId: { type: string, format: uuid }
+                  periodStart: { type: string, format: date }
+                  periodEnd: { type: string, format: date }
+                  completeness: { type: string, enum: [complete, incomplete] }
+                  currency: { type: [string, "null"] }
+                  revenue: { type: [string, "null"] }
+                  deliveryCost: { type: [string, "null"] }
+                  indicativeContribution: { type: [string, "null"] }
+                  contribution: { type: [string, "null"] }
+                  marginPercent: { type: [string, "null"] }
+                  notice: { type: string }
+        "400": { description: Invalid identifier or export purpose }
+        "401": { description: Unauthenticated }
+        "403": { description: Insufficient role, tenant membership or recent MFA }
+        "404": { description: Calculation unavailable in tenant }
+        "429": { description: Rate limit exceeded }
 components:
   schemas:
     ErrorResponse:
