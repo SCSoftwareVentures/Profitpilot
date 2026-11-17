@@ -96,6 +96,72 @@ app.delete("/v1/me/sessions/:jti",async(req,res,next)=>{try{
  if(!revoked)return res.status(404).json({error:"Active session not found"});
  res.status(200).json({sessionId:jti,revoked:true});
 }catch(e){next(e);}});
+app.post("/v1/tenants/:tenantId/privacy/requests",membership,requirePermission("privacy.requests.submit"),async(req,res,next)=>{try{
+ const {requestType,details}=req.body||{};
+ if(!["access","correction","export","deletion","restriction"].includes(requestType)||typeof details!=="string"||details.trim().length<3||details.length>2000)
+  return res.status(400).json({error:"A supported request type and concise description are required"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
+  const created=await client.query("INSERT INTO privacy_requests(tenant_id,subject_user_id,submitted_by,request_type,details) VALUES($1,$2,$2,$3,$4) RETURNING id,request_type,status,created_at",[req.membership.tenantId,req.membership.userId,requestType,details.trim()]);
+  const item=created.rows[0];
+  await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'privacy_request_submitted','privacy_request',$3,'Member submitted a privacy request',$4)",[req.membership.tenantId,req.membership.userId,item.id,JSON.stringify({requestType})]);
+  return item;
+ });
+ res.status(201).json(result);
+}catch(e){next(e);}});
+app.get("/v1/tenants/:tenantId/privacy/requests",membership,requirePermission("privacy.requests.read"),async(req,res,next)=>{try{
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
+  const rows=await client.query("SELECT id,request_type,status,details,created_at,updated_at,resolved_at,resolution_summary,legal_hold_reason FROM privacy_requests WHERE tenant_id=$1 AND subject_user_id=$2 ORDER BY created_at DESC LIMIT 100",[req.membership.tenantId,req.membership.userId]);
+  return {items:rows.rows};
+ });
+ res.json(result);
+}catch(e){next(e);}});
+app.get("/v1/tenants/:tenantId/privacy/requests/manage",membership,requirePermission("privacy.requests.manage"),async(req,res,next)=>{try{
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
+  const rows=await client.query("SELECT id,subject_user_id,submitted_by,request_type,status,details,assigned_to,created_at,updated_at,resolved_at,resolution_summary,legal_hold_reason FROM privacy_requests WHERE tenant_id=$1 ORDER BY created_at DESC LIMIT 200",[req.membership.tenantId]);
+  return {items:rows.rows};
+ });
+ res.json(result);
+}catch(e){next(e);}});
+app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/decision",membership,requirePermission("privacy.requests.manage"),requireStepUp(),async(req,res,next)=>{try{
+ const {action,reason,resolutionSummary}=req.body||{};
+ if(!["verify_identity","begin_review","place_legal_hold","release_legal_hold","fulfil","reject"].includes(action)||typeof reason!=="string"||reason.trim().length<3||reason.length>1000)
+  return res.status(400).json({error:"A supported review action and reason are required"});
+ if(["fulfil","reject"].includes(action)&&(typeof resolutionSummary!=="string"||resolutionSummary.trim().length<3||resolutionSummary.length>2000))
+  return res.status(400).json({error:"A resolution summary is required for a completed decision"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
+  const current=await client.query("SELECT id,status FROM privacy_requests WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.requestId,req.membership.tenantId]);
+  if(!current.rowCount)return {status:404,error:"Privacy request not found"};
+  const transitions={
+   verify_identity:{requested:"identity_verification"},
+   begin_review:{requested:"under_review",identity_verification:"under_review"},
+   place_legal_hold:{under_review:"legal_hold"},
+   release_legal_hold:{legal_hold:"under_review"},
+   fulfil:{under_review:"fulfilled"},
+   reject:{requested:"rejected",identity_verification:"rejected",under_review:"rejected"}
+  };
+  const nextStatus=transitions[action]?.[current.rows[0].status];
+  if(!nextStatus)return {status:409,error:"This action is not valid for the request's current status"};
+  const holdReason=action==="place_legal_hold"?reason.trim():null;
+  const summary=["fulfil","reject"].includes(action)?resolutionSummary.trim():null;
+  const updated=await client.query("UPDATE privacy_requests SET status=$3,legal_hold_reason=$4,resolution_summary=COALESCE($5,resolution_summary),assigned_to=COALESCE(assigned_to,$6),updated_at=clock_timestamp(),resolved_at=CASE WHEN $3 IN ('fulfilled','rejected') THEN clock_timestamp() ELSE NULL END WHERE id=$1 AND tenant_id=$2 RETURNING id,request_type,status,updated_at,resolved_at,resolution_summary,legal_hold_reason",[req.params.requestId,req.membership.tenantId,nextStatus,holdReason,summary,req.membership.userId]);
+  await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'privacy_request_status_changed','privacy_request',$3,$4,$5)",[req.membership.tenantId,req.membership.userId,req.params.requestId,reason.trim(),JSON.stringify({action,fromStatus:current.rows[0].status,toStatus:nextStatus})]);
+  return {status:200,item:updated.rows[0]};
+ });
+ if(result.error)return res.status(result.status).json({error:result.error});
+ res.status(result.status).json(result.item);
+}catch(e){next(e);}});
+app.post("/v1/tenants/:tenantId/privacy/requests/:requestId/withdraw",membership,requirePermission("privacy.requests.submit"),async(req,res,next)=>{try{
+ const {reason}=req.body||{};
+ if(typeof reason!=="string"||reason.trim().length<3||reason.length>1000)return res.status(400).json({error:"A withdrawal reason is required"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
+  const updated=await client.query("UPDATE privacy_requests SET status='withdrawn',updated_at=clock_timestamp() WHERE id=$1 AND tenant_id=$2 AND subject_user_id=$3 AND status IN ('requested','identity_verification','under_review') RETURNING id,status,updated_at",[req.params.requestId,req.membership.tenantId,req.membership.userId]);
+  if(!updated.rowCount)return {status:404,error:"Withdrawable privacy request not found"};
+  await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'privacy_request_withdrawn','privacy_request',$3,$4,'{}'::jsonb)",[req.membership.tenantId,req.membership.userId,req.params.requestId,reason.trim()]);
+  return {status:200,item:updated.rows[0]};
+ });
+ if(result.error)return res.status(result.status).json({error:result.error});
+ res.status(result.status).json(result.item);
+}catch(e){next(e);}});
 app.get("/v1/tenants/:tenantId/contracts",membership,requirePermission("contracts.read"),async(req,res,next)=>{try{const rows=await withTenant(req.membership.tenantId,req.identity.subject,async c=>(await c.query("SELECT id,customer_name,status FROM contracts WHERE tenant_id=$1 ORDER BY customer_name",[req.membership.tenantId])).rows);res.json({items:rows});}catch(e){next(e);}});
 app.post("/v1/tenants/:tenantId/imports",membership,requirePermission("imports.create"),async(req,res,next)=>{
  try{
