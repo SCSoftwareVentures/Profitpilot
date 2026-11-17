@@ -7,7 +7,7 @@ const event=(overrides={})=>({...base,...overrides});
 
 test("value events require explicit amount, dimensions, actor, reason and evidence",()=>{
   assert.equal(appendValueEvent({event:base}).events.length,1);
-  for(const overrides of [{amount:100.5},{amount:"-1.00"},{currency:""},{taxBasis:""},{evidenceRefs:[]},{occurredAt:"2026-11-17T09:00:00"}])
+  for(const overrides of [{amount:100.5},{amount:"-1.00"},{currency:""},{taxBasis:""},{evidenceRefs:[]},{occurredAt:"2026-11-17T09:00:00"},{occurredAt:"2026-02-31T09:00:00+11:00"}])
     assert.throws(()=>appendValueEvent({event:event(overrides)}));
 });
 
@@ -46,4 +46,10 @@ test("unlike currencies, tax bases and periods are kept in separate summary grou
 
 test("summary rejects malformed history instead of producing totals",()=>{
   assert.throws(()=>summariseValueEvents([{valueId:"value-1",type:"quoted",amount:"1.00",currency:"AUD",taxBasis:"gst_exclusive",periodStart:"2026-11-01",periodEnd:"2026-11-30"}]));
+});
+
+test("a value record cannot change its scope, currency, tax basis or period",()=>{
+  const first=appendValueEvent({event:base});
+  assert.throws(()=>appendValueEvent({events:first.events,event:event({eventId:"event-002",currency:"NZD",occurredAt:"2026-11-17T09:01:00+11:00",sourceRef:"source-2",evidenceRefs:["evidence-2"]})}),/cannot change scope, currency, tax basis or reporting period/);
+  assert.throws(()=>summariseValueEvents([...first.events,event({eventId:"event-002",currency:"NZD",occurredAt:"2026-11-17T09:01:00+11:00",sourceRef:"source-2",evidenceRefs:["evidence-2"]})]),/mixed reporting dimensions/);
 });
