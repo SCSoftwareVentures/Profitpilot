@@ -87,7 +87,7 @@ paths:
       - $ref: '#/components/parameters/BatchId'
     post:
       summary: Stage an encrypted file in private quarantine (synthetic non-production tests only)
-      description: Disabled in production, pending scanner and lifecycle acceptance. Requires owner/admin and recent MFA. Raw uncompressed UTF-8 text/csv only, 1 to 65536 bytes. Must match registered SHA-256. No file retrieval, parsing, approval or public link. A stored receipt means pending quarantine, not clean status.
+      description: Disabled in production, pending scanner and lifecycle acceptance. Requires owner/admin and recent MFA. Raw uncompressed UTF-8 text/csv only, 1 to 65536 bytes. Must match registered SHA-256. No file retrieval or public link. A stored receipt means pending quarantine, not clean status.
       requestBody:
         required: true
         content:
@@ -105,6 +105,22 @@ paths:
         "422": { description: Checksum or batch eligibility mismatch }
         "429": { description: Quarantine quota or rate limit exceeded }
         "503": { description: Upload disabled or unavailable }
+  /tenants/{tenantId}/imports/{batchId}/file/approve:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    post:
+      summary: Approve scanned and validated quarantine manifest for processing
+      description: Synthetic non-production only. Active owner/admin and recent MFA required. Approval does not expose file bytes or accept financial records. The isolated worker decrypts, rescans and checks the canonical manifest digest before atomic persistence. Holds and revoked approval authority block processing.
+      responses:
+        "202": { description: Approved for isolated processing }
+        "400": { description: Invalid approval request }
+        "401": { description: Unauthenticated }
+        "403": { description: Insufficient authority or recent MFA }
+        "404": { description: Batch not found }
+        "409": { description: Already approved or conflicting record }
+        "422": { description: File not eligible }
+        "503": { description: File processing disabled }
   /tenants/{tenantId}/imports/{batchId}/rows:
     parameters:
       - $ref: '#/components/parameters/TenantId'
