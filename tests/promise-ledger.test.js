@@ -64,3 +64,7 @@ test("malformed or forged prior promise history is rejected before appending",()
   const duplicate=[proposed,{...proposed,eventId:"event-1",type:"communicated",occurredAt:"2026-11-17T09:05:00+11:00",evidenceRefs:["sent-1"]}];
   assert.throws(()=>appendPromiseEvent({events:duplicate,event:event({eventId:"event-3",type:"accepted",occurredAt:"2026-11-17T10:00:00+11:00",evidenceRefs:["accept-1"]})}),/invalid event/);
 });
+
+test("promise timestamps reject impossible calendar dates",()=>{
+  assert.throws(()=>appendPromiseEvent({event:event({occurredAt:"2026-02-31T09:00:00+11:00"})}),/explicit timezone/);
+});
