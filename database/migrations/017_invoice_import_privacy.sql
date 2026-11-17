@@ -73,6 +73,10 @@ CREATE FUNCTION private.guard_runtime_import_metadata()
 RETURNS trigger LANGUAGE plpgsql SET search_path=pg_catalog AS $$
 BEGIN
  IF current_user<>'profitpilot_app' OR private.current_tenant_id() IS DISTINCT FROM NEW.tenant_id THEN RETURN NEW; END IF;
+ IF coalesce(private.current_actor_role(),'') NOT IN ('owner','admin','analyst','reviewer')
+ OR (TG_OP='INSERT' AND private.current_actor_role()='reviewer') THEN
+  RAISE EXCEPTION 'Import metadata requires an authorized tenant role' USING ERRCODE='42501';
+ END IF;
  IF TG_OP='UPDATE' AND ROW(NEW.file_name,NEW.permission_ref,NEW.source_type,NEW.file_sha256,NEW.created_by,NEW.tenant_id,NEW.id,NEW.source_period_start,NEW.source_period_end,NEW.created_at)
   IS DISTINCT FROM ROW(OLD.file_name,OLD.permission_ref,OLD.source_type,OLD.file_sha256,OLD.created_by,OLD.tenant_id,OLD.id,OLD.source_period_start,OLD.source_period_end,OLD.created_at) THEN
    RAISE EXCEPTION 'Import source metadata is immutable' USING ERRCODE='23514';
