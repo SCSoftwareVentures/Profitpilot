@@ -86,7 +86,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(insecureJwks.status,503,"production authentication must reject a non-HTTPS JWKS endpoint");
     process.env.NODE_ENV=savedNodeEnv;
     process.env.AUTH_JWKS_URL=savedJwksUrl;
-    const oversizedToken=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+"a".repeat(16385)}});
+    const oversizedToken=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+"a".repeat(8193)}});
     assert.equal(oversizedToken.status,401,"oversized bearer tokens must be rejected before remote key verification");
     const noToken=await request("/v1/me");
     assert.equal(noToken.status,401,"requests without a bearer token must be rejected");
