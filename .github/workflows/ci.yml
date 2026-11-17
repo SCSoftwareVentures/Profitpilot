@@ -8,6 +8,7 @@ on:
     branches:
       - main
       - integration/pr25-pr26-validation
+      - feature/job-readiness-engine
   workflow_dispatch:
 
 permissions:
