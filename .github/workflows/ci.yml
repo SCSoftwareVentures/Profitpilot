@@ -10,6 +10,7 @@ on:
       - integration/pr25-pr26-validation
       - feature/job-readiness-engine
       - feature/promise-ledger
+      - feature/profit-leak-radar
   workflow_dispatch:
 
 permissions:
