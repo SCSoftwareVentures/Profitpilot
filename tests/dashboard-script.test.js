@@ -72,3 +72,12 @@ test("dashboard exposes separate value lifecycle states without netting credits"
   assert.match(html,/Credits are not silently netted/);
   assert.match(html,/Net total: withheld/);
 });
+
+test("dashboard exposes SwitchProof source profiling and migration safeguards",async()=>{
+  const html=await readFile(htmlPath,"utf8");
+  assert.match(html,/data-view="migration"/);
+  assert.match(html,/id="migration"/);
+  assert.match(html,/profileMigration\(\{manifest:migrationManifest/);
+  assert.match(html,/does not copy, transform, upload or migrate data/);
+  assert.match(html,/control total reconciles/i);
+});
