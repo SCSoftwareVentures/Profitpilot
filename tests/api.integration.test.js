@@ -247,8 +247,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.deepEqual(queue.items.map(x=>x.decision),["candidate","held"]);
     assert.equal(queue.items[0].reason,null);
     assert.match(queue.items[1].reason,/Amount/);
-    const serialized=JSON.stringify(queue);
-    for(const sensitive of ["1250.50","CI-PAY-1","gross_wages"])assert.equal(serialized.includes(sensitive),false,"review must not disclose source data");
+    const serializedQueue=JSON.stringify(queue);
+    for(const sensitive of ["1250.50","CI-PAY-1","gross_wages"])assert.equal(serializedQueue.includes(sensitive),false,"review must not disclose source data");
     const secondPage=await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/review?offset=2&limit=2",{subject:"ci-api-analyst"});
     assert.equal((await secondPage.json()).items[0].rowNumber,3);
     assert.equal((await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/review?limit=101",{subject:"ci-api-analyst"})).status,400);
