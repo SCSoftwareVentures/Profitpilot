@@ -39,11 +39,13 @@ test("every registered API endpoint has an explicit reviewed authorization class
 // Sensitive tenant responses must not be stored in browser or intermediary caches.
 test("authenticated API responses carry explicit no-store protection",()=>{
   assert.match(source,/app\.use\("\/v1",\s*\(req,res,next\)\s*=>\s*\{res\.set\("Cache-Control","no-store"\)/);
+  assert.ok(source.indexOf('res.set("Cache-Control","no-store")')<source.indexOf('app.use(process.env.NODE_ENV==="production"?sharedLimiter'),"privacy headers precede throttling");
   assert.ok(source.indexOf('res.set("Cache-Control","no-store")')<source.indexOf('app.use("/v1",authRequired())'),"cache controls must precede authentication and tenant endpoints");
 });
 
 test("tenant mutations have a separate bounded rate limiter",()=>{
-  assert.match(source,/const mutationLimiter=rateLimit\(\{windowMs:60_000,limit:60,/);
+  assert.match(source,/const mutationLimiter=process\.env\.NODE_ENV==="production"\?sharedLimiter\(\{windowMs:60_000,limit:60,scope:"write"\}\):rateLimit\(\{windowMs:60_000,limit:60,/);
+  assert.match(source,/sharedLimiter\(\{windowMs:60_000,limit:100,scope:"global"\}\)/);
   assert.match(source,/app\.use\("\/v1\/tenants\/:tenantId",\(req,res,next\)=>req\.method==="POST"\?mutationLimiter\(req,res,next\):next\(\)\)/);
-  assert.ok(source.indexOf('const mutationLimiter=rateLimit(')<source.indexOf('app.post("/v1/tenants/:tenantId/imports"'),"write limiter must be installed before tenant write routes");
+  assert.ok(source.indexOf('const mutationLimiter=')<source.indexOf('app.post("/v1/tenants/:tenantId/imports"'),"write limiter must be installed before tenant write routes");
 });
