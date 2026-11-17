@@ -107,6 +107,13 @@ jobs:
           psql "$APP_URL" -v ON_ERROR_STOP=1 -c "DO \$\$ BEGIN IF (SELECT count(*) FROM tenants) <> 0 THEN RAISE EXCEPTION 'RLS without tenant context did not deny rows'; END IF; END \$\$;"
           psql "$APP_URL" -v ON_ERROR_STOP=1 -c "BEGIN; SELECT set_config('app.tenant_id','11111111-1111-4111-8111-111111111111',true); DO \$\$ BEGIN IF (SELECT count(*) FROM tenants) <> 0 THEN RAISE EXCEPTION 'Raw tenant GUC must not grant access without a valid HMAC'; END IF; END \$\$; COMMIT;"
 
+      - name: Capture isolated pre-privacy-action backup
+        env:
+          PGPASSWORD: ci-admin-password
+        run: |
+          umask 077
+          pg_dump -h localhost -U profitpilot_admin -Fc -f "$RUNNER_TEMP/privacy-before.dump" profitpilot
+
       - name: Run authenticated API integration tests
         env:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
@@ -115,6 +122,22 @@ jobs:
           export TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot"
           node --test tests/account-closure.integration.test.js
           node --test tests/api.integration.test.js
+
+      - name: Exercise real PostgreSQL backup and recovery privacy gate
+        env:
+          PGPASSWORD: ci-admin-password
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
+          PRIVACY_RESTORE_CI: "1"
+        run: |
+          set -eu
+          umask 077
+          trap 'rm -f "$RUNNER_TEMP/privacy-before.dump" "$RUNNER_TEMP/privacy-after.dump"; dropdb -h localhost -U profitpilot_admin --if-exists privacy_restore_old_ci; dropdb -h localhost -U profitpilot_admin --if-exists privacy_restore_new_ci' EXIT
+          pg_dump -h localhost -U profitpilot_admin -Fc -f "$RUNNER_TEMP/privacy-after.dump" profitpilot
+          createdb -h localhost -U profitpilot_admin privacy_restore_old_ci
+          createdb -h localhost -U profitpilot_admin privacy_restore_new_ci
+          pg_restore -h localhost -U profitpilot_admin --exit-on-error -d privacy_restore_old_ci "$RUNNER_TEMP/privacy-before.dump"
+          pg_restore -h localhost -U profitpilot_admin --exit-on-error -d privacy_restore_new_ci "$RUNNER_TEMP/privacy-after.dump"
+          PRIVACY_DRILL_KEY="$(openssl rand -hex 32)" node tests/physical-restore-drill.js
 
       - name: Verify production database TLS configuration fails closed
         run: |

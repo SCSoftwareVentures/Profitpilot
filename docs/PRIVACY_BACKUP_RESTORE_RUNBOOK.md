@@ -17,3 +17,5 @@ Use a restricted administrative database connection over verified TLS via PRIVAC
 5. Require authorized sign-off, backup expiry review and evidence retention before admitting traffic. Run a real isolated recovery drill before first production use.
 
 The gate detects missing markers covered by the independent checkpoint; it cannot detect actions never recorded externally or recover lost data. It does not automatically enforce network isolation, delete third-party backups, or assure legal compliance. No live backup or retention service is configured.
+
+CI recovery drill: ephemeral PostgreSQL custom-format dumps before and after synthetic privacy actions are restored to separate databases. The current signed checkpoint must reject the older restored copy and accept the newer restored copy. No dump is uploaded or retained. This exercises actual database dump/restore, not a production provider, PITR, live cutover or physical-media destruction.

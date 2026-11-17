@@ -68,11 +68,12 @@ DECLARE policy private.privacy_retention_policies%ROWTYPE;
 DECLARE account public.users%ROWTYPE;
 DECLARE now_at timestamptz;
 DECLARE sessions_terminated integer;
-DECLARE m record;
+DECLARE locked_membership record;
 DECLARE matched_grants integer;
 DECLARE all_grants integer;
 BEGIN
  actor:=private.assert_privacy_step_up(p_tenant,p_request,'execute_account_closure:'||p_erase::text,p_auth_time,p_proof);
+ PERFORM pg_advisory_xact_lock(hashtextextended('account-close-global-v2',0));
  SELECT * INTO item FROM public.privacy_requests WHERE tenant_id=p_tenant AND id=p_request AND subject_user_id=actor FOR UPDATE;
  IF NOT FOUND THEN RETURN jsonb_build_object('status',404,'error','Privacy request not found'); END IF;
  SELECT * INTO approval FROM private.account_closure_approvals WHERE tenant_id=p_tenant AND request_id=p_request;
@@ -83,13 +84,12 @@ BEGIN
  END IF;
  -- Block new session registration and competing membership provisioning while closing.
  SELECT * INTO account FROM public.users WHERE id=actor FOR UPDATE;
- -- Serialise competing closures within every affected tenant, then lock each subject hold.
- PERFORM pg_advisory_xact_lock(hashtextextended('account-close-global-v2',0));
+ -- Lock every affected membership and subject hold after taking the global closure lock.
  PERFORM 1 FROM public.tenant_memberships WHERE user_id=actor FOR UPDATE;
  PERFORM 1 FROM public.privacy_requests WHERE subject_user_id=actor ORDER BY id FOR UPDATE;
  IF p_erase THEN PERFORM 1 FROM private.privacy_retention_policies WHERE tenant_id IN (SELECT tenant_id FROM public.tenant_memberships WHERE user_id=actor) ORDER BY tenant_id FOR SHARE; END IF;
- FOR m IN SELECT tenant_id FROM public.tenant_memberships WHERE user_id=actor ORDER BY tenant_id LOOP
-  PERFORM private.lock_privacy_retention_subject(m.tenant_id,actor);
+ FOR locked_membership IN SELECT tenant_id FROM public.tenant_memberships WHERE user_id=actor ORDER BY tenant_id LOOP
+  PERFORM private.lock_privacy_retention_subject(locked_membership.tenant_id,actor);
  END LOOP;
  IF p_erase THEN
   SELECT * INTO policy FROM private.privacy_retention_policies WHERE tenant_id=p_tenant FOR SHARE;
