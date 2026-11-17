@@ -28,7 +28,9 @@ test("value summaries preserve each commercial state and do not net credits or r
   assert.equal(summary.recordedAmounts.customer_accepted,"850.00");
   assert.equal(summary.recordedAmounts.invoiced,"1000.00");
   assert.equal(summary.recordedAmounts.credited,"100.00");
-  assert.equal(summary.recordedAmounts.settled,"900.00");\n  assert.equal(summary.recordedAmounts.refunded,null);\n  assert.equal(summary.eventTypeCounts.refunded,0);
+  assert.equal(summary.recordedAmounts.settled,"900.00");
+  assert.equal(summary.recordedAmounts.refunded,null);
+  assert.equal(summary.eventTypeCounts.refunded,0);
   assert.equal(summary.creditedAndRefunded,"100.00");
   assert.equal(summary.nettedTotal,null);
   assert.equal(summary.verificationStatus,"not_independently_verified");
