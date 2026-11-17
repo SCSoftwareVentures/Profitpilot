@@ -3,9 +3,9 @@ import {withTenant} from "./db.js";
 import {requirePermission} from "./auth.js";
 import {isIsoDate} from "../src/engine.js";
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const VERSION="0.3.0";
+const VERSION="0.4.0";
 const MAX=500;
-const EXPENSE_CATEGORIES=new Set(["supplier","subcontractor","other_delivery"]);
+const EXPENSE_CATEGORIES=new Set(["supplier","subcontractor","other_delivery","site_overhead"]);
 const error=message=>({error:message});
 function cents(n){
  if(typeof n!=="string"||! /^-?\d+\.\d{2}$/.test(n))throw new Error("Invalid database money precision");
@@ -13,15 +13,32 @@ function cents(n){
 }
 function decimal(n){const sign=n<0n?"-":"";const v=n<0n?-n:n;return sign+(v/100n)+"."+String(v%100n).padStart(2,"0");}
 const sum=(rows,field)=>rows.reduce((n,r)=>n+cents(r[field]),0n);
+// Observed records only: absolute amounts prevent credits from cancelling the denominator.
+const abs=n=>n<0n?-n:n;
+const ratio=(n,d)=>d>0n&&n>=0n&&n<=d?decimal((n*10000n+d/2n)/d):null;
+function observedCoverage(rows,included,taxBasis,direction){
+ const base={scope:"Recorded match lines in this contract/site/period; not source completeness",direction,eligibleAbsoluteAmount:null,confirmedAbsoluteAmount:null,percentage:null,lineCount:null,confirmedLineCount:null,externallyVerified:false};
+ if(!Array.isArray(rows))return {...base,status:"unavailable"};
+ if(rows.length>MAX)return {...base,status:"evidence_limit_exceeded"};
+ const subset=rows.filter(r=>r.direction===direction);
+ const map=new Map(subset.map(r=>[r.invoiceLineId,r]));
+ const ids=new Set(included.map(r=>r.invoiceLineId));
+ if(map.size!==subset.length||ids.size!==included.length||included.some(r=>!map.has(r.invoiceLineId)||map.get(r.invoiceLineId).amount!==r.amount))return {...base,status:"inconsistent_evidence"};
+ const counts={lineCount:subset.length,confirmedLineCount:included.length};
+ if(subset.some(r=>!r.contained||r.currency!=="AUD"||r.taxBasis!==taxBasis))return {...base,...counts,status:"incompatible_scope_or_tax_basis"};
+ const denominator=subset.reduce((n,r)=>n+abs(cents(r.amount)),0n);
+ const numerator=included.reduce((n,r)=>n+abs(cents(r.amount)),0n);
+ return {...base,...counts,eligibleAbsoluteAmount:decimal(denominator),confirmedAbsoluteAmount:decimal(numerator),percentage:ratio(numerator,denominator),status:denominator===0n?"zero_denominator":"observed_only"};
+}
 export function buildContribution(snapshot){
- const {baseline,invoiceEvidence,payrollEvidence,pools,expenseEvidence=[]}=snapshot;
+ const {baseline,invoiceEvidence,payrollEvidence,pools,expenseEvidence=[],coverageEvidence=null}=snapshot;
  if(!baseline||baseline.contractCount!==1||baseline.versionCount!==1||!baseline.versionId||baseline.currency!=="AUD")
   return error("A single attributable business contract and one approved AUD contract version covering the whole service period are required.");
  if(invoiceEvidence.length>MAX||expenseEvidence.length>MAX||payrollEvidence.length>MAX||pools.length>MAX)return error("Evidence limit exceeded; use a smaller aligned service period.");
  if(!invoiceEvidence.length||!payrollEvidence.length)return error("Insufficient confirmed invoice and payroll allocation evidence.");
  if(invoiceEvidence.some(r=>!r.contained||!r.reviewed||!["HIGH","MEDIUM"].includes(r.confidence)||r.currency!=="AUD"||!["gst_exclusive","no_gst"].includes(r.taxBasis)))return error("Missing, partial, unreviewed, low-confidence or incompatible invoice evidence.");
  if(new Set([...invoiceEvidence,...expenseEvidence].map(r=>r.taxBasis)).size!==1)return error("Mixed invoice tax basis requires explicit reconciliation.");
- if(expenseEvidence.some(r=>!r.contained||!r.reviewed||!["HIGH","MEDIUM"].includes(r.confidence)||r.currency!=="AUD"||!EXPENSE_CATEGORIES.has(r.costCategory)||r.payrollOverlapReviewed!==true||r.duplicateExpenseReviewed!==true))return error("Supplier expense evidence must be explicitly classified, reviewed for duplicate and payroll overlap, and aligned to the service period.");
+ if(expenseEvidence.some(r=>!r.contained||!r.reviewed||!["HIGH","MEDIUM"].includes(r.confidence)||r.currency!=="AUD"||!EXPENSE_CATEGORIES.has(r.costCategory)||r.payrollOverlapReviewed!==true||r.duplicateExpenseReviewed!==true||(r.costCategory==="site_overhead"&&r.siteOverheadReviewed!==true)))return error("Supplier expense evidence must be explicitly classified, reviewed for duplicate and payroll overlap, and aligned to the service period.");
  const invoiceIds=[...invoiceEvidence,...expenseEvidence].map(r=>r.invoiceLineId).filter(Boolean);
  if(new Set(invoiceIds).size!==invoiceIds.length)return error("Duplicate invoice evidence cannot enter a report.");
  if(payrollEvidence.some(r=>!r.contained||!r.reviewed||r.currency!=="AUD"||!["direct","approved_allocated"].includes(r.bucketType)))return error("Payroll evidence must be confirmed, reviewed and entirely contained in the service period.");
@@ -36,20 +53,32 @@ export function buildContribution(snapshot){
  const supplier=sum(expenseEvidence.filter(r=>r.costCategory==="supplier"),"amount");
  const subcontractor=sum(expenseEvidence.filter(r=>r.costCategory==="subcontractor"),"amount");
  const other=sum(expenseEvidence.filter(r=>r.costCategory==="other_delivery"),"amount");
+ const overhead=sum(expenseEvidence.filter(r=>r.costCategory==="site_overhead"),"amount");
  const cost=labourCost+supplier+subcontractor+other;
  const contribution=revenue-cost;
+ const operatingResult=contribution-overhead;
  // Rounded percentage in hundredths, using signed integer arithmetic only.
  const scaled=contribution*10000n;
  const provisionalMargin=revenue>0n?decimal(scaled<0n?-((-scaled+revenue/2n)/revenue):(scaled+revenue/2n)/revenue):null;
+ const taxBasis=invoiceEvidence[0].taxBasis;
+ const poolTotal=sum(pools,"total");
+ const siteAllocated=poolTotal-sum(pools,"nonSite")-sum(pools,"excluded")-sum(pools,"unallocated");
+ const coverage={
+  customer:observedCoverage(coverageEvidence,invoiceEvidence,taxBasis,"customer"),
+  supplier:observedCoverage(coverageEvidence,expenseEvidence,taxBasis,"supplier"),
+  payroll:{scope:"Whole selected confirmed payroll pools, all sites; not complete payroll coverage",sourceDeclaredTotal:decimal(poolTotal),allSiteAttributed:decimal(siteAllocated),percentage:ratio(siteAllocated,poolTotal),externallyVerified:false},
+  completeSourceCoverage:false
+ };
  const outputs={reportType:"partial_management_contribution",completeness:"incomplete",currency:"AUD",taxBasis:invoiceEvidence[0].taxBasis,
  revenue:decimal(revenue),directLabour:decimal(direct),approvedAllocatedLabour:decimal(allocated),
  includedLabour:decimal(labourCost),supplierCost:decimal(supplier),subcontractorCost:decimal(subcontractor),otherDeliveryCost:decimal(other),
  deliveryCost:decimal(cost),contribution:decimal(contribution),marginPercent:null,includedCostMarginPercent:provisionalMargin,
+ siteOverheadCost:decimal(overhead),includedOperatingResult:decimal(operatingResult),coverage,
  expenseEvidenceStatus:expenseEvidence.length?"confirmed_lines_included":"no_confirmed_expense_evidence",expenseLineCount:expenseEvidence.length,
  invoiceLineCount:invoiceEvidence.length,allocationLineCount:payrollEvidence.length,
  poolContext:{scope:"Entire selected payroll pools; not contract costs",sourceDeclaredTotal:decimal(sum(pools,"total")),nonSite:decimal(sum(pools,"nonSite")),excluded:decimal(sum(pools,"excluded")),unallocated:decimal(sum(pools,"unallocated")),externallyVerified:false},
- limitations:["Partial contribution after included, approved labour and confirmed delivery expenses only; not net profit or an audited margin.","Included-cost margin is an illustrative ratio for recorded costs only, not a definitive profitability margin.","Zero included expense means no confirmed net amount, not proof that no expense was incurred. Unmatched items, overhead, tax, and other unrecorded costs are excluded.","Expense categories and payroll-overlap checks are human attestations, not independent external verification.","Amounts are source-declared; external verification and completeness have not been established.","Site payroll is attributed only when the business has exactly one contract; no shared-contract allocation is inferred."]};
- return {outputs,inputs:{contractVersionId:baseline.versionId,contractVersion:baseline.versionNo,invoiceEvidence,expenseEvidence,payrollEvidence,pools,attributionRule:"single-contract-business",snapshotMethod:"single-statement-v1"}};
+ limitations:["Partial contribution after included, approved labour and confirmed delivery expenses only; not net profit or an audited margin.","Included-cost margin is an illustrative ratio for recorded costs only, not a definitive profitability margin.","Zero included expense means no confirmed net amount, not proof that no expense was incurred. Unmatched items, shared or unrecorded overhead, tax, and other unrecorded costs are excluded.","Site overhead must be wholly attributable to this scope; the included operating result is not net profit.","Observed match coverage uses absolute line amounts, including credits, and does not prove source completeness or satisfy external validation gates.","Expense categories and payroll-overlap checks are human attestations, not independent external verification.","Amounts are source-declared; external verification and completeness have not been established.","Site payroll is attributed only when the business has exactly one contract; no shared-contract allocation is inferred."]};
+ return {outputs,inputs:{contractVersionId:baseline.versionId,contractVersion:baseline.versionNo,invoiceEvidence,expenseEvidence,payrollEvidence,pools,coverageEvidence,attributionRule:"single-contract-business",snapshotMethod:"single-statement-v1"}};
 }
 export function registerContributionRoutes(app,membership){
  app.post("/v1/tenants/:tenantId/calculations",membership,requirePermission("calculations.create"),async(req,res,next)=>{try{
@@ -83,6 +112,7 @@ export function registerContributionRoutes(app,membership){
        mr.evidence #>> '{deliveryExpenseReview,costCategory}' AS "costCategory",
        COALESCE(mr.evidence #> '{deliveryExpenseReview,payrollOverlapReviewed}' = 'true'::jsonb,false) AS "payrollOverlapReviewed",
        COALESCE(mr.evidence #> '{deliveryExpenseReview,duplicateExpenseReviewed}' = 'true'::jsonb,false) AS "duplicateExpenseReviewed",
+       COALESCE(mr.evidence #> '{deliveryExpenseReview,siteOverheadReviewed}' = 'true'::jsonb,false) AS "siteOverheadReviewed",
        mr.service_period_start::text AS "serviceStart",mr.service_period_end::text AS "serviceEnd",
        COALESCE(mr.service_period_start >= $4::date AND mr.service_period_end <= $5::date AND mr.service_period_end >= mr.service_period_start,false) AS contained,
        (mr.reviewer_id IS NOT NULL AND mr.reviewed_at IS NOT NULL) AS reviewed
@@ -92,6 +122,15 @@ export function registerContributionRoutes(app,membership){
       AND (mr.service_period_start IS NULL OR mr.service_period_end IS NULL OR mr.service_period_end < mr.service_period_start
        OR (mr.service_period_start <= $5::date AND mr.service_period_end >= $4::date))
       ORDER BY mr.id LIMIT 501
+    ), recorded_scope AS (
+      SELECT il.id AS "invoiceLineId",i.direction,i.currency,i.tax_basis AS "taxBasis",il.amount::text AS amount,
+       bool_and(COALESCE(mr.service_period_start >= $4::date AND mr.service_period_end <= $5::date AND mr.service_period_end >= mr.service_period_start,false)) AS contained
+      FROM match_reviews mr JOIN invoice_lines il ON il.id=mr.invoice_line_id AND il.tenant_id=mr.tenant_id
+      JOIN invoices i ON i.id=il.invoice_id AND i.tenant_id=il.tenant_id
+      WHERE mr.tenant_id=$1 AND mr.contract_id=$2 AND mr.site_id=$3
+       AND (mr.service_period_start IS NULL OR mr.service_period_end IS NULL OR mr.service_period_end < mr.service_period_start
+        OR (mr.service_period_start <= $5::date AND mr.service_period_end >= $4::date))
+      GROUP BY il.id,i.direction,i.currency,i.tax_basis,il.amount ORDER BY il.id LIMIT 501
     ), labour AS (
       SELECT al.id AS "allocationLineId",ar.id AS "allocationId",pp.id AS "poolId",al.bucket_type AS "bucketType",al.amount::text AS amount,
        pp.currency,pp.period_start::text AS "periodStart",pp.period_end::text AS "periodEnd",
@@ -114,7 +153,8 @@ export function registerContributionRoutes(app,membership){
      COALESCE((SELECT jsonb_agg(i ORDER BY i."matchId") FROM invoices_selected i),'[]'::jsonb) AS "invoiceEvidence",
      COALESCE((SELECT jsonb_agg(e ORDER BY e."matchId") FROM expenses_selected e),'[]'::jsonb) AS "expenseEvidence",
      COALESCE((SELECT jsonb_agg(l ORDER BY l."allocationLineId") FROM labour l),'[]'::jsonb) AS "payrollEvidence",
-     COALESCE((SELECT jsonb_agg(p ORDER BY p.id) FROM selected_pools p),'[]'::jsonb) AS pools
+     COALESCE((SELECT jsonb_agg(p ORDER BY p.id) FROM selected_pools p),'[]'::jsonb) AS pools,
+     COALESCE((SELECT jsonb_agg(x ORDER BY x."invoiceLineId") FROM recorded_scope x),'[]'::jsonb) AS "coverageEvidence"
    `,[req.membership.tenantId,contractId,siteId,periodStart,periodEnd]);
    const result=buildContribution(q.rows[0]);if(result.error)return result;
    const saved=await client.query("INSERT INTO calculation_runs(tenant_id,contract_id,site_id,period_start,period_end,formula_version,inputs,outputs,completeness,created_by) VALUES($1,$2,$3,$4,$5,$6,$7,$8,'incomplete',$9) RETURNING id,created_at",

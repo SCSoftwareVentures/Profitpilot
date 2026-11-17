@@ -326,7 +326,7 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requirePer
  }catch(e){next(e);}});
 
 app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requirePermission("matching.decide"),requireStepUp(),async(req,res,next)=>{try{
- const {decision,reason,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,expectedDirection}=req.body||{};
+ const {decision,reason,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,expectedDirection,siteOverheadReviewed}=req.body||{};
  if(!["confirmed","rejected","held"].includes(decision)||typeof reason!=="string"||reason.trim().length<3||reason.length>2000)return res.status(400).json({error:"Decision and reason are required"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const member=req.membership;
@@ -337,15 +337,15 @@ app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requirePer
   const canonical=m.evidence?.canonicalInvoice;
   if(canonical?.method==="canonical-invoice-0.1.0"&&decision==="confirmed"&&(canonical.preparedBy===member.userId||canonical.importedBy===member.userId))return {error:"Independent match confirmer required",status:403};
   let expenseReview=null;
-  if(m.direction!=="supplier"&&[costCategory,payrollOverlapReviewed,duplicateExpenseReviewed].some(v=>v!==undefined))return {error:"Expense review requires a supplier invoice match",status:422};
+  if(m.direction!=="supplier"&&[costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,siteOverheadReviewed].some(v=>v!==undefined))return {error:"Expense review requires a supplier invoice match",status:422};
   if(m.direction==="supplier"&&decision==="confirmed"){
-   if(!["supplier","subcontractor","other_delivery"].includes(costCategory)||payrollOverlapReviewed!==true||duplicateExpenseReviewed!==true)
+   if(!["supplier","subcontractor","other_delivery","site_overhead"].includes(costCategory)||payrollOverlapReviewed!==true||duplicateExpenseReviewed!==true||(costCategory==="site_overhead"&&siteOverheadReviewed!==true))
     return {error:"Confirm expense category, payroll-overlap review and duplicate-expense review",status:422};
    if(!m.contract_id||!m.site_id||!m.service_start||!m.service_end||m.service_end<m.service_start||!["HIGH","MEDIUM"].includes(m.confidence)||m.currency!=="AUD"||!["gst_exclusive","no_gst"].includes(m.tax_basis))
     return {error:"Supplier match evidence must be aligned, attributable and supported",status:422};
    const pair=await client.query("SELECT 1 FROM contracts c JOIN sites s ON s.tenant_id=c.tenant_id AND s.business_id=c.business_id WHERE c.tenant_id=$1 AND c.id=$2 AND s.id=$3 AND c.status='active' AND s.status='active'",[member.tenantId,m.contract_id,m.site_id]);
    if(!pair.rowCount)return {error:"Supplier match contract and site must belong to one business",status:422};
-   expenseReview={costCategory,payrollOverlapReviewed:true,duplicateExpenseReviewed:true};
+   expenseReview={costCategory,payrollOverlapReviewed:true,duplicateExpenseReviewed:true,...(costCategory==="site_overhead"?{siteOverheadReviewed:true}:{})};
   }
   const updated=await client.query("UPDATE match_reviews SET decision=$1,reviewer_id=$2,reviewed_at=now(),evidence=CASE WHEN $5::jsonb IS NULL THEN evidence ELSE (CASE WHEN jsonb_typeof(evidence)='object' THEN evidence ELSE '{}'::jsonb END) || jsonb_build_object('deliveryExpenseReview',$5::jsonb) END WHERE id=$3 AND tenant_id=$4 AND decision IN ('candidate','held') RETURNING id,decision,reviewed_at",[decision,member.userId,req.params.matchId,member.tenantId,expenseReview?JSON.stringify(expenseReview):null]);
   if(!updated.rowCount)return null;

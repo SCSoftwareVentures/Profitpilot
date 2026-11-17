@@ -78,12 +78,12 @@ export function createPayrollClient({getAccessToken,fetchImpl=globalThis.fetch}=
    if(new Set(r.items.map(i=>i.matchId)).size!==r.items.length)throw new PayrollRequestError(422);
    return r;
   },
-  decideInvoiceMatch(tenant,matchId,{decision,expectedDirection,reason,acknowledged,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,signal}={}){
+  decideInvoiceMatch(tenant,matchId,{decision,expectedDirection,reason,acknowledged,costCategory,payrollOverlapReviewed,duplicateExpenseReviewed,siteOverheadReviewed,signal}={}){
    if(acknowledged!==true||!["confirmed","held","rejected"].includes(decision)||!["customer","supplier"].includes(expectedDirection))throw new TypeError("Explicit match review required");
    const body={decision,expectedDirection,reason:text(reason,3,2000)};
    if(decision==="confirmed"&&expectedDirection==="supplier"){
-    if(!["supplier","subcontractor","other_delivery"].includes(costCategory)||payrollOverlapReviewed!==true||duplicateExpenseReviewed!==true)throw new TypeError("Explicit supplier checks required");
-    Object.assign(body,{costCategory,payrollOverlapReviewed:true,duplicateExpenseReviewed:true});
+    if(!["supplier","subcontractor","other_delivery","site_overhead"].includes(costCategory)||payrollOverlapReviewed!==true||duplicateExpenseReviewed!==true||(costCategory==="site_overhead"&&siteOverheadReviewed!==true))throw new TypeError("Explicit supplier checks required");
+    Object.assign(body,{costCategory,payrollOverlapReviewed:true,duplicateExpenseReviewed:true,...(costCategory==="site_overhead"?{siteOverheadReviewed:true}:{})});
    }
    return request(root(tenant)+"/matches/"+id(matchId)+"/decision",{body,fresh:true,signal});
   },

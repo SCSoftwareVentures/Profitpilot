@@ -18,3 +18,20 @@ test("expense amounts cannot be silently included without human evidence or with
  for(const patch of [{payrollOverlapReviewed:false},{duplicateExpenseReviewed:false},{costCategory:"overhead"},{contained:false},{taxBasis:"unknown"},{confidence:"LOW"},{currency:"USD"}]){f.expenseEvidence=[{...e,...patch}];assert.ok(buildContribution(f).error);}
  f.expenseEvidence=[e,e];assert.match(buildContribution(f).error,/Duplicate/);
 });
+
+test("observed coverage uses absolute credits, recorded unique lines and no completeness claim",()=>{
+ const f=fixture();f.invoiceEvidence[0].invoiceLineId="r";
+ const e={contained:true,currency:"AUD",taxBasis:"gst_exclusive"};
+ f.coverageEvidence=[{...e,direction:"customer",invoiceLineId:"r",amount:"120.01"},{...e,direction:"customer",invoiceLineId:"pending",amount:"-20.00"}];
+ const c=buildContribution(f).outputs.coverage;
+ assert.deepEqual([c.customer.eligibleAbsoluteAmount,c.customer.confirmedAbsoluteAmount,c.customer.percentage,c.payroll.percentage,c.completeSourceCoverage],["140.01","120.01","85.72","80.00",false]);
+ assert.equal(c.supplier.percentage,null);
+ f.coverageEvidence[1].taxBasis="unknown";assert.equal(buildContribution(f).outputs.coverage.customer.percentage,null);
+ f.coverageEvidence[1].taxBasis="gst_exclusive";f.coverageEvidence.push(f.coverageEvidence[1]);assert.equal(buildContribution(f).outputs.coverage.customer.status,"inconsistent_evidence");
+});
+test("site overhead is separate from delivery contribution and requires exclusive attribution",()=>{
+ const f=fixture(); const e={contained:true,reviewed:true,currency:"AUD",taxBasis:"gst_exclusive",confidence:"HIGH",payrollOverlapReviewed:true,duplicateExpenseReviewed:true,costCategory:"site_overhead",amount:"8.01",invoiceLineId:"oh"};
+ f.expenseEvidence=[e];assert.ok(buildContribution(f).error);
+ e.siteOverheadReviewed=true;const o=buildContribution(f).outputs;
+ assert.deepEqual([o.deliveryCost,o.contribution,o.siteOverheadCost,o.includedOperatingResult,o.marginPercent,o.completeness],["80.00","40.01","8.01","32.00",null,"incomplete"]);
+});

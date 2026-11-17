@@ -216,7 +216,7 @@ test("independent payroll decisions, exact source reconciliation and maker-check
   const reportPath=path(tenantA)+"/calculations";
   const reportBody={contractId:contract,siteId:siteA,periodStart:"2026-02-01",periodEnd:"2026-02-14"};
   const report=await browserClient("ci-payroll-importer").createContributionReport(tenantA,reportBody);
-  assert.equal(report.formulaVersion,"0.3.0");
+  assert.equal(report.formulaVersion,"0.4.0");
   assert.deepEqual([report.outputs.revenue,report.outputs.directLabour,report.outputs.approvedAllocatedLabour,report.outputs.contribution,report.outputs.marginPercent],["120.01","60.00","20.00","40.01",null]);
   assert.equal(report.outputs.poolContext.unallocated,"10.00");
   const savedReport=await browserClient("ci-payroll-reviewer").readContributionReport(tenantA,report.id);
@@ -294,17 +294,27 @@ test("independent payroll decisions, exact source reconciliation and maker-check
   assert.equal((await send("POST",path(tenantB)+"/imports/"+canonicalBatch+"/invoices/prepare","ci-payroll-outside",prep)).status,404);
   const pendingReport=await browserClient("ci-payroll-importer").createContributionReport(tenantA,reportBody);
   assert.equal(pendingReport.outputs.contribution,"25.01");
+  assert.equal(pendingReport.outputs.coverage.customer.percentage,"100.00");
+  assert.equal(pendingReport.outputs.coverage.supplier.eligibleAbsoluteAmount,"29.22");
+  assert.equal(pendingReport.outputs.coverage.supplier.confirmedAbsoluteAmount,"15.02");
+  assert.equal(pendingReport.outputs.coverage.supplier.percentage,"51.40");
+  assert.equal(pendingReport.outputs.coverage.completeSourceCoverage,false);
   for(const item of canonical.candidates){
    const p=path(tenantA)+"/matches/"+item.matchId+"/decision";
-   const body={decision:"confirmed",reason:"Independently reviewed synthetic source mapping",costCategory:"supplier",payrollOverlapReviewed:true,duplicateExpenseReviewed:true};
+   const body={decision:"confirmed",reason:"Independently reviewed synthetic site overhead",costCategory:"site_overhead",payrollOverlapReviewed:true,duplicateExpenseReviewed:true,siteOverheadReviewed:true};
+   assert.equal((await send("POST",p,"ci-payroll-reviewer",{...body,siteOverheadReviewed:false})).status,422);
    assert.equal((await send("POST",p,"ci-payroll-owner",body)).status,403);
    assert.equal((await send("POST",p,"ci-payroll-reviewer",{...body,expectedDirection:"customer"})).status,422);
    const confirmedMatch=await browserClient("ci-payroll-reviewer").decideInvoiceMatch(tenantA,item.matchId,{...body,expectedDirection:"supplier",acknowledged:true});
    assert.equal(confirmedMatch.decision.decision,"confirmed");
   }
   const canonicalReport=await browserClient("ci-payroll-importer").createContributionReport(tenantA,reportBody);
-  assert.equal(canonicalReport.outputs.contribution,"15.01");
-  assert.equal(canonicalReport.outputs.supplierCost,"15.00");
+  assert.equal(canonicalReport.outputs.contribution,"25.01");
+  assert.equal(canonicalReport.outputs.supplierCost,"5.00");
+  assert.equal(canonicalReport.outputs.siteOverheadCost,"10.00");
+  assert.equal(canonicalReport.outputs.includedOperatingResult,"15.01");
+  assert.equal(canonicalReport.outputs.coverage.supplier.percentage,"100.00");
+  assert.equal(canonicalReport.outputs.marginPercent,null);
   await admin.query("INSERT INTO contracts(tenant_id,business_id,customer_name) VALUES($1,$2,'Competing contract')",[tenantA,businessA]);
   assert.equal((await send("POST",reportPath,"ci-payroll-importer",reportBody)).status,422,"shared business contract costs cannot be double-counted");
   const auditState=await admin.query("SELECT * FROM private.verify_audit_chain($1)",[tenantA]);

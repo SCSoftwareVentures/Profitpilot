@@ -440,7 +440,8 @@ paths:
                 decision: { type: string, enum: [confirmed, rejected, held] }
                 reason: { type: string, minLength: 3, maxLength: 2000 }
                 expectedDirection: { type: string, enum: [customer, supplier], description: Optional direction guard for selected match. }
-                costCategory: { type: string, enum: [supplier, subcontractor, other_delivery] }
+                costCategory: { type: string, enum: [supplier, subcontractor, other_delivery, site_overhead] }
+                siteOverheadReviewed: { type: boolean, description: Required for site_overhead; exclusive attribution and no overlap. }
                 payrollOverlapReviewed: { type: boolean }
                 duplicateExpenseReviewed: { type: boolean }
       responses:
@@ -453,7 +454,7 @@ paths:
       - $ref: '#/components/parameters/TenantId'
     post:
       summary: Create a versioned contract/site/period calculation run
-      description: Version 0.3.0 captures confirmed customer invoices, approved site payroll and reviewed supplier delivery expenses in one service-period snapshot. Single-contract businesses only; exact AUD decimal strings, partial contribution and included-cost ratio only. Definitive margin suppressed. No client-supplied totals.
+      description: Version 0.4.0 captures confirmed customer invoices, approved site payroll, reviewed supplier delivery expenses, wholly attributable site overhead and observed coverage in one service-period snapshot. Single-contract businesses only; exact AUD decimal strings, partial contribution and included-cost ratio only. Definitive margin suppressed. No client-supplied totals.
       responses:
         "201": { description: Calculation run created }
         "422": { description: Insufficient or unreconciled source evidence }
