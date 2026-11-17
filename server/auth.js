@@ -1,4 +1,5 @@
 import {createRemoteJWKSet, jwtVerify} from "jose";
+import {withTenant} from "./db.js";
 
 let jwks;
 let jwksUrl;
@@ -61,7 +62,7 @@ export function authRequired(){
    const now=Date.now()/1000;
    if(typeof payload.iat!=="number"||!Number.isFinite(payload.iat)||payload.iat>now+5||now-payload.iat>900)return res.status(401).json({error:"Invalid or expired access token"});
    if(typeof payload.sub!=="string"||!payload.sub.trim())return res.status(401).json({error:"Invalid access token"});
-   req.identity={subject:payload.sub,email:typeof payload.email==="string"?payload.email:null};
+   req.identity={subject:payload.sub,email:typeof payload.email==="string"?payload.email:null,authTime:Number.isInteger(payload.auth_time)?payload.auth_time:null,acr:typeof payload.acr==="string"?payload.acr:null};
    return next();
   }catch{
    return res.status(401).json({error:"Invalid or expired access token"});
@@ -72,6 +73,48 @@ export function authRequired(){
 export function requireRole(...roles){
  return (req,res,next)=>{
   if(!req.membership||!roles.includes(req.membership.role))return res.status(403).json({error:"Insufficient tenant role"});
+  return next();
+ };
+}
+
+export function requirePermission(permission){
+ return async(req,res,next)=>{
+  if(!req.membership)return res.status(403).json({error:"Insufficient tenant permission"});
+  try{
+   const result=await withTenant(req.membership.tenantId,req.identity.subject,client=>client.query(
+    `SELECT CASE
+      WHEN EXISTS (
+       SELECT 1 FROM tenant_membership_permission_overrides o
+       WHERE o.tenant_id=$1 AND o.user_id=$2 AND o.permission_key=$3 AND o.effect='deny'
+      ) THEN false
+      WHEN EXISTS (
+       SELECT 1 FROM tenant_membership_permission_overrides o
+       WHERE o.tenant_id=$1 AND o.user_id=$2 AND o.permission_key=$3 AND o.effect='grant'
+      ) THEN true
+      ELSE EXISTS (
+       SELECT 1 FROM role_permissions rp
+       WHERE rp.role=$4 AND rp.permission_key=$3
+      )
+     END AS allowed`,
+    [req.membership.tenantId,req.membership.userId,permission,req.membership.role]
+   ));
+   if(!result.rows[0]?.allowed)return res.status(403).json({error:"Insufficient tenant permission"});
+   return next();
+  }catch(error){return next(error);}
+ };
+}
+
+export function requireStepUp(){
+ return (req,res,next)=>{
+  const requiredAcr=process.env.AUTH_STEP_UP_ACR;
+  const maxAge=Number(process.env.AUTH_STEP_UP_MAX_AGE_SECONDS||300);
+  const authTime=req.identity?.authTime;
+  const now=Math.floor(Date.now()/1000);
+  const fresh=Number.isInteger(authTime)&&authTime<=now+5&&now-authTime<=maxAge;
+  const acr=req.identity?.acr;
+  if(!requiredAcr||!Number.isInteger(maxAge)||maxAge<30||maxAge>900||!fresh||acr!==requiredAcr){
+   return res.status(403).json({error:"Recent step-up authentication required"});
+  }
   return next();
  };
 }
