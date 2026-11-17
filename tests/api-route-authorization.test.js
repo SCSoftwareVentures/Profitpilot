@@ -35,3 +35,9 @@ test("every registered API endpoint has an explicit reviewed authorization class
   assert.ok(!routes.some(({path})=>path.startsWith("/v1")&&!expected.has(
     `${routes.find(r=>r.path===path)?.method} ${path}`)));
 });
+
+// Sensitive tenant responses must not be stored in browser or intermediary caches.
+test("authenticated API responses carry explicit no-store protection",()=>{
+  assert.match(source,/app\.use\("\/v1",\s*\(req,res,next\)\s*=>\s*\{res\.set\("Cache-Control","no-store"\)/);
+  assert.ok(source.indexOf('res.set("Cache-Control","no-store")')<source.indexOf('app.use("/v1",authRequired())'),"cache controls must precede authentication and tenant endpoints");
+});
