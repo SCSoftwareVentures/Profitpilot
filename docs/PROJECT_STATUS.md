@@ -194,3 +194,8 @@ Implemented on the hardening branch:
 CI run **#43983253747** passed on exact implementation/documentation head `30f0c9fa8937eea5fed537162750a5b7caafeb40`. Node.js and PostgreSQL jobs both succeeded, including migrations 002–013, 20-table tenant/FK audit, restricted-role RLS, authenticated API integration, production image build, TLS trust/rejection tests and production-mode health check. The latest OpenAPI error-schema correction is commit `c031d73b89961c520df68ad33a82db388694d847`; its exact-head CI is pending.
 
 The product remains **NOT COMPLETE**. Payroll ingestion stays disabled; the full financial acceptance plan, private file lifecycle, production operations, independent security/accounting/legal reviews, customer validation G0–G4 and signed G5 build approval remain outstanding. No merge, deployment, real-data intake or payment activity is authorised.
+
+ 
+### Latest exact-head verification
+
+GitHub Actions run **#667** passed on exact PR head `6b98299006d9aa620f494ec4fe52d095e82947c4`, including migrations through 014, reviewer decision immutability and same-transaction audit tests, PostgreSQL tenant/RLS checks, verified TLS trust/rejection and production-mode API health. The draft PR remains unmerged. Product completion and all external release approvals remain outstanding.
