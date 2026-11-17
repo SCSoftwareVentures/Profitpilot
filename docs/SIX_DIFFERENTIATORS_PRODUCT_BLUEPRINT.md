@@ -1,6 +1,6 @@
 # ProfitPilot — Six Differentiators Product Blueprint
 
-**Status:** approved for product-design exploration; not build authorisation.
+**Status:** owner-approved for staged repository implementation and synthetic/test-environment demonstration. No production, real-data or launch authorisation is implied.
 **Date:** 16 November 2026
 **Scope:** translate the six differentiators previously approved by the founder into bounded product concepts, dependencies, safety rules and validation tests. This document does not claim that any capability is implemented or customer-validated.
 
@@ -8,9 +8,9 @@
 
 ProfitPilot's first commercial hypothesis remains an evidence-led contract-economics workflow for Australian independent commercial cleaning contractors with recurring, multi-site B2B contracts. The initial analysis unit is contract × site × service period.
 
-The six differentiators strengthen the longer-term product thesis. They do not override the concierge-first strategy or G0–G5 build gate. Do not implement production SaaS features until G0–G4 and competitive preconditions pass and G5 records an explicit signed GO with named technical ownership, legal/privacy plan, delivery capacity and approved budget.
+The owner has authorised continued implementation of these six differentiators as part of preparing the complete project for sale. Build them in a staged, coherent sequence with synthetic fixtures, deterministic tests, explicit evidence states and human approval boundaries. G0–G5 remain mandatory before production deployment or real sensitive-data processing, but do not block repository-level feature engineering or synthetic demonstrations.
 
-The first release must remain narrow. Do not add a marketplace, workforce scheduling suite, payroll/award engine, accounting replacement, autonomous approval agent or payment processing to the initial wedge.
+The first demonstrable product should remain coherent around contract economics, evidence, exceptions and business commitments. Do not dilute the initial buyer story with a marketplace, full workforce scheduling suite, payroll/award engine, accounting replacement, autonomous approval agent or payment processing. Longer-term expansion should be clearly separated from the initial product scope.
 
 ## 2. Six approved differentiators
 
@@ -201,3 +201,45 @@ For implementation, definition of done includes code, tests, migrations/rollback
 - Concierge-first validation and G0–G5 build controls remain binding.
 - No real customer, employee, payroll, invoice or confidential commercial data belongs in this repository.
 - No production deployment, payment processing or external customer data access is authorised by this document.
+
+
+## Implementation record — Job Readiness Engine foundation
+
+A first synthetic/test-only domain implementation is provided in `src/job-readiness.js` with unit coverage in `tests/job-readiness.test.js`. It evaluates a versioned checklist using explicit satisfied, missing, conflicting, unverified and permitted not-applicable states. A satisfied check that requires evidence cannot pass without a safe evidence reference. Missing answers remain unverified. The result is either blocked or ready for a human decision; the engine never grants approval or claims a safety/profitability guarantee.
+
+This is a domain foundation only. It is not yet integrated with persisted jobs, site templates, permissions, attachments, audit history or a user-facing workflow. Those remain separate implementation tasks.
+
+
+## Implementation record — Promise Ledger foundation
+
+A synthetic/test-only state-machine implementation is provided in `src/promise-ledger.js`, with transition and evidence tests in `tests/promise-ledger.test.js`. The prototype enforces a proposed → communicated → accepted progression, explicit evidence for material state changes, unique event IDs, timezone-aware timestamps, chronological append order and terminal fulfilled/cancelled states. It does not send communications or treat a sent message as proof of customer acceptance.
+
+The browser demonstration includes a synthetic Promise Ledger timeline. Persistence, authenticated actor attribution, event-store/database enforcement, customer notification integrations, search, due-date workflows and a complete user-facing review process remain unimplemented.
+
+
+## Implementation record — Profit Leak Radar foundation
+
+A synthetic/test-only evaluator is provided in `src/profit-leak-radar.js` with unit tests in `tests/profit-leak-radar.test.js`. It classifies a potential exception only when the supplied record has a recognised exception type, positive canonical money, explicit currency/tax basis/period, evidence references and a caller-declared complete source-coverage state. When coverage or any required dimension is missing, monetary exposure is withheld. Even a complete candidate has `verifiedLoss: null` and `recoveredValue: null`; human review remains mandatory.
+
+The dashboard demonstrates one candidate and one incomplete-coverage exception. The caller's coverage declaration is not independently certified by this primitive. Persistence, source-manifest verification, domain-specific detection rules, reviewer workflow and measured alert precision/recall remain outstanding.
+
+
+## Implementation record — Verified Value Ledger foundation
+
+A synthetic/test-only event model is provided in `src/verified-value-ledger.js`, with tests in `tests/verified-value-ledger.test.js`. It records quoted, contracted, variation-approved, delivered, customer-accepted, invoiced, credited, refunded, settled and disputed amounts as distinct event types. Each event requires a stable scope, currency, tax basis, period, actor/source identifiers, timezone-aware timestamp, reason and evidence reference. Summaries remain partitioned by scope and reporting dimensions. Unrecorded states return `null`, not zero; credits/refunds remain separate and no net total is produced.
+
+The dashboard includes a synthetic lifecycle table. This is not independent verification of customer acceptance, delivery, invoicing or bank settlement. Durable database persistence, authenticated actor attribution, source reconciliation, reviewer controls and reversal/restatement workflows remain unimplemented.
+
+
+## Implementation record — SwitchProof Migration foundation
+
+A pre-migration profiler is provided in `src/switchproof-migration.js` with synthetic tests in `tests/switchproof-migration.test.js`. It requires a source manifest, permission reference, checksum, expected row count, explicit mapping version, source-key mapping, required-field mappings, currency/tax basis/period and source control total. It detects duplicate source keys, missing required values, malformed amounts/dates, currency mismatches, row-count differences and control-total mismatches. The output contains exception codes and row numbers, not raw source row content.
+
+A passing profile means only that the supplied synthetic/in-memory rows reconcile to the supplied metadata and declared mappings. It does not independently verify the checksum or permission, copy data, approve mappings or perform a migration. Durable quarantine, private storage, malware scanning, reversible transformation, target reconciliation and human migration approval remain outstanding.
+
+
+## Implementation record — Field Knowledge Memory foundation
+
+A permission-scoped in-memory domain model is provided in `src/field-knowledge-memory.js`, with tests in `tests/field-knowledge-memory.test.js`. Entries require tenant, scope, owner, source, visibility, confidence, content, review date and expiry date. Customer-visible entries require an explicit customer scope; restricted entries are owner/admin-only; all access is tenant-bound. Review-due and expired states are explicit. Caller-supplied confidence is labelled as not independently verified.
+
+The synthetic dashboard shows current, review-due and restricted sample entries. These are domain primitives, not production access controls. Database persistence, authenticated server-side authorisation, retention/deletion enforcement, consent, search, conflict resolution, audit history and mobile editing workflows remain outstanding.

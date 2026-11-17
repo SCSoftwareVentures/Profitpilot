@@ -87,3 +87,12 @@ I confirm that the evidence above has been reviewed, the scope and budget are ap
 - G5 decision: **DEFER — NOT AUTHORISED**.
 
 Naming a technical owner satisfies only the named-owner field. It does not constitute that person's acceptance, assign unverified capacity, provide a budget, satisfy validation gates, or authorise implementation. Complete the remaining fields and attach evidence before any G5 approval.
+
+
+## Owner engineering scope clarification — 17 November 2026
+
+The owner has explicitly authorised continued and expanded repository-level product engineering, implementation of the approved product concepts, synthetic demonstration work, automated testing, documentation and buyer-handover preparation. This authorisation is for controlled development and test environments using synthetic data only.
+
+This instruction supersedes the earlier statement that G5 is a prerequisite to all implementation. G5 remains **DEFERRED / NOT AUTHORISED** as a production-build / live-data / customer-release approval. G0–G4 evidence, qualified policy decisions, privacy/legal plan, security/operational readiness and signed G5 remain mandatory before production deployment or processing real customer, employee, payroll or invoice data.
+
+The owner does not intend to launch and operate ProfitPilot personally; the intended deliverable is the entire project for sale. The former AUD 500 initial and AUD 100 monthly caps are withdrawn as project-planning constraints. Actual paid commitments still require explicit owner approval. This clarification is not a signed G5 decision and does not authorise merge, deployment, live data, customer communications, buyer outreach or transfer of ownership.

@@ -2,7 +2,7 @@
 
 **Baseline:** V8.6.1 Master Product Blueprint, dated 16 November 2026  
 **Repository:** public working project repository; synthetic fixtures only  
-**Status:** extensive product/validation/security/financial specification plus a partial API/database scaffold; not a complete or deployed application
+**Status:** unreleased prototype with a partial API/database implementation, a synthetic local dashboard and a substantial product/security/financial specification; not a complete or deployed customer application
 
 ## Current product decision
 
@@ -10,14 +10,17 @@ ProfitPilot's overall vision is a business operations and customer transaction-m
 
 The first delivery mode is concierge validation using authorised data and an approved secure handling route. The initial analysis unit is contract × site × service period × calculation version.
 
-## Latest verified repository position — 16 November 2026
+## Current verified repository position — 17 November 2026
 
-- PR #25 security branch: 17178768002b978d6f5bd76f0192b2bbff7a4355; open, draft and unmerged.
-- PR #25 CI run #310 passed Node.js 22 dependency/syntax/unit checks and PostgreSQL migrations, tenant/RLS, authenticated API, container-build and health checks.
-- PR #26 product blueprint: last fully CI-verified content commit 559c7476d13e42ec9d9190409b8e3b091407a1bb; subsequent changes were limited to README and project-status documentation; PR remains open, draft and unmerged.
-- PR #26 CI run #347 passed Node.js 22 syntax/unit checks and PostgreSQL migration/RLS, authenticated API, container-build and health checks.
-- The PRs are sibling branches against main commit 55d1403c0dc34ac26a9bdb58107662754f34a8e3. The CI runs are separate; neither proves a combined candidate.
-- Neither PR has been merged. No production environment or customer pilot is established.
+- PR #25 and PR #26 are historical source/review branches.
+- PR #27 is the combined integration candidate containing the security implementation and product blueprint.
+- PR #28 (`hardening/financial-security-followup`) is the active hardening branch based on PR #27. It remains open, draft and unmerged.
+- PR #28 exact head `e6fde42e3808cd5c269768c35619ede6d1361ecc` passed GitHub Actions run **#43988234834 (run #773)**. Node.js 22 reported 70 tests, 67 passed, 0 failed and 3 database-dependent skips; the PostgreSQL 16 job passed migrations through 014, 20-table tenant/FK audit, restricted-role RLS, authenticated API integration, production image build, trusted-CA acceptance, untrusted-CA rejection and production-mode database health.
+- Dashboard work corrected the synthetic fixture's explicit currency/tax/period basis, removed floating-point currency display, made aggregation validity distinct from unverified source completeness, rejects empty/malformed aggregation inputs and uses null rather than NaN for invalid money. Browser-script syntax/local imports, basic keyboard focus, labelled CSV input, active navigation state and report limitations are covered by regression checks.
+- An acquisition-readiness plan now defines the product, financial, security, IP, handover and commercial evidence required for a potential sale. The AUD 30,000–50,000 objective remains an aspiration, not a valuation.
+- No PR is merged. No production environment or customer pilot is established. No deployment, real-data intake, payment activity or external buyer outreach is authorised.
+
+The repository's current development objective is to produce a demonstrable, financially disciplined, security-conscious and transferable software asset. The owner's AUD 30,000–50,000 sale objective is a commercial target only, not an appraisal or guaranteed valuation. See [Acquisition Readiness Plan](ACQUISITION_READINESS_PLAN.md).
 
 ## Current repository contents
 
@@ -74,9 +77,9 @@ See the master completion register, financial test traceability matrix and branc
 
 ## Build-control rule
 
-Do not treat repository setup, CI, documentation, HTML concepts or technical preparation as authorisation to build the SaaS.
+Owner instruction dated 17 November 2026 authorises continued code-level engineering hardening and synthetic prototype development in the repository. This does not constitute a signed G5 release GO.
 
-Software build remains blocked until G0–G4 and competitive preconditions pass and G5 records explicit signed GO with named technical ownership, legal/privacy plan, delivery capacity and approved budget.
+Production customer-data features, secure live-data intake, merge to the protected release branch, deployment, customer pilot and payments remain gated until G0–G4 and competitive preconditions are evidenced and G5 records explicit signed GO with named technical ownership, legal/privacy plan, delivery capacity and approved budget.
 
 G6 is a post-build paid software-pilot exit gate.
 
@@ -177,3 +180,69 @@ The documentation reconciliation advanced PR #27 branch `integration/pr25-pr26-v
 - **PostgreSQL migrations and tenant RLS:** completed successfully, including migration application, tenant/FK catalogue audit, restricted-role RLS checks, authenticated API integration, production image build and restricted-container health check.
 
 This verifies the current combined candidate plus documentation reconciliation on its exact head. It does not execute the full financial acceptance plan or satisfy independent assurance, customer validation or G0–G5 release gates. PR #27 remains draft and unmerged.
+
+ 
+## Hardening follow-up — 17 November 2026
+
+Draft PR #28 `hardening/financial-security-followup` is correctly based on the combined PR #27 branch `integration/pr25-pr26-validation`, preserving PR #27 as the combined review candidate and isolating follow-up changes. It remains draft and unmerged.
+
+Implemented on the hardening branch:
+- exact decimal-string-only parsing/formatting in the prototype financial engine, including numeric(14,2) bounds and rejection of JSON numeric amounts;
+- production database TLS fail-closed configuration with verified certificate validation;
+- migration 013 database-enforced reviewer authority and signed-actor payroll confirmation identity;
+- direct SQL role-boundary tests, payroll actor-substitution tests, and 500 deterministic property cases with seed 0x5eed1234;
+- PostgreSQL CI now enables TLS on its ephemeral server, verifies a trusted CA, rejects an untrusted CA, and runs the API container in production mode against verified TLS;
+- OpenAPI schemas and response contracts now describe exact money strings and the current partial API surface.
+
+CI run **#43983253747** passed on exact implementation/documentation head `30f0c9fa8937eea5fed537162750a5b7caafeb40`. Node.js and PostgreSQL jobs both succeeded, including migrations 002–013, 20-table tenant/FK audit, restricted-role RLS, authenticated API integration, production image build, TLS trust/rejection tests and production-mode health check. The latest OpenAPI error-schema correction is commit `c031d73b89961c520df68ad33a82db388694d847`; its exact-head CI is pending.
+
+The product remains **NOT COMPLETE**. Payroll ingestion stays disabled; the full financial acceptance plan, private file lifecycle, production operations, independent security/accounting/legal reviews, customer validation G0–G4 and signed G5 build approval remain outstanding. No merge, deployment, real-data intake or payment activity is authorised.
+
+ 
+### Latest exact-head verification
+
+GitHub Actions run **#667** passed on exact PR head `6b98299006d9aa620f494ec4fe52d095e82947c4`, including migrations through 014, reviewer decision immutability and same-transaction audit tests, PostgreSQL tenant/RLS checks, verified TLS trust/rejection and production-mode API health. The draft PR remains unmerged. Product completion and all external release approvals remain outstanding.
+
+ 
+## Latest hardening CI — 17 November 2026
+
+Draft PR #28 `hardening/financial-security-followup` targets the combined PR #27 branch. Latest verified head: `6b98299006d9aa620f494ec4fe52d095e82947c4`. CI run **#43983962328** passed both Node.js 22 and PostgreSQL 16 jobs.
+
+PostgreSQL CI applied migrations through 014 and passed the tenant/FK catalogue audit across 20 protected/root tables, restricted-role RLS, authenticated API integration, production image build, verified TLS with a trusted CA, rejection of an untrusted CA and production-mode database health. Integration tests cover database-enforced reviewer roles, signed actor binding, immutable evidence/final decisions, mandatory audit reason and same-transaction audit events. Node.js job reported 56 passed, 0 failed, 3 database-dependent skips (executed in PostgreSQL job).
+
+The complete product is still not ready for pilot or production. Payroll ingestion remains disabled; full financial acceptance, private file lifecycle, production identity/operations, independent penetration/accounting/legal review, G0–G4 customer evidence and signed G5 GO remain open. PR #28 remains draft and unmerged.
+
+
+### Current PR #28 head — 17 November 2026
+
+Exact head `5988ba408eae176cf5c69def1a9b5f4106e954c1` passed GitHub Actions run **#43984181421 (run #684)**. Both Node.js 22 and PostgreSQL 16 jobs succeeded, including migrations through 014, tenant/FK and restricted-role RLS checks, authenticated API reviewer/audit tests, production image build, trusted/untrusted TLS verification and production-mode database health. Product and production readiness remain NOT COMPLETE; all financial acceptance and external release gates remain open.
+
+
+## Owner strategic direction update — 17 November 2026
+
+The owner confirms that ProfitPilot is being built for sale as an entire software project; the owner does not intend to launch and operate it personally. The deliverable is a complete, coherent, buyer-ready and reproducible software asset, including working core workflows, polished synthetic demonstration, financial-engine evidence, security architecture, source code, documentation, IP/licence diligence and professional handover materials.
+
+AUD 30,000–50,000 is an initial reference target only, not a ceiling, minimum, appraisal, guaranteed valuation or buyer commitment. No predetermined upper valuation limit is set; maximise evidence-backed strategic value.
+
+The previous AUD 500 initial and AUD 100 recurring monthly project caps are withdrawn as planning constraints. Product scope and engineering priorities must not be constrained by those caps. Actual purchases, subscriptions, contractor engagements, external services or other financial commitments still require explicit owner approval.
+
+A live owner-operated production launch, real customer pilot or recurring revenue is not a prerequisite for the intended sale. Continue repository-level implementation and synthetic/test-environment development toward a complete buyer-ready asset. G5 and other release approvals remain necessary for production deployment or real sensitive-data handling, not for the explicitly authorised synthetic/test-only engineering work. No merge, deployment, real-data intake, buyer outreach, sale or transfer of ownership is authorised by this direction.
+
+
+## Six differentiator engineering progress — 17 November 2026
+
+The owner-authorised synthetic/test build now includes initial domain foundations and browser demonstration panels for all six approved differentiators: Job Readiness Engine, Promise Ledger, Profit Leak Radar, Verified Value Ledger, SwitchProof Migration and Field Knowledge Memory. Each domain has a dedicated Node test file. The implementation is staged and deliberately does not claim complete production functionality.
+
+Current safeguards include evidence-required readiness checks, human-only decisions, append-only-style promise events, explicit source references and timestamps, withholding of candidate financial exposure under incomplete coverage, separate value lifecycle totals with no silent credit netting, pre-migration control-total checks, and tenant/visibility/review-date rules for operational knowledge.
+
+The latest recorded full CI attempt before the final source corrections failed due literal escaped newline characters in two new modules and one test file. Those syntax defects have been corrected. The exact latest branch head has a new CI run pending; do not mark this work as CI-passed until that run completes successfully. No production persistence, real-data processing or deployment is implied.
+
+
+## Exact-head CI confirmation — 17 November 2026
+
+The hardening branch exact head `b9821de5ad84a223d8f43e0fc53a85b437b56d5e` passed GitHub Actions run **#43990160842 (run #931)**.
+
+- Node.js 22: 118 tests total; 115 passed, 0 failed, 3 database-dependent skips in this job.
+- PostgreSQL 16: migrations through 014, tenant/FK catalogue audit, restricted-role RLS, authenticated API integration, production API image build, trusted-CA acceptance, untrusted-CA rejection and production-mode TLS health: all passed.
+
+The three Node-job skips are database-dependent and are exercised in the PostgreSQL job. This is exact-head configured CI evidence. It does not constitute independent security certification, accounting/tax/legal approval, production readiness or completion of the full financial acceptance plan. The branch remains a draft, unmerged development candidate.
