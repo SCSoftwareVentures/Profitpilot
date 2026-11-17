@@ -243,6 +243,41 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requirePermiss
  res.status(result.status).json({batchId:req.params.batchId,inserted:result.inserted,received:result.received,duplicates:result.duplicates});
  }catch(e){next(e);}});
 
+// Decision-only import review: never return raw payroll, financial or personal source payloads.
+app.get("/v1/tenants/:tenantId/imports/:batchId/review",membership,requirePermission("imports.validate"),async(req,res,next)=>{
+ try{
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(req.params.batchId))return res.status(400).json({error:"Invalid batch ID"});
+  const offsetArg=req.query.offset===undefined?"0":req.query.offset;
+  const limitArg=req.query.limit===undefined?"100":req.query.limit;
+  if(typeof offsetArg!=="string"||!/^(0|[1-9]\d{0,6})$/.test(offsetArg)||typeof limitArg!=="string"||!/^[1-9]\d{0,2}$/.test(limitArg)||Number(limitArg)>100){
+   return res.status(400).json({error:"Invalid review pagination"});
+  }
+  const offset=Number(offsetArg),limit=Number(limitArg);
+  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
+   const batch=await client.query("SELECT id,status,source_type FROM import_batches WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
+   if(!batch.rowCount)return null;
+   const methodVersion=batch.rows[0].source_type==="payroll"?"payroll-validator-0.1.0":"invoice-validator-0.1.0";
+   const args=[req.params.batchId,req.membership.tenantId,methodVersion];
+   const from=" FROM raw_import_rows r LEFT JOIN mapping_decisions d ON d.tenant_id=r.tenant_id AND d.raw_row_id=r.id AND d.method_version=$3 WHERE r.batch_id=$1 AND r.tenant_id=$2";
+   const counts=await client.query(
+    "SELECT COUNT(*)::int AS total,"+
+    "COUNT(*) FILTER(WHERE d.decision='candidate')::int AS candidate,"+
+    "COUNT(*) FILTER(WHERE d.decision='held')::int AS held,"+
+    "COUNT(*) FILTER(WHERE d.decision='accepted')::int AS accepted,"+
+    "COUNT(*) FILTER(WHERE d.decision='rejected')::int AS rejected,"+
+    "COUNT(*) FILTER(WHERE d.id IS NULL)::int AS unvalidated"+from,args);
+   const page=await client.query(
+    "SELECT r.row_number AS \"rowNumber\",COALESCE(d.decision,'unvalidated') AS decision,"+
+    "CASE WHEN d.decision IN ('held','rejected') THEN d.reason ELSE NULL END AS reason"+from+
+    " ORDER BY r.row_number LIMIT $4 OFFSET $5",[...args,limit,offset]);
+   return {batchId:req.params.batchId,sourceType:batch.rows[0].source_type,status:batch.rows[0].status,
+    summary:counts.rows[0],offset,limit,items:page.rows};
+  });
+  if(!result)return res.status(404).json({error:"Import batch not found"});
+  res.json(result);
+ }catch(e){next(e);}
+});
+
 app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requirePermission("imports.validate"),async(req,res,next)=>{try{
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const batch=await client.query("SELECT id,status,source_type,source_period_start::text AS source_period_start,source_period_end::text AS source_period_end FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.batchId,req.membership.tenantId]);

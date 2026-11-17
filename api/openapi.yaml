@@ -284,6 +284,25 @@ paths:
         "400": { description: Invalid row payload }
         "403": { description: Not authorised }
         "404": { description: Batch not found }
+  /tenants/{tenantId}/imports/{batchId}/review:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    get:
+      summary: Return a redacted import review queue
+      description: Tenant-scoped decision counts, row numbers and held reasons only. Never returns raw source records, amounts or identities. No automatic financial approval.
+      parameters:
+        - name: offset
+          in: query
+          schema: { type: integer, minimum: 0, maximum: 9999999, default: 0 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 100 }
+      responses:
+        "200": { description: Validation review summary and paginated decisions }
+        "400": { description: Invalid identifier or pagination }
+        "403": { description: Insufficient tenant permission }
+        "404": { description: Import batch absent in this tenant }
   /tenants/{tenantId}/imports/{batchId}/validate:
     parameters:
       - $ref: '#/components/parameters/TenantId'

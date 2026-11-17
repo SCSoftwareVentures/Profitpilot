@@ -236,6 +236,26 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal((await admin.query("SELECT count(*)::int AS n FROM payroll_pools WHERE batch_id=$1",[payrollId])).rows[0].n,0,"structural validation must not create payroll pools");
     assert.equal((await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/validate",{subject:"ci-api-reader",method:"POST",body:{}})).status,403);
 
+    // Reviewer sees validation decisions, never the underlying source payload.
+    const payrollReview=await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/review?offset=0&limit=2",{subject:"ci-api-analyst"});
+    assert.equal(payrollReview.status,200);
+    const queue=await payrollReview.json();
+    assert.equal(queue.sourceType,"payroll");
+    assert.equal(queue.status,"review");
+    assert.deepEqual(queue.summary,{total:3,candidate:1,held:2,accepted:0,rejected:0,unvalidated:0});
+    assert.deepEqual(queue.items.map(x=>x.rowNumber),[1,2]);
+    assert.deepEqual(queue.items.map(x=>x.decision),["candidate","held"]);
+    assert.equal(queue.items[0].reason,null);
+    assert.match(queue.items[1].reason,/Amount/);
+    const serialized=JSON.stringify(queue);
+    for(const sensitive of ["1250.50","CI-PAY-1","gross_wages"])assert.equal(serialized.includes(sensitive),false,"review must not disclose source data");
+    const secondPage=await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/review?offset=2&limit=2",{subject:"ci-api-analyst"});
+    assert.equal((await secondPage.json()).items[0].rowNumber,3);
+    assert.equal((await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/review?limit=101",{subject:"ci-api-analyst"})).status,400);
+    assert.equal((await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/review?offset=-1",{subject:"ci-api-analyst"})).status,400);
+    assert.equal((await request("/v1/tenants/"+tenantB+"/imports/"+payrollId+"/review",{subject:"ci-api-tenant-b-only"})).status,404,"foreign payroll batch must be hidden");
+    assert.equal((await request("/v1/tenants/"+tenantA+"/imports/"+payrollId+"/review",{subject:"ci-api-reader"})).status,403,"read-only members lack review permission");
+
 
     const readerWrite=await request(`/v1/tenants/${tenantA}/imports`,{
       subject:"ci-api-reader",method:"POST",

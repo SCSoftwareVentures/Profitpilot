@@ -189,6 +189,7 @@ test("every tenant-scoped API route denies cross-business accounts before reques
    };
    await call("POST",basePath+"/imports/"+foreign.batch+"/rows",{rows:[{memo:"must not insert"}]});
    await call("POST",basePath+"/imports/"+foreign.batch+"/validate",{});
+   await call("GET",basePath+"/imports/"+foreign.batch+"/review");
    await call("POST",basePath+"/matches/"+foreign.match+"/decision",bypassBody);
    await call("GET",basePath+"/calculations/"+foreign.calculation);
    await call("POST",basePath+"/security/permissions/overrides",{
@@ -216,6 +217,9 @@ test("every tenant-scoped API route denies cross-business accounts before reques
    [tenantA,objectsA,tokens.a,objectsB],
    [tenantB,objectsB,tokens.b,objectsA]
   ]){
+   const ownReview=await send("GET","/v1/tenants/"+ownTenant+"/imports/"+own.batch+"/review",credential);
+   assert.equal(ownReview.status,200,"authorized owner may inspect own review queue");
+   assert.equal((await ownReview.json()).summary.total,0);
    const ownCalc=await send("GET","/v1/tenants/"+ownTenant+"/calculations/"+own.calculation,credential);
    assert.equal(ownCalc.status,200,"authorized owner must read own calculation");
    assert.equal((await ownCalc.json()).id,own.calculation);

@@ -14,3 +14,7 @@ Authorized tenants can persist payroll rows and validate their structure with PO
 Records failing these checks are held with a reason. Passing records become candidate mapping decisions with LOW confidence. Neither case constitutes a human financial approval. Revalidation does not change already accepted or rejected decisions and cannot automatically allocate payroll or create payroll pools.
 
 No currency conversion, award interpretation, superannuation/tax calculations, secure file upload or production retention certification is supplied. Human approval and authoritative payroll total reconciliation remain separate work.
+
+## Review decision endpoint
+
+GET /v1/tenants/{tenantId}/imports/{batchId}/review?offset=0&limit=100 exposes aggregate counts (candidate, held, accepted, rejected, unvalidated) and a paginated list of row numbers, decisions and held/rejected reasons. It requires imports.validate and never returns raw payloads, source references, amounts or worker identities. Page size is capped at 100. A foreign batch ID returns 404. No financial decisions are automated.
