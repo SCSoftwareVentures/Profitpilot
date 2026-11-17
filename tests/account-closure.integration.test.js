@@ -8,7 +8,7 @@ import {signCheckpoint,verifyCheckpoint,checkpointDigest} from "../scripts/priva
 test("account closure, token revocation, email erasure and restore safeguards",{skip:!process.env.TEST_ADMIN_DATABASE_URL},async()=>{
  const tenant="91919191-1111-4111-8111-111111111111",otherTenant="92929292-1111-4111-8111-111111111111";
  const user="93939393-1111-4111-8111-111111111111",owner="94949494-1111-4111-8111-111111111111",other="95959595-1111-4111-8111-111111111111",multi="96969696-1111-4111-8111-111111111111";
- const issuer="https://closure-ci.invalid/",audience="profitpilot-api";
+ const issuer="https://abcdefghijklmnopqrst.supabase.co/auth/v1",audience="profitpilot-api";
  const {publicKey,privateKey}=await generateKeyPair("RS256");
  const jwk={...await exportJWK(publicKey),kid:"closure-test",alg:"RS256",use:"sig"};
  const jwks=createServer((req,res)=>{res.setHeader("content-type","application/json");res.end(JSON.stringify({keys:[jwk]}));});
@@ -18,9 +18,9 @@ test("account closure, token revocation, email erasure and restore safeguards",{
  const [{default:app},{pool,withTenant}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);
  const api=createServer(app);await new Promise(r=>api.listen(0,"127.0.0.1",r));
  const base="http://127.0.0.1:"+api.address().port,root="/v1/tenants/"+tenant+"/privacy/requests";
- async function token(sub,{authTime=Math.floor(Date.now()/1000),mfa=true}={}){
+ async function token(sub,{authTime=Math.floor(Date.now()/1000),mfa=true,tokenIssuer=issuer}={}){
   return new SignJWT({auth_time:authTime,acr:"urn:profitpilot:step-up",amr:mfa?["pwd","mfa"]:["pwd"]})
-  .setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(issuer).setAudience(audience).setSubject(sub)
+  .setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(tokenIssuer).setAudience(audience).setSubject(sub)
   .setIssuedAt().setExpirationTime("5m").setJti(randomBytes(16).toString("hex")).sign(privateKey);
  }
  async function req(path,sub,body,options={}){
@@ -40,8 +40,19 @@ test("account closure, token revocation, email erasure and restore safeguards",{
  try{
   await admin.query("INSERT INTO tenants(id,legal_name) VALUES($1,'Closure CI'),($2,'Other CI')",[tenant,otherTenant]);
   await admin.query("INSERT INTO users(id,auth_subject,email) VALUES($1,'closure-user','erase-me@example.invalid'),($2,'closure-owner','owner@example.invalid'),($3,'closure-other','other@example.invalid'),($4,'closure-multi','multi@example.invalid')",[user,owner,other,multi]);
+  await admin.query("UPDATE users SET auth_issuer=$1 WHERE id=ANY($2::uuid[])",[issuer,[user,owner,other,multi]]);
   await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role) VALUES($1,$2,'analyst'),($1,$3,'owner'),($1,$4,'admin'),($1,$5,'analyst'),($6,$5,'analyst')",[tenant,user,owner,other,multi,otherTenant]);
   assert.equal((await req("/v1/me","unknown-closure-subject")).status,401);
+  // A valid signature under a changed configuration must still match the provisioned issuer.
+  const wrongIssuer="https://other-project.invalid/auth/v1";
+  process.env.AUTH_ISSUER=wrongIssuer;
+  try{assert.equal((await req("/v1/me","closure-user",undefined,{tokenIssuer:wrongIssuer})).status,401);}
+  finally{process.env.AUTH_ISSUER=issuer;}
+  await assert.rejects(()=>admin.query("UPDATE users SET auth_issuer=$1 WHERE id=$2",[wrongIssuer,user]),/Identity binding cannot be changed/);
+  await assert.rejects(()=>withTenant(tenant,"closure-user",c=>c.query("SELECT private.register_auth_session('synthetic-old-session','closure-user',now(),now()+interval '1 minute')")),/permission denied/i);
+  const unbound="96969696-2222-4222-8222-222222222222";
+  await admin.query("INSERT INTO users(id,auth_subject,email) VALUES($1,'unbound-ci','unbound@example.invalid')",[unbound]);
+  assert.equal((await req("/v1/me","unbound-ci")).status,401,"no trust on first login");
   const multiReq=await reviewed("closure-multi");
   assert.equal((await req(multiReq.p+"/approve-closure","closure-owner",{eraseEmail:false})).status,200);
   await new Promise(r=>setTimeout(r,1100));
@@ -102,6 +113,7 @@ test("account closure, token revocation, email erasure and restore safeguards",{
   // Each organization requires its own independent approval, and each retains an active owner.
   const successor="97979797-1111-4111-8111-111111111111";
   await admin.query("INSERT INTO users(id,auth_subject,email) VALUES($1,'closure-successor','successor@example.invalid')",[successor]);
+  await admin.query("UPDATE users SET auth_issuer=$1 WHERE id=$2",[issuer,successor]);
   await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role) VALUES($1,$3,'owner'),($2,$3,'owner')",[tenant,otherTenant,successor]);
   const otherRoot="/v1/tenants/"+otherTenant+"/privacy/requests";
   const created=await req(otherRoot,"closure-multi",{requestType:"account_closure",details:"Close second organization account"});
@@ -136,6 +148,7 @@ test("account closure, token revocation, email erasure and restore safeguards",{
   const providerUser="98989898-1111-4111-8111-111111111111",providerSubject="99999999-1111-4111-8111-111111111111";
   const providerIssuer="https://abcdefghijklmnopqrst.supabase.co/auth/v1";
   await admin.query("INSERT INTO users(id,auth_subject,email) VALUES($1,$2,'provider-ci@example.invalid')",[providerUser,providerSubject]);
+  await admin.query("UPDATE users SET auth_issuer=$1 WHERE id=$2",[issuer,providerUser]);
   await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role) VALUES($1,$2,'analyst')",[tenant,providerUser]);
   const providerRequest=await reviewed(providerSubject,"closure-successor");
   assert.equal((await req(providerRequest.p+"/approve-closure","closure-successor",{eraseEmail:false})).status,200);
@@ -146,6 +159,7 @@ test("account closure, token revocation, email erasure and restore safeguards",{
   await admin.query("UPDATE private.privacy_retention_policies SET allow_provider_account_erasure=true WHERE tenant_id=$1",[tenant]);
   await assert.rejects(()=>admin.query("SELECT private.authorize_provider_erasure($1,$2,$3,'CI consent','CI approval')",[providerUser,providerIssuer,multi]),/Exact provider mapping/);
   await assert.rejects(()=>withTenant(tenant,"closure-successor",c=>c.query("SELECT private.authorize_provider_erasure($1,$2,$3,'CI consent','CI approval')",[providerUser,providerIssuer,providerSubject])),/permission denied/i);
+  await assert.rejects(()=>admin.query("SELECT private.authorize_provider_erasure($1,$2,$3,'CI consent','CI approval')",[providerUser,"https://zyxwvutsrqponmlkjihg.supabase.co/auth/v1",providerSubject]),/Exact provider mapping/);
   const firstGrant=(await grant()).rows[0].id;
   await assert.rejects(()=>admin.query("SELECT private.provider_erasure_target($1,'https://wrong.example/auth/v1')",[firstGrant]),/mismatched/);
   await admin.query("INSERT INTO private.privacy_retention_holds(tenant_id,subject_user_id,authority_reference) VALUES($1,$2,'CI provider hold')",[tenant,providerUser]);

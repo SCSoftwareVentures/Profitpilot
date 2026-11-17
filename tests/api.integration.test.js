@@ -67,6 +67,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const userD="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const userE="cccccccc-cccc-4ccc-8ccc-cccccccccccc";
     await admin.query("INSERT INTO users(id,auth_subject,email,status) VALUES ($1,'ci-api-analyst','analyst@example.invalid','active'),($2,'ci-api-reader','reader@example.invalid','active'),($3,'ci-api-tenant-b-only','tenant-b@example.invalid','active'),($4,'ci-api-reviewer','reviewer@example.invalid','active'),($5,'ci-api-owner','owner@example.invalid','active') ON CONFLICT(auth_subject) DO UPDATE SET status='active'",[userA,userB,userC,userD,userE]);
+    await admin.query("UPDATE users SET auth_issuer=$1 WHERE id=ANY($2::uuid[]) AND auth_issuer IS NULL",[issuer,[userA,userB,userC,userD,userE]]);
     await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES ($1,$2,'analyst','active'),($1,$3,'read_only','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status='active'",[tenantA,userA,userB]);
     await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES ($1,$2,'analyst','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status='active'",[tenantB,userC]);
     await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES ($1,$2,'reviewer','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status='active'",[tenantA,userD]);

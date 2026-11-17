@@ -98,6 +98,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/020_multi_tenant_account_closure.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/021_closed_session_retention.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/022_provider_erasure_authorization.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/023_identity_issuer_binding.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:

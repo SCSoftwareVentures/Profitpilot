@@ -64,7 +64,7 @@ export function authRequired(){
   }catch{return res.status(401).json({error:"Invalid or expired access token"});}
   let revoked;
   try{
-   revoked=await registerAndCheckAuthSession({jti:payload.jti,subject:payload.sub,issuedAt:payload.iat,expiresAt:payload.exp});
+   revoked=await registerAndCheckAuthSession({jti:payload.jti,subject:payload.sub,issuer:c.issuer,issuedAt:payload.iat,expiresAt:payload.exp});
   }catch{
    return res.status(503).json({error:"Session security service unavailable"});
   }
