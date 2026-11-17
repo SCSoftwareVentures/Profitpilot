@@ -15,11 +15,11 @@ export function authRequired(){
   try{
    const c=config();
    if(!jwks||jwksUrl!==c.url.href){
-    jwks=createRemoteJWKSet(c.url,{timeoutDuration:5000,cacheMaxAge:300000,cooldownDuration:0});
+    jwks=createRemoteJWKSet(c.url,{timeoutDuration:5000,cacheMaxAge:300000,cooldownDuration:process.env.NODE_ENV==="production"?30000:0});
     jwksUrl=c.url.href;
    }
    const token=req.headers.authorization?.match(/^Bearer\s+([^\s]+)$/i)?.[1];
-   if(!token)return res.status(401).json({error:"Authentication required"});
+   if(!token||token.length>8192)return res.status(401).json({error:"Authentication required"});
    const {payload}=await jwtVerify(token,jwks,{
     issuer:c.issuer,
     audience:c.audience,
@@ -28,8 +28,8 @@ export function authRequired(){
     maxTokenAge:"15m",
     clockTolerance:5
    });
-   if(typeof payload.sub!=="string"||!payload.sub||payload.sub.length>255)return res.status(401).json({error:"Invalid identity subject"});
-   req.identity={subject:payload.sub,email:typeof payload.email==="string"?payload.email:null,authTime:payload.auth_time,issuedAt:payload.iat,mfa:Array.isArray(payload.amr)&&payload.amr.includes("mfa")};
+   if(typeof payload.sub!=="string"||!payload.sub||payload.sub.length>255||/[\p{C}]/u.test(payload.sub))return res.status(401).json({error:"Invalid identity subject"});
+   req.identity={subject:payload.sub,email:typeof payload.email==="string"?payload.email:null,authTime:payload.auth_time,issuedAt:payload.iat,sessionId:payload.sid,mfa:Array.isArray(payload.amr)&&payload.amr.includes("mfa")};
    next();
   }catch(e){
    const unavailable=e.message==="Authentication is not configured"||e.message==="Production issuer and JWKS endpoints must use HTTPS";
@@ -50,4 +50,13 @@ export function hasRecentMfa(identity,now=Math.floor(Date.now()/1000)){
 export function requireRecentMfa(req,res,next){
  if(!hasRecentMfa(req.identity))return res.status(403).json({error:"Recent multi-factor authentication required",code:"STEP_UP_REQUIRED"});
  next();
+}
+
+export function sessionRequired(check){
+ return async(req,res,next)=>{
+  try{
+   if(!await check(req.identity))return res.status(403).json({error:"Active authenticated session required",code:"SESSION_DENIED"});
+   next();
+  }catch{return res.status(503).json({error:"Session verification unavailable"});}
+ };
 }
