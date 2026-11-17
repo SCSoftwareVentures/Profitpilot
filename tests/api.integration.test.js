@@ -44,7 +44,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
   const apiAddress=api.address();
   const base=`http://127.0.0.1:${apiAddress.port}`;
   async function token(subject){
-    return new SignJWT({email:subject+"@example.invalid",auth_time:Math.floor(Date.now()/1000),acr:"urn:profitpilot:step-up"})
+    return new SignJWT({email:subject+"@example.invalid",auth_time:Math.floor(Date.now()/1000),acr:"urn:profitpilot:step-up",amr:["pwd","mfa"]})
       .setProtectedHeader({alg:"RS256",kid:jwk.kid})
       .setIssuer(issuer).setAudience(audience).setSubject(subject)
       .setIssuedAt().setExpirationTime("5m").setJti(randomBytes(16).toString("hex")).sign(privateKey);
