@@ -54,3 +54,12 @@ test("dashboard exposes a synthetic append-only Promise Ledger timeline",async()
   assert.match(html,/This synthetic timeline/);
   assert.match(html,/does not send messages/);
 });
+
+test("dashboard exposes evidence-gated Profit Leak Radar candidates",async()=>{
+  const html=await readFile(htmlPath,"utf8");
+  assert.match(html,/data-view="leaks"/);
+  assert.match(html,/id="leaks"/);
+  assert.match(html,/assessLeakCandidate/);
+  assert.match(html,/Exposure withheld/);
+  assert.match(html,/not verified losses or recovered savings/);
+});
