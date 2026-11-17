@@ -43,6 +43,17 @@ const promiseDemoRecords=(()=>{
 const fmt=formatDemoMoney;
 const escapeHtml=value=>String(value??"").replace(/[&<>"']/g,char=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[char]));
 const displayMargin=value=>typeof value==="string"&&/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(value)?escapeHtml(value)+"%":"Unavailable";
+function renderPromiseLedger(){
+  const records=promiseDemoRecords.map(record=>{
+    const current=record.current;
+    const history=record.events.map(item=>{
+      const reference=item.evidenceRef||item.messageRef||"No evidence reference";
+      return '<div class="activityrow"><div><b>'+escapeHtml(item.type.replaceAll("_"," "))+'</b><small>'+escapeHtml(item.actorType)+' · '+escapeHtml(item.occurredAt)+'</small><small>'+escapeHtml(item.reason||reference)+'</small></div><span class="tag">'+escapeHtml(item.toStatus)+'</span></div>';
+    }).join("");
+    return '<div class="activityrow"><div><b>'+escapeHtml(current.title)+'</b><small>'+escapeHtml(record.promiseType.replaceAll("_"," "))+' · '+escapeHtml(record.counterparty||"Internal task")+'</small><small>Due '+escapeHtml(current.dueAt)+' · '+escapeHtml(current.dueTimezone)+' · Owner '+escapeHtml(current.ownerId)+' · Version '+record.currentVersion+'</small><small>Scope: '+escapeHtml(current.scope.join("; "))+'</small></div><span class="tag '+(record.status==="disputed"?"warn":"ok")+'">'+escapeHtml(record.status)+'</span></div><details><summary>View '+record.events.length+' recorded events</summary>'+history+'</details>';
+  }).join("");
+  document.querySelector("#promiseRecords").innerHTML=records;
+}
 function renderReadiness(){const result=evaluateJobReadiness(COMMERCIAL_CLEANING_READINESS_TEMPLATE,{checks:readinessChecks});document.querySelector("#readinessSummary").innerHTML='<div class="cardhead"><h2>Readiness: '+(result.readinessStatus==="ready"?"Ready":"Not ready")+'</h2><b>'+result.completenessPercent+'% complete</b></div><div class="barrow" style="height:12px;padding:0;border:0"><i style="display:block;background:var(--green);height:8px;width:'+result.completenessPercent+'%;border-radius:6px"></i></div><p class="small">'+result.blockingCount+' blocking checks · Template '+escapeHtml(result.templateId)+' v'+escapeHtml(result.templateVersion)+'</p>';document.querySelector("#readinessChecks").innerHTML=result.checkResults.map(x=>'<div class="activityrow"><div><b>'+escapeHtml(x.label)+'</b><small>'+escapeHtml(x.reason||x.issue||x.evidenceRef||"Evidence recorded")+'</small></div><span class="tag '+(x.blocking?"warn":"ok")+'">'+escapeHtml(x.status.replaceAll("_"," "))+'</span></div>').join("");}
 function render(){
  const m=aggregateMetrics(contracts);
@@ -58,6 +69,7 @@ function render(){
  document.querySelector("#snapshot").innerHTML=table;document.querySelector("#contractTable").innerHTML=table;
  document.querySelector("#exceptionTable").innerHTML=exceptions.length?'<table><thead><tr><th>Exception</th><th>Reference</th><th>Value</th><th>Status</th></tr></thead><tbody>'+exceptions.map(e=>'<tr><td>'+escapeHtml(e.title)+'</td><td>'+escapeHtml(e.detail)+'</td><td>'+escapeHtml(e.value)+'</td><td><span class="tag warn">'+escapeHtml(e.status)+'</span></td></tr>').join("")+'</tbody></table>':'<div class="empty">No open exceptions.</div>';
  renderReadiness();
+ renderPromiseLedger();
  document.querySelector("#reportSummary").innerHTML='<p>Revenue: <b>'+fmt(m.revenue)+'</b></p><p>Delivery costs: <b>'+fmt(m.cost)+'</b></p><p>Contribution: <b>'+fmt(m.contribution)+'</b></p><p class="small">Source completeness: unverified. This is a fictional, incomplete demonstration dataset and must not be interpreted as verified business performance.</p>';
 }
 function show(view){document.querySelectorAll(".view").forEach(x=>x.classList.toggle("hidden",x.id!==view));document.querySelectorAll("[data-view]").forEach(x=>{const active=x.dataset.view===view;x.classList.toggle("active",active);if(active)x.setAttribute("aria-current","page");else x.removeAttribute("aria-current");});}
