@@ -14,7 +14,8 @@ const expected=new Map([
   ["POST /v1/tenants/:tenantId/imports/:batchId/validate","role"],
   ["POST /v1/tenants/:tenantId/matches/:matchId/decision","role"],
   ["POST /v1/tenants/:tenantId/calculations","role"],
-  ["GET /v1/tenants/:tenantId/calculations/:runId","member"]
+  ["GET /v1/tenants/:tenantId/calculations/:runId","member"],
+  ["POST /v1/tenants/:tenantId/calculations/:runId/export","step-up"]
 ]);
 
 test("every registered API endpoint has an explicit reviewed authorization classification",()=>{
@@ -25,10 +26,11 @@ test("every registered API endpoint has an explicit reviewed authorization class
     const key=`${route.method} ${route.path}`;
     assert.ok(expected.has(key),`unreviewed endpoint: ${key}`);
     const classification=expected.get(key);
-    if(classification==="member"||classification==="role")
+    if(classification==="member"||classification==="role"||classification==="step-up")
       assert.match(route.middleware,/\bmembership\b/,`missing tenant membership middleware: ${key}`);
-    if(classification==="role")
+    if(classification==="role"||classification==="step-up")
       assert.match(route.middleware,/\brequireRole\s*\(/,`missing role middleware: ${key}`);
+    if(classification==="step-up")assert.match(route.middleware,/\brequireRecentMfa\b/,`missing MFA middleware: ${key}`);
     if(route.path.startsWith("/v1/tenants/"))
       assert.match(route.path,/^\/v1\/tenants\/:tenantId(?:\/|$)/,`tenant route must carry explicit tenant ID: ${key}`);
   }
