@@ -14,13 +14,23 @@ export async function withTenant(tenantId,subject,fn){
  const payload=[tenantId,subject,expires,nonce,keyId].join("\n");
  const signature=createHmac("sha256",Buffer.from(secret,"hex")).update(payload).digest("hex");
  const client=await pool.connect();
+ let discarded=false;
  try{
   await client.query("BEGIN");
   await client.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.tenant_subject',$2,true),set_config('app.tenant_expires',$3,true),set_config('app.tenant_nonce',$4,true),set_config('app.tenant_key_id',$5,true),set_config('app.tenant_signature',$6,true)",[tenantId,subject,expires,nonce,keyId,signature]);
   const result=await fn(client);
   await client.query("COMMIT");
   return result;
- }catch(error){await client.query("ROLLBACK");throw error;}
- finally{client.release();}
+ }catch(error){
+  try{await client.query("ROLLBACK");}
+  catch(rollbackError){
+   // Never reuse a connection whose tenant transaction could not be rolled back.
+   discarded=true;
+   client.release(rollbackError);
+   throw new AggregateError([error,rollbackError],"Tenant transaction and rollback both failed");
+  }
+  throw error;
+ }
+ finally{if(!discarded)client.release();}
 }
 export async function health(){const r=await pool.query("SELECT 1 AS ok");return r.rows[0].ok===1;}
