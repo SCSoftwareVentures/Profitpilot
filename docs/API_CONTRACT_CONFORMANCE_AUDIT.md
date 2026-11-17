@@ -177,3 +177,16 @@ The draft hardening branch updates `api/openapi.yaml` to document:
 - calculation output fields with contribution and margin nullable while the result is incomplete, and the separately labelled indicative value.
 
 The OpenAPI server URL remains a placeholder and no service is deployed. This is contract documentation, not evidence that all proposed product endpoints exist. Payroll ingestion, variation management, export, membership discovery and private binary upload remain unimplemented.
+
+ 
+## Database-enforced reviewer decision contract — migration 014
+
+The hardening branch now makes the reviewer decision contract stricter than route middleware alone:
+- only the signed active tenant actor with owner/admin/reviewer role may submit a decision;
+- only candidate/held decisions may transition to confirmed/rejected/held;
+- evidence and identity fields are immutable after candidate creation;
+- finalised decisions cannot be changed;
+- a 3–2000 character audit reason is required;
+- the database trigger writes the decision audit event in the same transaction as the state transition.
+
+The Express route sets the transaction-local audit reason and relies on the database trigger, avoiding a duplicate application-layer audit insert. CI run #43983962328 passed these direct-SQL and API integration cases on exact head `6b98299006d9aa620f494ec4fe52d095e82947c4`.
