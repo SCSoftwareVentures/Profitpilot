@@ -23,6 +23,7 @@ test("every registered API endpoint has an explicit reviewed authorization class
   assert.ok(source.includes('app.use("/v1",authRequired())'),
     "all /v1 routes must remain behind the authentication middleware");
   assert.ok(source.includes('app.use("/v1",sessionRequired(checkIdentitySession))'),"all authenticated routes must check active session state");
+  assert.ok(source.indexOf('app.use("/v1",sessionRequired(checkIdentitySession))')<source.indexOf('app.use("/v1",express.json({limit:"100kb",inflate:false}))'),"authenticate and authorize sessions before parsing request bodies");
   assert.equal(routes.length,expected.size,"route inventory changed: review and classify every new endpoint");
   for(const route of routes){
     const key=`${route.method} ${route.path}`;
