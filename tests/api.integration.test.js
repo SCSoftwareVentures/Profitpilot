@@ -61,9 +61,11 @@ test("authenticated API enforces tenant membership, role permissions and import 
     return fetch(base+path,{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
   }
   try{
-    await admin.query("INSERT INTO users(id,auth_subject,email,status) VALUES ($1,'ci-api-analyst','analyst@example.invalid','active'),($2,'ci-api-reader','reader@example.invalid','active'),($3,'ci-api-tenant-b-only','tenant-b@example.invalid','active') ON CONFLICT(auth_subject) DO UPDATE SET status='active'",[userA,userB,userC]);
+    const userD="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    await admin.query("INSERT INTO users(id,auth_subject,email,status) VALUES ($1,'ci-api-analyst','analyst@example.invalid','active'),($2,'ci-api-reader','reader@example.invalid','active'),($3,'ci-api-tenant-b-only','tenant-b@example.invalid','active'),($4,'ci-api-reviewer','reviewer@example.invalid','active') ON CONFLICT(auth_subject) DO UPDATE SET status='active'",[userA,userB,userC,userD]);
     await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES ($1,$2,'analyst','active'),($1,$3,'read_only','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status='active'",[tenantA,userA,userB]);
     await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES ($1,$2,'analyst','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status='active'",[tenantB,userC]);
+    await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES ($1,$2,'reviewer','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status='active'",[tenantA,userD]);
     await admin.query("INSERT INTO businesses(id,tenant_id,name) VALUES ($1,$2,'CI Business A') ON CONFLICT(id) DO NOTHING",[businessA,tenantA]);
     await admin.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'CI Customer A','active') ON CONFLICT(id) DO NOTHING",[contractA,tenantA,businessA]);
     await admin.query("INSERT INTO businesses(id,tenant_id,name) VALUES ($1,$2,'CI Business B') ON CONFLICT(id) DO NOTHING",[businessB,tenantB]);
@@ -193,6 +195,31 @@ test("authenticated API enforces tenant membership, role permissions and import 
       body:{...importBody,sha256:"c".repeat(64)}
     });
     assert.equal(readerWrite.status,403,"read_only members must not create imports");
+
+    const matchId="99999999-9999-4999-8999-999999999999";
+    const analystDecision=await request(`/v1/tenants/${tenantA}/matches/${matchId}/decision`,{subject:"ci-api-analyst",method:"POST",body:{decision:"confirmed",reason:"CI role test"}});
+    assert.equal(analystDecision.status,403,"analysts must not finalise match-review decisions");
+    const readerDecision=await request(`/v1/tenants/${tenantA}/matches/${matchId}/decision`,{subject:"ci-api-reader",method:"POST",body:{decision:"confirmed",reason:"CI role test"}});
+    assert.equal(readerDecision.status,403,"read-only members must not finalise match-review decisions");
+    const reviewerDecision=await request(`/v1/tenants/${tenantA}/matches/${matchId}/decision`,{subject:"ci-api-reviewer",method:"POST",body:{}});
+    assert.equal(reviewerDecision.status,400,"reviewers must pass role authorisation before decision payload validation");
+
+    const reviewerImport=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-reviewer",method:"POST",body:{...importBody,sha256:"e".repeat(64)}});
+    assert.equal(reviewerImport.status,403,"reviewers must not create source imports");
+    const reviewerRows=await request(`/v1/tenants/${tenantA}/imports/${matchId}/rows`,{subject:"ci-api-reviewer",method:"POST",body:{rows:[{invoice:"CI"}]}});
+    assert.equal(reviewerRows.status,403,"reviewers must not ingest source rows");
+    const analystRows=await request(`/v1/tenants/${tenantA}/imports/${matchId}/rows`,{subject:"ci-api-analyst",method:"POST",body:{rows:[{invoice:"CI"}]}});
+    assert.equal(analystRows.status,404,"analysts may ingest rows, subject to tenant-scoped batch existence");
+
+    const readerValidation=await request(`/v1/tenants/${tenantA}/imports/${matchId}/validate`,{subject:"ci-api-reader",method:"POST",body:{}});
+    assert.equal(readerValidation.status,403,"read-only members must not initiate validation");
+    const reviewerValidation=await request(`/v1/tenants/${tenantA}/imports/${matchId}/validate`,{subject:"ci-api-reviewer",method:"POST",body:{}});
+    assert.equal(reviewerValidation.status,404,"reviewers may validate only an existing tenant-scoped batch");
+
+    const readerCalculation=await request(`/v1/tenants/${tenantA}/calculations`,{subject:"ci-api-reader",method:"POST",body:{}});
+    assert.equal(readerCalculation.status,403,"read-only members must not create calculations");
+    const analystCalculation=await request(`/v1/tenants/${tenantA}/calculations`,{subject:"ci-api-analyst",method:"POST",body:{}});
+    assert.equal(analystCalculation.status,400,"analysts may initiate calculations subject to valid inputs");
 
     await admin.query("UPDATE tenant_memberships SET status='revoked' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);
     const revoked=await request(`/v1/tenants/${tenantA}/contracts`,{subject:"ci-api-analyst"});
