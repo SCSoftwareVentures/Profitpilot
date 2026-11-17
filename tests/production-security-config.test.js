@@ -12,7 +12,7 @@ test("production fails closed for insecure, incomplete or mixed operator/applica
  {AUTH_AUDIENCE:""},{AUTH_STEP_UP_ACR:""},{AUTH_STEP_UP_MAX_AGE_SECONDS:"3600"},
  {CORS_ORIGIN:"*"},{CORS_ORIGIN:"http://app.example.invalid"},{CORS_ORIGIN:"https://app.example.invalid/path"},{CORS_ORIGIN:"https://app.example.invalid,https://app.example.invalid"},
  {TENANT_CONTEXT_HMAC_SECRET:"synthetic-secret"},{TENANT_CONTEXT_HMAC_KEY_ID:"bad key"},{TEST_ADMIN_DATABASE_URL:"fixture"},
- {PRIVACY_CHECKPOINT_KEY:"operator-secret"},{POSTGRES_ADMIN_PASSWORD:"operator-password"},{ENABLE_SYNTHETIC_PAYROLL_UI:"true"}
+ {PRIVACY_CHECKPOINT_KEY:"operator-secret"},{POSTGRES_ADMIN_PASSWORD:"operator-password"},{ENABLE_SYNTHETIC_PAYROLL_UI:"true"},{ENABLE_SYNTHETIC_ATTACHMENT_QUARANTINE:"true"}
  ];
  for(const patch of bad)assert.throws(()=>assertProductionConfig({...valid,...patch}),error=>error.message.startsWith("Invalid production security configuration:")&&!/operator-secret|synthetic-secret|user:pass/.test(error.message));
 });

@@ -360,7 +360,14 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(activeSecondary.rowCount,1,"the replacement key must remain valid after old-key revocation");
     const afterCommit=await appPool.query("SELECT current_setting('app.tenant_id',true) AS tenant_id");
     assert.ok(afterCommit.rows[0].tenant_id===null||afterCommit.rows[0].tenant_id==="","tenant context must not leak after a transaction returns its pooled connection");
-    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'RLS write probe','active')",["99999999-9999-4999-8999-999999999999",tenantB,businessB])),/row-level security/i,"RLS WITH CHECK must reject cross-tenant writes");
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'RLS write probe','active')",["99999999-9999-4999-8999-999999999999",tenantB,businessB])),/permission denied/i,"unimplemented contract provisioning must not be writable through runtime");
+    const probeInsert="INSERT INTO import_batches(id,tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by) VALUES(gen_random_uuid(),$1,'payroll','CI permission','uploaded',$2,'permission-probe.csv',$3)";
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query(probeInsert,[tenantB,"9".repeat(64),userC])),/row-level security/i,"RLS WITH CHECK must reject cross-tenant writes");
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-reader",client=>client.query(probeInsert,[tenantA,"9".repeat(64),userB])),/row-level security/i,"valid signed tenant membership without write permission cannot insert financial records");
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query(probeInsert,[tenantA,"9".repeat(64),userB])),/row-level security/i,"import creator cannot be spoofed within the same tenant");
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-owner",client=>client.query("DELETE FROM contracts WHERE id=$1",[contractA])),/permission denied/i);
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-owner",client=>client.query("UPDATE contracts SET id=id WHERE id=$1",[contractA])),/row-level security/i,"row-lock privilege cannot be used to mutate a contract");
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-owner",client=>client.query("UPDATE allocation_runs SET created_by=$1 WHERE tenant_id=$2",[userB,tenantA])),/permission denied/i,"allocation creator is not a runtime-writable column");
 
     const otherTenant=await request(`/v1/tenants/${tenantB}/contracts`,{subject:"ci-api-analyst"});
     assert.equal(otherTenant.status,403,"a tenant A member must not access tenant B");

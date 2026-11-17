@@ -13,7 +13,7 @@ test("all public tables require explicit security classification and restrictive
  const specialScoped=new Set(["tenants","users"]);
  const directWriteForbidden=new Set([
   "tenants","users","tenant_memberships","permission_catalog",
-  "role_permissions","tenant_membership_permission_overrides"
+  "role_permissions","tenant_membership_permission_overrides","businesses","sites","contracts","contract_versions","variations"
  ]);
  const safeName=name=>'"'+name.replaceAll('"','""')+'"';
  let client;
@@ -93,6 +93,13 @@ test("all public tables require explicit security classification and restrictive
     assert.equal(access.allowed,false,
      "runtime database role retains direct "+privilege+" on "+name);
    }
+  }
+  for(const name of ["import_batches","raw_import_rows","mapping_decisions","payroll_pools","allocation_runs","allocation_lines","invoices","invoice_lines","match_reviews","calculation_runs","privacy_requests"]){
+   for(const privilege of ["DELETE","TRUNCATE"]){
+    const {rows:[access]}=await admin.query("SELECT has_table_privilege('profitpilot_app',$1,$2) AS allowed",["public."+name,privilege]);
+    assert.equal(access.allowed,false,"runtime direct destructive financial/privacy privilege: "+name+" "+privilege);
+   }
+   assert.ok(policies.some(p=>p.tablename===name&&p.cmd==="INSERT"&&/has_scoped_permission/.test(p.with_check||"")),"runtime write authority policy missing: "+name);
   }
   for(const privilege of ["DELETE","TRUNCATE"]){
    const {rows:[access]}=await admin.query(

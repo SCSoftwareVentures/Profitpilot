@@ -59,3 +59,5 @@ Supply-chain update: resolved dependency lock, lifecycle-script suppression, npm
 Runtime boundary update (migration 046): database/schema object creation and temporary tables are prohibited for the application role; production startup refuses elevated or misconfigured database connections and unsafe identity/CORS/secret configuration. Pool connections are reset or destroyed after work. Current commit-specific CI is required; new infrastructure and actual TLS provider handshake remain unverified.
 
 Migration 047 adds operator-only audit prefix capture, restore validation of audit history and signed evidence of retired signing-key tombstones. No independently administered offsite custody service or live restore orchestration is configured.
+
+Migration 048 further narrows application SQL rights and adds restrictive financial/subject-writing RLS authority. This is defence in depth, not proof that every financial route or direct read is exhaustively minimised. High-risk financial write action proofs remain to be reviewed at the database boundary.

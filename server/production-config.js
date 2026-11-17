@@ -27,7 +27,7 @@ export function assertProductionConfig(env=process.env){
  const key=env.TENANT_CONTEXT_HMAC_SECRET||"";
  if(key.length%2!==0||!/^[a-f0-9]{64,256}$/i.test(key))fail("TENANT_CONTEXT_HMAC_SECRET");
  if(!/^[A-Za-z0-9._-]{1,128}$/.test(env.TENANT_CONTEXT_HMAC_KEY_ID||"primary"))fail("TENANT_CONTEXT_HMAC_KEY_ID");
- if(env.ENABLE_SYNTHETIC_PAYROLL_UI==="true"||env.ENABLE_ATTACHMENT_QUARANTINE==="true"||env.TEST_ADMIN_DATABASE_URL||env.TEST_APP_DATABASE_URL)fail("synthetic service settings");
+ if(env.ENABLE_SYNTHETIC_PAYROLL_UI==="true"||env.ENABLE_ATTACHMENT_QUARANTINE==="true"||env.ENABLE_SYNTHETIC_ATTACHMENT_QUARANTINE==="true"||env.TEST_ADMIN_DATABASE_URL||env.TEST_APP_DATABASE_URL)fail("synthetic service settings");
  // Administrative and recovery credentials belong on independent operator systems.
  for(const name of ["POSTGRES_ADMIN_PASSWORD","PRIVACY_ADMIN_DATABASE_URL","PRIVACY_CHECKPOINT_KEY","PRIVACY_BACKUP_ENCRYPTION_KEY"]){
   if(env[name])fail("operator credential present in API environment ("+name+")");
