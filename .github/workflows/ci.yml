@@ -138,12 +138,13 @@ jobs:
         run: |
           set -eu
           umask 077
-          trap 'rm -f "$RUNNER_TEMP/privacy-before.dump" "$RUNNER_TEMP/privacy-after.dump"; dropdb -h localhost -U profitpilot_admin --if-exists privacy_restore_old_ci; dropdb -h localhost -U profitpilot_admin --if-exists privacy_restore_new_ci' EXIT
+          trap 'rm -f "$RUNNER_TEMP/privacy-before.dump" "$RUNNER_TEMP/privacy-after.dump" "$RUNNER_TEMP/privacy-after.sealed" "$RUNNER_TEMP/privacy-after.verified.dump"; dropdb -h localhost -U profitpilot_admin --if-exists privacy_restore_old_ci; dropdb -h localhost -U profitpilot_admin --if-exists privacy_restore_new_ci' EXIT
           docker exec -e PGPASSWORD "$PG_CI_CONTAINER" pg_dump -h 127.0.0.1 -U profitpilot_admin -Fc profitpilot > "$RUNNER_TEMP/privacy-after.dump"
+          node tests/encrypted-backup-drill.js "$RUNNER_TEMP/privacy-after.dump" "$RUNNER_TEMP/privacy-after.sealed" "$RUNNER_TEMP/privacy-after.verified.dump"
           createdb -h localhost -U profitpilot_admin privacy_restore_old_ci
           createdb -h localhost -U profitpilot_admin privacy_restore_new_ci
           docker exec -i -e PGPASSWORD "$PG_CI_CONTAINER" pg_restore -h 127.0.0.1 -U profitpilot_admin --exit-on-error -d privacy_restore_old_ci < "$RUNNER_TEMP/privacy-before.dump"
-          docker exec -i -e PGPASSWORD "$PG_CI_CONTAINER" pg_restore -h 127.0.0.1 -U profitpilot_admin --exit-on-error -d privacy_restore_new_ci < "$RUNNER_TEMP/privacy-after.dump"
+          docker exec -i -e PGPASSWORD "$PG_CI_CONTAINER" pg_restore -h 127.0.0.1 -U profitpilot_admin --exit-on-error -d privacy_restore_new_ci < "$RUNNER_TEMP/privacy-after.verified.dump"
           PRIVACY_DRILL_KEY="$(openssl rand -hex 32)" node tests/physical-restore-drill.js
 
       - name: Verify production database TLS configuration fails closed

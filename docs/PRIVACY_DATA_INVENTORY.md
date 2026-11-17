@@ -66,3 +66,5 @@ Migration 021 adds session cleanup receipts with user ID, cutoff, count, authori
 Migration 022 records restricted provider erasure grants and operator-recorded verification of provider absence. These records retain local subject mapping and authorization references; they do not establish erasure of provider logs, backups, storage, processors or unrelated business records.
 
 Migration 024 extends narrow active-storage erasure to unreferenced rejected/failed import payloads, with retention, dependency and legal-hold controls. Row IDs, batch metadata, original hashes and audit records are retained; payroll totals, financial records, accepted imports and derived records are excluded. Subject attribution within arbitrary accepted JSON still requires reviewed source provenance and data-subject mapping; actor/creator is not the data subject.
+
+Encrypted logical backup artifact format binds a dump to its original checkpoint, backup and deployment identifiers. No real backup is persisted by this repository or CI. Production storage and key custody must be mapped separately.
