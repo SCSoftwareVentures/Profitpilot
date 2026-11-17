@@ -3,7 +3,7 @@ import express from "express";
 import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
-import {sharedLimiter} from "./shared-rate-limit.js";
+import {sharedLimiter,startRateLimitRetention} from "./shared-rate-limit.js";
 import {randomUUID,createHash} from "node:crypto";
 import {withTenant,health} from "./db.js";
 import {validateProductionSecrets} from "./production-config.js";
@@ -13,18 +13,16 @@ import {parseCsv,validateInvoiceRows,isIsoDate,money} from "../src/engine.js";
 
 const app=express();
 app.disable("x-powered-by");
+// Set privacy headers even for rejected or throttled requests.
+app.use("/v1",(req,res,next)=>{res.set("Cache-Control","no-store");res.set("Pragma","no-cache");next();});
 app.use(helmet());
 app.use(cors({origin:(process.env.CORS_ORIGIN||"").split(",").map(x=>x.trim()).filter(Boolean),credentials:false,methods:["GET","POST"]}));
 app.use(process.env.NODE_ENV==="production"?sharedLimiter({windowMs:60_000,limit:100,scope:"global"}):rateLimit({windowMs:60_000,limit:100,standardHeaders:true,legacyHeaders:false}));
 app.use(express.json({limit:"100kb"}));
-// Additional write throttling limits abuse of evidence ingestion and review endpoints.
-// This in-process store is suitable for a single API instance only; production
-// horizontal scaling requires a shared external rate-limit store.
+// Production shares write counters across replicas; development uses local counters.
 const mutationLimiter=process.env.NODE_ENV==="production"?sharedLimiter({windowMs:60_000,limit:60,scope:"write"}):rateLimit({windowMs:60_000,limit:60,standardHeaders:true,legacyHeaders:false,message:{error:"Too many write requests; retry later"}});
 app.use("/v1/tenants/:tenantId",(req,res,next)=>req.method==="POST"?mutationLimiter(req,res,next):next());
 app.get("/health",async(req,res)=>{try{await health();res.json({status:"ok",database:"connected"});}catch{res.status(503).json({status:"unavailable"});}});
-// Never allow authenticated tenant responses to be cached by browsers or shared proxies.
-app.use("/v1",(req,res,next)=>{res.set("Cache-Control","no-store");res.set("Pragma","no-cache");next();});
 app.use("/v1",authRequired());
 
 async function membership(req,res,next){
@@ -170,5 +168,6 @@ app.get("/v1/tenants/:tenantId/calculations/:runId",membership,async(req,res,nex
 
 app.use((err,req,res,next)=>{const id=randomUUID();const status=err.code==="23505"?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
+if(process.env.NODE_ENV==="production")startRateLimitRetention();
 if(process.env.NODE_ENV!=="test")app.listen(port,()=>process.stdout.write("ProfitPilot API listening on "+port+"\n"));
 export default app;
