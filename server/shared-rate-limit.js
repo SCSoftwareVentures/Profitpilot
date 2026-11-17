@@ -25,7 +25,10 @@ export function sharedLimiter({limit,windowMs=60000,scope},db=pool,env=process.e
     const [head,tail]=canonical.split("::");
     const a=head?head.split(":"):[],z=tail?tail.split(":"):[];
     const parts=tail===undefined?a:[...a,...Array(8-a.length-z.length).fill("0"),...z];
-    address=parts.slice(0,4).map(x=>x.padStart(4,"0")).join(":")+"::/64";
+    const words=parts.map(x=>parseInt(x,16));
+    if(words.slice(0,5).every(x=>x===0)&&words[5]===65535){
+     address=[words[6]>>8,words[6]&255,words[7]>>8,words[7]&255].join(".");
+    }else address=parts.slice(0,4).map(x=>x.padStart(4,"0")).join(":")+"::/64";
    }
    const digest=createHmac("sha256",Buffer.from(secret,"hex")).update(scope+"\n"+address).digest("hex");
    const result=await db.query("SELECT total_hits,retry_after FROM public.consume_api_rate_limit($1)",[scope+":"+digest]);
