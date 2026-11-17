@@ -229,3 +229,10 @@ The dashboard demonstrates one candidate and one incomplete-coverage exception. 
 A synthetic/test-only event model is provided in `src/verified-value-ledger.js`, with tests in `tests/verified-value-ledger.test.js`. It records quoted, contracted, variation-approved, delivered, customer-accepted, invoiced, credited, refunded, settled and disputed amounts as distinct event types. Each event requires a stable scope, currency, tax basis, period, actor/source identifiers, timezone-aware timestamp, reason and evidence reference. Summaries remain partitioned by scope and reporting dimensions. Unrecorded states return `null`, not zero; credits/refunds remain separate and no net total is produced.
 
 The dashboard includes a synthetic lifecycle table. This is not independent verification of customer acceptance, delivery, invoicing or bank settlement. Durable database persistence, authenticated actor attribution, source reconciliation, reviewer controls and reversal/restatement workflows remain unimplemented.
+
+
+## Implementation record — SwitchProof Migration foundation
+
+A pre-migration profiler is provided in `src/switchproof-migration.js` with synthetic tests in `tests/switchproof-migration.test.js`. It requires a source manifest, permission reference, checksum, expected row count, explicit mapping version, source-key mapping, required-field mappings, currency/tax basis/period and source control total. It detects duplicate source keys, missing required values, malformed amounts/dates, currency mismatches, row-count differences and control-total mismatches. The output contains exception codes and row numbers, not raw source row content.
+
+A passing profile means only that the supplied synthetic/in-memory rows reconcile to the supplied metadata and declared mappings. It does not independently verify the checksum or permission, copy data, approve mappings or perform a migration. Durable quarantine, private storage, malware scanning, reversible transformation, target reconciliation and human migration approval remain outstanding.
