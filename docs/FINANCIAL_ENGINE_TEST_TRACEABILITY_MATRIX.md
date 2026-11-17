@@ -145,3 +145,15 @@ Before implementation: reconcile the PR #25 security branch with the product bra
 The follow-up hardening branch adds canonical decimal-string enforcement and a deterministic property suite. The property suite runs 500 payroll bucket reconciliation cases with seed `0x5eed1234`, checks aggregation order invariance, preserves unknown/null and negative-credit semantics, and blocks mixed currency/tax-basis aggregation. Targeted Node/PostgreSQL CI also exercises direct-SQL reviewer-role denial and payroll actor binding.
 
 These are additional implementation and regression checks. They do **not** mark the complete DEC/TAX/PAY/PAYLED/INV/CON/VAR/IMP plan as executed. Locale-specific thousands parsing, rounding-policy selection, GST/FX conversion, payroll source-row lifecycle/restatement, invoice eligibility denominator, variation lifecycle, import control totals, formula-injection export and full source provenance remain unimplemented or not tested end-to-end. Qualified reviewers must approve all expected financial values and policy choices before the financial acceptance gate can pass.
+
+
+## Current prototype semantics — 17 November 2026
+
+The small prototype aggregation helper has deliberately separated two concepts:
+
+- `aggregationValid: true` means the supplied rows have canonical money values and a common explicit currency, tax basis and reporting period, so those supplied values can be arithmetically aggregated.
+- `completeness: "unverified"` means the helper has **not** established source completeness, invoice denominator eligibility, payroll coverage, cost-category completeness, approved accounting/tax policy or provenance closure. It must not be interpreted as a complete business result.
+
+The helper rejects empty or malformed collections and returns `null` for invalid monetary outputs rather than emitting `NaN`. The browser dashboard uses synthetic data only, labels contribution/margin as indicative, and includes the unverified source-completeness status in its demonstration export.
+
+These prototype safeguards do not close the DEC/TAX/PAY/PAYLED/INV/CON/VAR/IMP acceptance plan. The complete financial acceptance suite and qualified policy approvals remain outstanding.
