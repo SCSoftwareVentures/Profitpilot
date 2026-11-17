@@ -11,7 +11,7 @@ function safeText(value,max=500){
  */
 export function evaluateJobReadiness({template,answers}={}){
   if(!template||typeof template!=="object"||Array.isArray(template)||
-     !SAFE_ID.test(template.id||"")||!SAFE_ID.test(template.version||"")||
+     typeof template.id!=="string"||!SAFE_ID.test(template.id)||typeof template.version!=="string"||!SAFE_ID.test(template.version)||
      !Array.isArray(template.checks)||template.checks.length===0||template.checks.length>200){
     throw new TypeError("A versioned readiness template with 1–200 checks is required.");
   }
@@ -21,7 +21,7 @@ export function evaluateJobReadiness({template,answers}={}){
   const seen=new Set();
   const checks=template.checks.map((definition,index)=>{
     if(!definition||typeof definition!=="object"||Array.isArray(definition)||
-       !SAFE_ID.test(definition.id||"")||seen.has(definition.id)){
+       typeof definition.id!=="string"||!SAFE_ID.test(definition.id)||seen.has(definition.id)){
       throw new TypeError("Template check IDs must be unique valid identifiers.");
     }
     seen.add(definition.id);
@@ -51,7 +51,7 @@ export function evaluateJobReadiness({template,answers}={}){
     };
   });
   const requiredCount=checks.filter(x=>x.required).length;
-  const satisfiedCount=checks.filter(x=>x.required&&x.state==="satisfied").length;
+  const satisfiedCount=checks.filter(x=>x.required&&x.state==="satisfied").length;\n  const notApplicableCount=checks.filter(x=>x.required&&x.state==="not_applicable").length;
   const blockers=checks.filter(x=>x.blocking).map(x=>({
     checkId:x.id,
     state:x.state,
@@ -64,7 +64,7 @@ export function evaluateJobReadiness({template,answers}={}){
     templateVersion:template.version,
     status,
     approvalGranted:false,
-    readinessCounts:{required:requiredCount,satisfied:satisfiedCount,blocked:blockers.length},
+    readinessCounts:{required:requiredCount,satisfied:satisfiedCount,notApplicable:notApplicableCount,complete:satisfiedCount+notApplicableCount,blocked:blockers.length},
     checks,
     blockers,
     limitations:[
