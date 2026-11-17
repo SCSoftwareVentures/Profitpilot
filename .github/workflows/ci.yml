@@ -100,6 +100,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/022_provider_erasure_authorization.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/023_identity_issuer_binding.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/024_discarded_import_retention.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/025_runtime_acl_and_catalog_guard.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:
@@ -128,6 +129,7 @@ jobs:
           node --test tests/account-closure.integration.test.js
           node --test tests/import-retention.integration.test.js
           node --test tests/api.integration.test.js
+          node --test tests/tenant-isolation-catalog.integration.test.js
 
       - name: Exercise real PostgreSQL backup and recovery privacy gate
         env:
