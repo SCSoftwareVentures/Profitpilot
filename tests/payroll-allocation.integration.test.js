@@ -205,6 +205,33 @@ test("independent payroll decisions, exact source reconciliation and maker-check
    /immutable/i,"confirmed allocation runs are immutable even for a migration administrator");
   await assert.rejects(()=>admin.query("UPDATE allocation_lines SET amount=amount+1 WHERE allocation_run_id=$1",[allocation.id]),
    /immutable/i,"confirmed site lines are immutable");
+  // Same client-backed workflow now feeds a service-period evidence snapshot.
+  const contract=randomUUID(),version=randomUUID(),invoice=randomUUID(),invoiceLine=randomUUID(),match=randomUUID();
+  await admin.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name) VALUES($1,$2,$3,'Synthetic report customer')",[contract,tenantA,businessA]);
+  await admin.query("INSERT INTO contract_versions(id,tenant_id,contract_id,version_no,effective_from,price,billing_basis,approved_by,approved_at) VALUES($1,$2,$3,1,'2026-02-01',120.01,'fixed',$4,now())",[version,tenantA,contract,owner]);
+  // Invoice date is outside the period; confirmed service dates govern attribution.
+  await admin.query("INSERT INTO invoices(id,tenant_id,direction,invoice_number,invoice_date,total_amount,currency,tax_basis,source_ref) VALUES($1,$2,'customer',$3,'2026-03-01',120.01,'AUD','gst_exclusive','SYNTHETIC-REPORT')",[invoice,tenantA,"report-"+randomUUID()]);
+  await admin.query("INSERT INTO invoice_lines(id,tenant_id,invoice_id,line_number,description,amount) VALUES($1,$2,$3,1,'Synthetic service',120.01)",[invoiceLine,tenantA,invoice]);
+  await admin.query("INSERT INTO match_reviews(id,tenant_id,invoice_line_id,contract_id,site_id,service_period_start,service_period_end,confidence,decision,reviewer_id,reviewed_at) VALUES($1,$2,$3,$4,$5,'2026-02-01','2026-02-14','HIGH','confirmed',$6,now())",[match,tenantA,invoiceLine,contract,siteA,reviewer]);
+  const reportPath=path(tenantA)+"/calculations";
+  const reportBody={contractId:contract,siteId:siteA,periodStart:"2026-02-01",periodEnd:"2026-02-14"};
+  const reportReply=await send("POST",reportPath,"ci-payroll-importer",reportBody);
+  assert.equal(reportReply.status,201,await reportReply.clone().text());
+  const report=await reportReply.json();
+  assert.equal(report.formulaVersion,"0.2.0");
+  assert.deepEqual([report.outputs.revenue,report.outputs.directLabour,report.outputs.approvedAllocatedLabour,report.outputs.contribution,report.outputs.marginPercent],["120.01","60.00","20.00","40.01",null]);
+  assert.equal(report.outputs.poolContext.unallocated,"10.00");
+  const snapshot=await send("GET",reportPath+"/"+report.id,"ci-payroll-reviewer");
+  assert.equal(snapshot.status,200);
+  const savedReport=await snapshot.json();
+  assert.equal(savedReport.inputs.invoiceEvidence[0].matchId,match);
+  assert.equal(savedReport.inputs.payrollEvidence.length,2);
+  assert.equal(savedReport.completeness,"incomplete");
+  assert.equal(JSON.stringify(savedReport).includes("SYNTHETIC-DIRECT-EVIDENCE"),false);
+  assert.equal((await send("GET",path(tenantB)+"/calculations/"+report.id,"ci-payroll-outside")).status,404);
+  assert.equal((await send("POST",reportPath,"ci-payroll-importer",{...reportBody,periodEnd:"2026-02-10"})).status,422);
+  await admin.query("INSERT INTO contracts(tenant_id,business_id,customer_name) VALUES($1,$2,'Competing contract')",[tenantA,businessA]);
+  assert.equal((await send("POST",reportPath,"ci-payroll-importer",reportBody)).status,422,"shared business contract costs cannot be double-counted");
   const auditState=await admin.query("SELECT * FROM private.verify_audit_chain($1)",[tenantA]);
   assert.equal(auditState.rows[0].is_valid,true,"payroll approvals preserve tamper-evident audit chain");
  }finally{

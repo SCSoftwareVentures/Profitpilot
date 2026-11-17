@@ -71,3 +71,7 @@ Corrections create a new calculation version and restatement linking old/new run
 8. Duplicate imports are idempotent and reviewable.
 9. Restatement preserves prior run.
 10. Incomplete periods remain distinguishable.
+
+## Implementation 0.2.0 — conservative partial report
+
+The API calculation run snapshots confirmed medium/high reviewed customer invoice matches by explicit service period and approved site payroll lines in one database statement. It requires one full-period approved AUD contract version and exactly one contract in the business (including inactive contracts, conservatively). Partial overlaps, unknown/mixed/GST-inclusive revenue bases, overlapping payroll pools and excessive evidence are rejected. Integer cents preserve precision. The snapshot includes opaque match, line, pool and allocation IDs, amounts and period bounds but no raw source references or personal payroll records. Returned contribution is revenue less included site labour only, always incomplete; definitive margin is null. Pool context is whole-source context, not additional contract costs. Supplier/other costs, explicit multi-contract attribution, coverage denominators, restatement linkage and external source verification remain future work. Never sum overlapping report runs.

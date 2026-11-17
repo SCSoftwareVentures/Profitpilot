@@ -423,7 +423,7 @@ paths:
       - $ref: '#/components/parameters/TenantId'
     post:
       summary: Create a versioned contract/site/period calculation run
-      description: Server calculates from immutable input versions; no client-supplied output totals are trusted.
+      description: Version 0.2.0 captures confirmed service-period invoice matches and approved site payroll in one evidence snapshot. Single-contract businesses only; exact AUD decimal strings, incomplete partial contribution, margin suppressed. No client-supplied totals.
       responses:
         "201": { description: Calculation run created }
         "422": { description: Insufficient or unreconciled source evidence }
