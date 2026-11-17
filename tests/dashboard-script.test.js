@@ -45,3 +45,12 @@ test("dashboard exposes the synthetic Job Readiness Engine workflow",async()=>{
   assert.match(html,/Ready for human decision/);
   assert.match(html,/never approves the job automatically/);
 });
+
+test("dashboard exposes a synthetic append-only Promise Ledger timeline",async()=>{
+  const html=await readFile(htmlPath,"utf8");
+  assert.match(html,/data-view="promises"/);
+  assert.match(html,/id="promises"/);
+  assert.match(html,/appendPromiseEvent\(\{events:promiseProposed\.events/);
+  assert.match(html,/This synthetic timeline/);
+  assert.match(html,/does not send messages/);
+});
