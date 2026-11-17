@@ -459,3 +459,13 @@ Owner-authorised synthetic/test-only implementations have been added for all six
 The synthetic browser dashboard now exposes a panel for each domain. These are initial domain and demonstration foundations, not production-complete features. Persistence, server-side authorisation, source provenance enforcement, full workflow lifecycle, secure file handling, integrations and specialist assurance remain outstanding.
 
 An initial CI run on the first integration attempt exposed syntax defects caused by literal escaped newline sequences in two modules and one test file. These were corrected on the branch. Exact-head CI for the corrected tree is pending and must pass before these additions are marked verified. Do not infer production readiness from domain unit tests or a browser demonstration.
+
+
+## 27. Exact-head CI — six differentiator foundations and hardening — 17 November 2026
+
+Exact hardening branch head `b9821de5ad84a223d8f43e0fc53a85b437b56d5e` passed GitHub Actions run **#43990160842 (run #931)**.
+
+- Verify (Node.js 22): 118 tests, 115 passed, 0 failed, 3 database-dependent skips.
+- PostgreSQL 16: migrations through 014; tenant/FK catalogue audit; restricted-role RLS; authenticated API integration; production image build; verified TLS trusted-CA acceptance and untrusted-CA rejection; production-mode database health. All steps passed.
+
+This confirms the configured CI on the exact head containing the initial six differentiator domain foundations and synthetic dashboard panels. It does not establish full feature completeness, full financial acceptance, independent security/accounting/legal assurance, production approval or customer validation. Keep PR #28 draft and unmerged.
