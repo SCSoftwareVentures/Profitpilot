@@ -68,6 +68,8 @@ CREATE FUNCTION private.guard_quarantined_batch_ingestion()
 RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $fn$
 BEGIN
  IF session_user='profitpilot_app' AND private.current_tenant_id() IS DISTINCT FROM NEW.tenant_id THEN RETURN NEW; END IF;
+ -- Serialize with the upload transaction, including direct runtime SQL writes.
+ PERFORM 1 FROM public.import_batches WHERE tenant_id=NEW.tenant_id AND id=NEW.batch_id FOR UPDATE;
  IF EXISTS(SELECT 1 FROM private.quarantined_files WHERE tenant_id=NEW.tenant_id AND batch_id=NEW.batch_id) THEN
   RAISE EXCEPTION 'Quarantined file is not approved for ingestion' USING ERRCODE='23514';
  END IF;
