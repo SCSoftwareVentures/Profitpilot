@@ -12,8 +12,9 @@ const enabled=Boolean(process.env.TEST_ADMIN_DATABASE_URL&&process.env.TEST_APP_
 test("every tenant-scoped API route denies cross-business accounts before request handling",{
  skip:!enabled
 },async()=>{
- const tenantA="11111111-1111-4111-8111-111111111111";
- const tenantB="22222222-2222-4222-8222-222222222222";
+ // Use dedicated organizations: object-level test data must never pollute other CI suites.
+ const tenantA="91111111-1111-4111-8111-111111111111";
+ const tenantB="92222222-2222-4222-8222-222222222222";
  const userA="abcabcab-1111-4111-8111-111111111111";
  const userB="bcbcbcbc-2222-4222-8222-222222222222";
  const subjectA="ci-route-a";
