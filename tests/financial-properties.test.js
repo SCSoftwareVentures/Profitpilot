@@ -65,8 +65,8 @@ test("PROP-005/013 — unknown amounts remain invalid and negative credits retai
 
 test("PROP-008/009 — unlike currency and tax basis never aggregate",()=>{
   const base={periodStart:"2026-11-01",periodEnd:"2026-11-30",revenue:"100.00",cost:"50.00"};
-  assert.equal(aggregateMetrics([{...base,currency:"AUD",taxBasis:"gst_exclusive"},{...base,currency:"NZD",taxBasis:"gst_exclusive"}]).complete,false);
-  assert.equal(aggregateMetrics([{...base,currency:"AUD",taxBasis:"gst_exclusive"},{...base,currency:"AUD",taxBasis:"gst_inclusive"}]).complete,false);
+  assert.equal(aggregateMetrics([{...base,currency:"AUD",taxBasis:"gst_exclusive"},{...base,currency:"NZD",taxBasis:"gst_exclusive"}]).aggregationValid,false);
+  assert.equal(aggregateMetrics([{...base,currency:"AUD",taxBasis:"gst_exclusive"},{...base,currency:"AUD",taxBasis:"gst_inclusive"}]).aggregationValid,false);
 });
 
 test("PROP-005/006 — missing and unconfirmed invoice values cannot enter valid candidate totals",()=>{
