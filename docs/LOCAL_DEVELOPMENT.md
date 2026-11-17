@@ -29,6 +29,6 @@ The Compose database initialization scripts run only when the named database vol
 - Invoice row validation is implemented; payroll import validation is not.
 - Do not use real personal, payroll or customer information in this prototype.
 
-The fresh local Compose volume applies migrations through 023. Compose is development-only; the local database connection uses no TLS and must never be exposed or used with real customer data. Existing volumes require an explicit migration; do not erase them. CI is the verification path, not a production deployment.
+The fresh local Compose volume applies migrations through 024. Compose is development-only; the local database connection uses no TLS and must never be exposed or used with real customer data. Existing volumes require an explicit migration; do not erase them. CI is the verification path, not a production deployment.
 
 Provision synthetic users with the exact configured AUTH_ISSUER in auth_issuer. Existing users without a verified binding cannot authenticate; no automatic backfill is performed.

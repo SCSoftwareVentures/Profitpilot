@@ -99,6 +99,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/021_closed_session_retention.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/022_provider_erasure_authorization.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/023_identity_issuer_binding.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/024_discarded_import_retention.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:
@@ -125,6 +126,7 @@ jobs:
           npm install --no-audit --no-fund
           export TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot"
           node --test tests/account-closure.integration.test.js
+          node --test tests/import-retention.integration.test.js
           node --test tests/api.integration.test.js
 
       - name: Exercise real PostgreSQL backup and recovery privacy gate
