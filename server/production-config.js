@@ -11,13 +11,14 @@ export function validateProductionSecrets(env=process.env){
  let url;
  try{url=new URL(env.DATABASE_URL);}catch{throw new Error("Production DATABASE_URL is invalid");}
  if(!["postgres:","postgresql:"].includes(url.protocol)||!url.hostname||!url.username||!url.password)throw new Error("Production database connection requires a valid PostgreSQL URL and credentials");
- if([...url.searchParams.keys()].some(key=>/^ssl/i.test(key)))throw new Error("Database URL must not override verified TLS configuration");
+ if(url.search||url.hash)throw new Error("Database URL must not override verified connection configuration");
+ if(decodeURIComponent(url.username)!=="profitpilot_app")throw new Error("Production database connection must use the restricted application role");
  if(env.DATABASE_SSL!=="true")throw new Error("Production database TLS must be enabled");
  if(!env.DATABASE_SSL_CA?.trim())throw new Error("Production database TLS trust anchor is required");
  if(!env.AUTH_ISSUER||!env.AUTH_AUDIENCE||!env.AUTH_JWKS_URL)throw new Error("Production authentication configuration is incomplete");
  for(const [name,value] of [["AUTH_ISSUER",env.AUTH_ISSUER],["AUTH_JWKS_URL",env.AUTH_JWKS_URL]]){
   let endpoint;
   try{endpoint=new URL(value);}catch{throw new Error(name+" must be a valid HTTPS URL");}
-  if(endpoint.protocol!=="https:")throw new Error(name+" must use HTTPS");
+  if(endpoint.protocol!=="https:"||endpoint.username||endpoint.password||endpoint.hash||endpoint.search)throw new Error(name+" must use a verified plain HTTPS endpoint");
  }
 }
