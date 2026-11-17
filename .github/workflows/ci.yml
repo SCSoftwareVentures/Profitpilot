@@ -94,6 +94,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/016_privacy_controlled_redaction.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/017_privacy_approval_invalidation.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/018_account_closure.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/019_privacy_restore_safeguards.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:
@@ -110,7 +111,9 @@ jobs:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
           npm install --no-audit --no-fund
-          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/api.integration.test.js
+          export TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot"
+          node --test tests/account-closure.integration.test.js
+          node --test tests/api.integration.test.js
 
       - name: Verify production database TLS configuration fails closed
         run: |
