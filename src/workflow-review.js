@@ -12,7 +12,7 @@ export function prepareInvoiceReview(rows, contract) {
   return validateInvoiceRows(rows).map(item => {
     const amount = item.record?.amount;
     if (typeof amount !== "string" && typeof amount !== "number") item.errors.push("Invalid amount type");
-    else if (!/^(?:0|[1-9]\\d*)(?:\\.\\d{1,2})?$/.test(String(amount)) || Number(amount) > 999999999999.99) item.errors.push("Amount must be a plain positive decimal with at most two places");
+    else if (!/^(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(String(amount)) || Number(amount) > 999999999999.99) item.errors.push("Amount must be a plain positive decimal with at most two places");
     if (item.errors.length) return {...item, candidate: null, status: "held"};
     const candidate = matchInvoice(item.record, contract);
     return {...item, candidate, status: candidate.confidence === "UNMATCHED" ? "held" : "pending_review"};
