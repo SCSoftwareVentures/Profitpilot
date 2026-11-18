@@ -13,7 +13,7 @@ test("actual authenticated sensitive API: payroll review, own verified account c
  Object.assign(jwk,{kid:"ci-sensitive",alg:"RS256",use:"sig"});
  const keys=createServer((_req,res)=>{res.setHeader("Content-Type","application/json");res.end(JSON.stringify({keys:[jwk]}));});
  await new Promise(r=>keys.listen(0,"127.0.0.1",r));
- process.env.NODE_ENV="test";process.env.DATABASE_URL=process.env.TEST_APP_DATABASE_URL;
+ process.env.NODE_ENV="test";process.env.SYNTHETIC_SECURITY_UI_ENABLED="true";process.env.DATABASE_URL=process.env.TEST_APP_DATABASE_URL;
  process.env.AUTH_ISSUER="https://sensitive-ci.invalid/";process.env.AUTH_AUDIENCE="profitpilot-api";
  process.env.AUTH_JWKS_URL="http://127.0.0.1:"+keys.address().port+"/jwks";
  const [{default:app},{pool:runtime}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);
@@ -29,6 +29,10 @@ test("actual authenticated sensitive API: payroll review, own verified account c
  const expect=async(role,path,status,opts={})=>{const result=await call(role,path,opts);assert.equal(result.status,status,path+" / "+role+" "+JSON.stringify(result.data));return result.data;};
  const hash=s=>createHash("sha256").update(s).digest("hex");
  try{
+  const screen=await fetch(base+"/candidate/security/");
+  assert.equal(screen.status,200);assert.match(screen.headers.get("cache-control"),/no-store/);assert.match(screen.headers.get("content-security-policy"),/script-src 'self'/);
+  assert.match(await screen.text(),/Non-production, synthetic records only/);
+  const script=await fetch(base+"/candidate/security/app.js");assert.equal(script.status,200);assert.match(await script.text(),/credentials:"omit"/);
   await admin.query("INSERT INTO public.tenants(id,legal_name) VALUES($1,'Synthetic sensitive API'),($2,'Synthetic sensitive other')",[t,other]);
   for(const [role,id] of Object.entries(identities))await admin.query("INSERT INTO public.users(id,auth_subject,email) VALUES($1,$2,$3)",[id,subjects[role],"old-"+role+"@example.invalid"]);
   for(const [role,id] of Object.entries(identities))await admin.query("INSERT INTO public.tenant_memberships(tenant_id,user_id,role) VALUES($1,$2,$3)",[t,id,role==="reader"?"read_only":role==="reviewer"?"admin":role]);
