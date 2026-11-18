@@ -66,7 +66,7 @@ BEGIN
  IF NOT FOUND THEN RAISE EXCEPTION 'Payroll proposal unavailable' USING ERRCODE='22023'; END IF;
  SELECT * INTO b FROM public.import_batches WHERE tenant_id=p_tenant AND id=p.batch_id FOR UPDATE;
  IF NOT FOUND OR b.source_type<>'payroll' OR b.status<>'accepted' OR btrim(b.permission_ref)=''
- OR b.file_sha256 !~ '^[a-f0-9]{64}
+ OR b.file_sha256 !~ '^[a-f0-9]{64}$' THEN
   RAISE EXCEPTION 'Payroll source is not accepted' USING ERRCODE='23514'; END IF;
  SELECT * INTO p FROM public.payroll_pools WHERE tenant_id=p_tenant AND id=p.id AND batch_id=b.id FOR UPDATE;
  IF NOT FOUND OR p.period_start IS DISTINCT FROM b.source_period_start OR p.period_end IS DISTINCT FROM b.source_period_end THEN
