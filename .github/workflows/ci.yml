@@ -156,6 +156,8 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/031_minimized_financial_reads.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/032_financial_access_budgets.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/033_startup_key_attestation.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/034_public_runtime_grants.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
 
@@ -211,6 +213,11 @@ jobs:
         env:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: node --test tests/rls-policy-drift.integration.test.js
+
+      - name: Verify exact public runtime grants and adversarial drift
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
+        run: node --test tests/public-runtime-grants.integration.test.js
 
       - name: Verify security privilege gate rejects deliberately unsafe changes
         env:
@@ -309,6 +316,7 @@ jobs:
           psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.catalog.sql
           psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -f tests/rls-policy-inventory.catalog.sql
           psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
+          psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$RESTORE_APP_URL" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.runtime.sql
           TEST_RESTORE_ADMIN_DATABASE_URL="$RESTORE_ADMIN_URL" TEST_RESTORE_APP_DATABASE_URL="$RESTORE_APP_URL" node --test tests/backup-restore.integration.test.js
           psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DROP DATABASE profitpilot_restore_ci'
