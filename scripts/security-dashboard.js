@@ -3,6 +3,7 @@ import {readFileSync} from "node:fs";
 import {timingSafeEqual} from "node:crypto";
 import {pathToFileURL} from "node:url";
 import pg from "pg";
+import {requestBoundaryStatus} from "../server/network-boundary.js";
 import {securityReaderConfig,readSecuritySnapshot,parseSecurityPage} from "./security-command-centre.js";
 const TOKEN=/^[a-f0-9]{64}$/;
 const HEADERS={"Cache-Control":"no-store","Pragma":"no-cache","X-Content-Type-Options":"nosniff","X-Frame-Options":"DENY","Referrer-Policy":"no-referrer","Content-Security-Policy":"default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'","Strict-Transport-Security":"max-age=31536000"};
@@ -15,6 +16,7 @@ export function dashboardHandler({token,authority,snapshot,clock=Date.now}){
   for(const [k,v] of Object.entries(HEADERS))res.setHeader(k,v);
   const send=(status,value,type="application/json; charset=utf-8")=>{res.statusCode=status;res.setHeader("Content-Type",type);res.end(value);};
   const fail=(status)=>send(status,JSON.stringify({error:"Dashboard request denied or unavailable"}));
+  if(requestBoundaryStatus(req)!==0)return fail(400);
   if(req.headers.host!==authority||req.headers.origin&&req.headers.origin!=="https://"+authority||req.headers["sec-fetch-site"]==="cross-site"||req.method!=="GET"||
   req.headers["transfer-encoding"]||req.headers["content-length"]&&req.headers["content-length"]!=="0"||typeof req.url!=="string"||req.url.length>256)return fail(403);
   if(files.has(req.url))return send(200,files.get(req.url),req.url==="/"?"text/html; charset=utf-8":req.url.endsWith(".js")?"text/javascript; charset=utf-8":"text/css; charset=utf-8");
@@ -49,7 +51,10 @@ async function main(){
  try{
   await checkedSecuritySnapshot(pool,{limit:1,cursor:null});
   const server=createServer({key:readFileSync(env.SECURITY_DASHBOARD_TLS_KEY_FILE),cert:readFileSync(env.SECURITY_DASHBOARD_TLS_CERT_FILE),minVersion:"TLSv1.2",maxHeaderSize:8192},dashboardHandler({token,authority:"localhost:"+port,snapshot:page=>checkedSecuritySnapshot(pool,page)}));
-  server.maxHeadersCount=32;server.requestTimeout=8000;server.headersTimeout=5000;server.keepAliveTimeout=2000;server.maxConnections=16;
+  server.maxHeadersCount=0;server.requestTimeout=8000;server.headersTimeout=5000;server.keepAliveTimeout=2000;server.maxConnections=16;
+  server.on("checkContinue",(_req,res)=>{res.writeHead(417,{"Connection":"close","Cache-Control":"no-store"});res.end();});
+  server.on("checkExpectation",(_req,res)=>{res.writeHead(417,{"Connection":"close","Cache-Control":"no-store"});res.end();});
+  server.on("connect",(_req,socket)=>socket.destroy());server.on("upgrade",(_req,socket)=>socket.destroy());
   server.on("error",()=>{process.stderr.write("Security dashboard unavailable.\n");process.exitCode=1;void pool.end();});
   server.listen(port,"127.0.0.1",()=>process.stdout.write("Security dashboard listening on approved local TLS boundary.\n"));
   for(const sig of ["SIGINT","SIGTERM"])process.once(sig,()=>server.close(()=>void pool.end()));
