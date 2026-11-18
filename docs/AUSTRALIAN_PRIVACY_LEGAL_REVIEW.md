@@ -107,3 +107,31 @@ applicability, data processing agreements, published notices, rights workflow,
 retention schedule, independent assessment and counsel sign-off outstanding.
 No launch approval. Re-review whenever features, jurisdiction, data categories,
 processors or the law change.
+
+
+## Core payroll confirmation supplement — 18 November 2026
+
+Exact core baseline 9fb36818c2663a6870678acc04651eab7e60b5fe, CI #1899 passed. New work must be independently reviewed against the final candidate. Private proposal/decision records and confirmation receipts now include tenant, run, reviewer identity, evidence digest, session digest, authentication time and event time. These records are potentially identifiable; neither hashing nor tenant scoping removes privacy obligations. The API remains disabled for these records.
+
+### Counsel decision register (unresolved, no sign-off)
+
+| ID | Question and required deliverable | Release consequence |
+|---|---|---|
+| L-01 | Establish operating entity, turnover, applicable Privacy Act/TFN and other statutory coverage; decide customer/provider responsibilities and exceptions. | No real collection |
+| L-02 | Approve each payroll field and customer instruction, lawful purpose, notice at collection, prohibited identifiers and recipient/processor arrangements. | No payroll intake |
+| L-03 | Reconcile confirmed-evidence immutability with APP 11, record-specific statutory preservation, employee access/correction, disposal, legal holds and backup expiry. Approve a correction/supersession and authorised disposal design that preserves necessary financial integrity. | No live payroll; current freeze must not be represented as a lawful indefinite retention schedule |
+| L-04 | Determine whether any financial recommendation, allocation, rating or other feature triggers APP 1.7–1.9; inventory actual personal data and kinds of significant decisions. Approve required disclosures before MarCom publication or real processing. | No affected feature enabled |
+| L-05 | Confirm real subprocessors, storage/support regions, overseas disclosure protections, breach allocation, retention and exit/return instructions in executed customer and supplier agreements. | No real data transfer |
+| L-06 | Approve privacy policy, collection notice, customer service terms, contractual security claims, rights and complaint procedure, designated contact, refund/termination and non-excludable rights. Review standard-form terms under ACL. | No customer contract or public compliance claim |
+| L-07 | Determine relevant Fair Work, tax, financial services and other obligations from actual product scope; distinguish financial management reporting from payroll processing or payment custody. | No representation of statutory payroll or regulated payment service |
+| L-08 | Approve the NDB incident decision process, record of assessment, confidentiality, retention and notification authority; complete tabletop and independent review. | No production security/legal acceptance |
+
+### Updated primary-source checks
+- OAIC, APP 1 guidance (updated 30 September 2026): https://www.oaic.gov.au/privacy/australian-privacy-principles/australian-privacy-principles-guidelines/chapter-1-app-1-open-and-transparent-management-of-personal-information — additional automated-decision transparency obligations commence 10 December 2026 for covered APP entities when the statutory conditions are satisfied. Do not infer exemption solely from human review.
+- OAIC, employee records exemption: https://www.oaic.gov.au/privacy/privacy-guidance-for-organisations-and-government-agencies/organisations/employee-records-exemption — the employer exemption does not generally extend to external contractors handling these records.
+- Fair Work Ombudsman: https://www.fairwork.gov.au/pay-and-wages/paying-wages/record-keeping — employers must generally retain time and wage records seven years; establish the customer's required record subset rather than retaining every input indefinitely.
+- ACCC: https://www.accc.gov.au/business/selling-products-and-services/contracts — standard-form business contract terms and marketing claims require review; do not disclaim rights that cannot lawfully be excluded.
+- OAIC, NDB: https://www.oaic.gov.au/privacy/notifiable-data-breaches/preventing-preparing-for-and-responding-to-data-breaches/data-breach-preparation-and-response/part-4-notifiable-data-breach-ndb-scheme — assessment period and notification obligations remain separately determined.
+
+### External review acceptance
+Supply counsel with the final feature scope, data flow and field maps, operating entity and actual processor contracts, candidate version, retention schedule, security evidence and draft customer documents. Obtain a confidential dated written opinion covering L-01 through L-08, named reviewer, conditions, remediation evidence and residual risks. The owner must authorize publication and real processing separately. No sign-off, lawyer engagement, consent to launch, or claim of regulatory approval is made by this supplement.
