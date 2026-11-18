@@ -76,3 +76,24 @@ The API emits fixed-schema aggregate interval metrics and threshold-driven activ
 ### Quarantine expiry after recovery
 
 Preserve authoritative, independently controlled expiry receipts (tenant, batch, source checksum and disposal timestamp) alongside the other post-snapshot recovery evidence. Reconcile holds and stop scanners before replay. The administrator-only `private.replay_quarantine_expiry` clears restored transient ciphertext, preserves the accounting batch and adds an expiry event. Receipt mismatch or active hold fails closed; already reconciled matching receipts are idempotent. Do not reopen service until reconciliation is complete. The procedure does not erase older backup copies or authenticate an externally supplied receipt by itself; trusted receipt custody, backup expiry and operational signoff remain required.
+
+### Production startup readiness
+
+Production now refuses to listen until the actual database login, TLS connection,
+restricted role, forced tenant RLS, restricted financial reads, audit permissions,
+private security state and configured active signing key pass readiness checks.
+The key proof uses a domain-separated HMAC, not disclosure of key material.
+The health endpoint rechecks these minimum invariants. It is not a substitute
+for the full CI catalog audit or operational monitoring. Use verified CA
+certificates, independently generated strong keys and runtime-only credentials.
+Reject TLS disable overrides, unsafe database connection overrides and attempts
+to enable the unapproved production quarantine workflow.
+
+Select `AUTH_ACCESS_TOKEN_PROFILE=rfc9068` for a verified access-token type,
+or `token_use_access` for a provider with a verified access-token claim.
+Configure `AUTH_MFA_ACR` to the exact independently reviewed issuer assurance
+value. Production step-up requires both the explicit MFA AMR and matching ACR.
+Verify the provider's actual claim mapping, audience and session revocation in
+an approved staging environment. Do not deploy merely because the synthetic
+CI smoke test passes. The diversity check on secrets rejects obvious weak
+values but does not prove randomness; generate secrets with a CSPRNG.
