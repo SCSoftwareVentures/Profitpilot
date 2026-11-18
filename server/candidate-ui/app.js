@@ -8,6 +8,7 @@ function clear(){epoch++;controller?.abort();controller=null;for(const node of d
 el("clear").addEventListener("click",clear);
 el("new-order").addEventListener("click",()=>{if(!busy)el("order").value=crypto.randomUUID();});
 el("new-case").addEventListener("click",()=>{if(!busy)el("case").value=crypto.randomUUID();});
+el("new-correction").addEventListener("click",()=>{if(!busy)el("correction-order").value=crypto.randomUUID();});
 window.addEventListener("pagehide",clear);
 async function operation(action){
  if(busy)return;
@@ -36,10 +37,19 @@ async function operation(action){
     if(["intake","resolve","refuse"].includes(action))body.evidenceDigest=digest("case-evidence");
     el("case-confirm").checked=false;break;
    }
+   case "correction-preview":path="/payroll/runs/"+clean("correction-old")+"/correction-preview";body={proposalId:clean("correction-proposal"),reason:el("correction-reason").value,authorityEvidenceDigest:digest("correction-evidence")};break;
+   case "correction-status":path="/payroll/corrections/"+clean("correction-order");break;
+   case "correction-step":{
+    checked("correction-confirm");path="/payroll/corrections/"+clean("correction-order");
+    const step=el("correction-step").value;
+    body={oldRunId:clean("correction-old"),proposalId:clean("correction-proposal"),reason:el("correction-reason").value,authorityEvidenceDigest:digest("correction-evidence"),scopeDigest:digest("correction-scope"),step,confirm:true};
+    if(step==="consume")body.proposalDigest=digest("correction-digest");
+    el("correction-confirm").checked=false;break;
+   }
    default:throw Error("Unknown operation.");
   }
   busy=true;active=true;controller=new AbortController();
-  for(const b of document.querySelectorAll("button[data-operation],#new-order,#new-case"))b.disabled=true;
+  for(const b of document.querySelectorAll("button[data-operation],#new-order,#new-case,#new-correction"))b.disabled=true;
   el("status").textContent="Request in progress.";
   const res=await fetch("/v1/tenants/"+t+path,{method:body===undefined?"GET":"POST",headers:{Authorization:"Bearer "+token,...(body===undefined?{}:{"Content-Type":"application/json"})},credentials:"omit",cache:"no-store",redirect:"error",signal:controller.signal,body:body===undefined?undefined:JSON.stringify(body)});
   const data=await res.json();
@@ -50,7 +60,14 @@ async function operation(action){
    el("proposal").value=data.proposalId;el("digest").value=data.evidenceDigest;
   }
   if(res.ok&&action==="preview"&&sha.test(data.scopeDigest||""))el("scope").value=data.scopeDigest;
+  if(res.ok&&action==="correction-preview"&&sha.test(data.scopeDigest||"")&&sha.test(data.proposalDigest||"")){
+   el("correction-scope").value=data.scopeDigest;el("correction-digest").value=data.proposalDigest;
+  }
+  if(res.ok&&action==="correction-status"&&uuid.test(data.oldRunId||"")&&uuid.test(data.proposalId||"")&&sha.test(data.scopeDigest||"")&&sha.test(data.proposalDigest||"")&&sha.test(data.authorityEvidenceDigest||"")){
+   el("correction-old").value=data.oldRunId;el("correction-proposal").value=data.proposalId;el("correction-scope").value=data.scopeDigest;el("correction-digest").value=data.proposalDigest;el("correction-evidence").value=data.authorityEvidenceDigest;el("correction-reason").value=data.reason;
+   el("correction-confirm").checked=false;
+  }
  }catch(e){if(current===epoch)el("status").textContent=e.name==="AbortError"?"Request cancelled.":(active?"Request unavailable.":e.message);}
- finally{if(active){busy=false;controller=null;for(const b of document.querySelectorAll("button[data-operation],#new-order,#new-case"))b.disabled=false;}}
+ finally{if(active){busy=false;controller=null;for(const b of document.querySelectorAll("button[data-operation],#new-order,#new-case,#new-correction"))b.disabled=false;}}
 }
 for(const node of document.querySelectorAll("button[data-operation]"))node.addEventListener("click",()=>operation(node.dataset.operation));
