@@ -71,3 +71,14 @@ test("malformed review decisions fail closed",()=>{
   assert.throws(()=>syntheticPeriodReport({rows,decisions:[bad],contract}));
  }
 });
+
+test("duplicate invoice IDs fail before confirmation, ignoring case and surrounding spaces",()=>{
+ const duplicated=[rows[0],{...rows[0],invoice_id:" inv1 ",__rowNumber:"3"}];
+ assert.throws(()=>syntheticPeriodReport({rows:duplicated,decisions:[],contract}),/Duplicate source invoice ID/);
+});
+test("distinct invoice IDs are accepted as separate review candidates",()=>{
+ const distinct=[rows[0],{...rows[0],invoice_id:"INV2",__rowNumber:"3"}];
+ const report=syntheticPeriodReport({rows:distinct,decisions:[],contract});
+ assert.equal(report.entries.length,2);
+ assert.equal(report.confirmedInvoiceAmount,0);
+});
