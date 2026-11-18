@@ -24,3 +24,19 @@ test("negative allocation is rejected",()=>assert.equal(allocatePayroll({pool:10
 test("amount-only match is unmatched",()=>assert.equal(matchInvoice({amount:100},{site:"A",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).confidence,"UNMATCHED"));
 test("match candidate always needs human confirmation",()=>assert.equal(matchInvoice({site:"A",date:"2026-11-05",amount:100},{id:"c",site:"A",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).requiresHumanConfirmation,true));
 test("metrics aggregate totals and margin",()=>{const r=aggregateMetrics([{revenue:1000,cost:600},{revenue:500,cost:250}]);assert.deepEqual([r.revenue,r.cost,r.contribution,r.margin],[1500,850,650,43.33]);});
+
+test("payroll reconciles one hundred ten-cent allocations exactly",()=>{
+ const r=allocatePayroll({pool:"10.00",direct:Array.from({length:100},()=>({site:"A",amount:"0.10"}))});
+ assert.equal(r.reconciles,true);
+ assert.equal(r.siteTotals.A,10);
+ assert.equal(r.unallocated,0);
+});
+test("payroll rejects sub-cent, nonnumeric, and unsafe amounts",()=>{
+ for(const value of ["0.001","abc","Infinity","90071992547409.92"]){
+  assert.equal(allocatePayroll({pool:100,direct:[{site:"A",amount:value}]}).reconciles,false);
+ }
+});
+test("payroll rejects missing site and missing amount",()=>{
+ assert.equal(allocatePayroll({pool:100,direct:[{site:"",amount:10}]}).reconciles,false);
+ assert.equal(allocatePayroll({pool:100,direct:[{site:"A"}]}).reconciles,false);
+});
