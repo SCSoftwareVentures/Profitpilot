@@ -16,6 +16,7 @@ BEGIN
     'private.quarantine_invoice_file(uuid,uuid,text,text,bytea,bytea,bytea)',
     'private.quarantine_status(uuid,uuid)','private.session_authorized(text,bigint,bigint,text,bigint,text,text,text)',
     'private.approve_quarantine_promotion(uuid,uuid)',
+    'private.site_payroll_summary(uuid,uuid,date,date)','private.read_calculation_summary(uuid,uuid)',
     'public.consume_api_rate_limit(text)','public.purge_api_rate_limits()'];
    WHEN 'profitpilot_scanner' THEN expected:=ARRAY[
     'private.claim_quarantine_scan()','private.expire_quarantine_bytes()',
@@ -48,7 +49,7 @@ BEGIN
    -- Workers never access table or sequence data directly. API can use only
    -- reviewed public relations; private tables/sequences and rate counters
    -- remain inaccessible even through column-level grants.
-   IF role_name<>'profitpilot_app' OR t.nspname='private' OR t.relname='api_rate_limits' THEN
+   IF role_name<>'profitpilot_app' OR t.nspname='private' OR t.relname IN ('api_rate_limits','payroll_source_rows','allocation_lines') THEN
     IF t.relkind='S' THEN
      IF has_sequence_privilege(role_name,t.oid,'USAGE,SELECT,UPDATE') THEN RAISE EXCEPTION 'Unexpected direct sequence privilege: % / %.%',role_name,t.nspname,t.relname; END IF;
     ELSE
@@ -60,6 +61,7 @@ BEGIN
    END IF;
   END LOOP;
  END LOOP;
+ IF has_column_privilege('profitpilot_app','public.calculation_runs','inputs','SELECT') OR has_column_privilege('profitpilot_app','public.calculation_runs','outputs','SELECT') THEN RAISE EXCEPTION 'Runtime can read unminimized calculation JSON'; END IF;
  IF EXISTS(
   SELECT 1 FROM pg_proc f JOIN pg_namespace n ON n.oid=f.pronamespace
   CROSS JOIN LATERAL aclexplode(coalesce(f.proacl,acldefault('f',f.proowner))) a
