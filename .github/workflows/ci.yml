@@ -164,6 +164,11 @@ jobs:
           PGPASSWORD: ci-admin-password
         run: psql "postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.catalog.sql
 
+      - name: Verify exact row-level policy inventory and adversarial drift
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
+        run: node --test tests/rls-policy-drift.integration.test.js
+
       - name: Verify tenant RLS with restricted runtime role
         env:
           PGPASSWORD: ci-admin-password
@@ -302,6 +307,7 @@ jobs:
           RESTORE_ADMIN_URL="postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot_restore_ci"
           RESTORE_APP_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot_restore_ci"
           psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.catalog.sql
+          psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -f tests/rls-policy-inventory.catalog.sql
           psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$RESTORE_APP_URL" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.runtime.sql
           TEST_RESTORE_ADMIN_DATABASE_URL="$RESTORE_ADMIN_URL" TEST_RESTORE_APP_DATABASE_URL="$RESTORE_APP_URL" node --test tests/backup-restore.integration.test.js
