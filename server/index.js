@@ -14,7 +14,7 @@ import {proxyTrust,corsOrigins,createBoundedServer} from "./network-boundary.js"
 import {importIntakeGate,promotionProof} from "./intake-security.js";
 import {createReadinessGuard} from "./readiness-guard.js";
 import {productionReleaseGate} from "./release-gate.js";
-import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof} from "./sensitive-operation-proof.js";
+import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof,privacyCaseProof} from "./sensitive-operation-proof.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
 import {quarantineConfig,sealQuarantine,MAX_QUARANTINE_BYTES} from "./quarantine.js";
@@ -49,7 +49,7 @@ app.use("/v1/tenants/:tenantId/imports",importIntakeGate());
 app.use("/v1",express.json({limit:"100kb",inflate:false}));
 app.use("/v1",enforceJsonBudget);
 const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-for(const param of ["batchId","matchId","runId","proposalId","orderId"])app.param(param,(req,res,next,value)=>uuidPattern.test(value)?next():res.status(400).json({error:"Invalid resource ID"}));
+for(const param of ["batchId","matchId","runId","proposalId","orderId","caseId"])app.param(param,(req,res,next,value)=>uuidPattern.test(value)?next():res.status(400).json({error:"Invalid resource ID"}));
 const requestTenant=(req,tenantId,fn)=>withTenant(tenantId,req.identity.subject,fn,req.identity);
 
 async function membership(req,res,next){
@@ -337,6 +337,29 @@ app.post("/v1/tenants/:tenantId/privacy/invoices/:batchId/disposals/:orderId",me
   const proof=securityWorkProof(tenant,order,"privacy_disposal",req.body.scopeDigest,req.body.step,req.identity);
   const [t,o,_kind,scope,step,...authority]=proof;
   return res.json(await sensitiveQuery(req,"SELECT private.api_invoice_disposal_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",[t,o,batch,scope,step,...authority]));
+ }catch(e){return failSensitive(e,res,next);}
+});
+
+
+const privacyActionMap={request:"privacy_case_request",intake:"privacy_case_intake",acknowledge:"privacy_case_acknowledge",resolve:"privacy_case_resolve",refuse:"privacy_case_refuse"};
+app.post("/v1/tenants/:tenantId/privacy/cases/:caseId",membership,requireRole("owner","admin","analyst","reviewer","read_only"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!req.body||!Object.hasOwn(privacyActionMap,req.body.action)||req.body.confirm!==true)return res.status(400).json({error:"Explicit privacy case action required"});
+  const a=req.body.action,opening=a==="request"||a==="intake",outcome=a==="resolve"||a==="refuse";
+  const keys=["action","confirm",...(opening?["kind"]:[]),...(outcome?["reasonCode"]:[]),...(a==="intake"||outcome?["evidenceDigest"]:[])];
+  if(!exactBody(req.body,keys))return res.status(400).json({error:"Unsupported privacy case inputs"});
+  const tenant=req.membership.tenantId,id=req.params.caseId.toLowerCase(),kind=opening?req.body.kind:null,reason=outcome?req.body.reasonCode:null,evidence=a==="intake"||outcome?req.body.evidenceDigest:null;
+  if(a!=="request"&&!["owner","admin"].includes(req.membership.role))return res.status(403).json({error:"Sensitive operation denied"});
+  const proof=privacyCaseProof(tenant,id,privacyActionMap[a],kind,reason,evidence,req.identity);
+  const result=await sensitiveQuery(req,"SELECT private.api_privacy_rights_case($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) AS result",[...proof,kind,reason,evidence]);
+  return res.json(result);
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/privacy/cases/:caseId",membership,requireRole("owner","admin","analyst","reviewer","read_only"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  const tenant=req.membership.tenantId,id=req.params.caseId.toLowerCase(),proof=privacyCaseProof(tenant,id,"privacy_case_status",null,null,null,req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_rights_case($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) AS result",[...proof,null,null,null]));
  }catch(e){return failSensitive(e,res,next);}
 });
 
