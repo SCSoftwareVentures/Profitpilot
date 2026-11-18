@@ -11,6 +11,7 @@ import {validateProductionSecrets} from "./production-config.js";
 import {MAX_BATCH_ROWS,createRequestAdmission,enforceJsonBudget} from "./request-budget.js";
 import {proxyTrust,corsOrigins,createBoundedServer} from "./network-boundary.js";
 import {importIntakeGate,promotionProof} from "./intake-security.js";
+import {createReadinessGuard} from "./readiness-guard.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
 import {quarantineConfig,sealQuarantine,MAX_QUARANTINE_BYTES} from "./quarantine.js";
@@ -27,11 +28,13 @@ app.use((req,res,next)=>{res.set("Cache-Control","no-store");res.set("Pragma","n
 app.use(helmet());
 app.use(createRequestAdmission(32));
 app.use(cors({origin:corsOrigins(),credentials:false,methods:["GET","POST"]}));
+const readiness=createReadinessGuard(health);
+if(process.env.NODE_ENV==="production")app.use(readiness.middleware);
 app.use(process.env.NODE_ENV==="production"?sharedLimiter({windowMs:60_000,limit:100,scope:"global"}):rateLimit({windowMs:60_000,limit:100,standardHeaders:true,legacyHeaders:false}));
 // Production shares write counters across replicas; development uses local counters.
 const mutationLimiter=process.env.NODE_ENV==="production"?sharedLimiter({windowMs:60_000,limit:60,scope:"write"}):rateLimit({windowMs:60_000,limit:60,standardHeaders:true,legacyHeaders:false,message:{error:"Too many write requests; retry later"}});
 app.use("/v1/tenants/:tenantId",(req,res,next)=>req.method==="POST"?mutationLimiter(req,res,next):next());
-app.get("/health",async(req,res)=>{try{await health();res.json({status:"ok",database:"connected"});}catch{res.status(503).json({status:"unavailable"});}});
+app.get("/health",async(req,res)=>{try{if(process.env.NODE_ENV==="production"){if(!await readiness.check())throw new Error("Not ready");}else await health();res.json({status:"ok",database:"connected"});}catch{res.status(503).json({status:"unavailable"});}});
 app.use("/v1",authRequired());
 app.use("/v1",sessionRequired(checkIdentitySession));
 app.use("/v1/tenants/:tenantId/imports",importIntakeGate());
@@ -261,7 +264,7 @@ app.post("/v1/tenants/:tenantId/calculations/:runId/export",membership,requireRo
 app.use((err,req,res,next)=>{if(res.destroyed||res.writableEnded)return;if(res.headersSent)return next(err);const id=randomUUID();const status=err.code==="P4501"?429:err.code==="23505"?409:err.code==="54000"?413:err.code==="22P02"||err.code==="22P05"?400:err.status===503?503:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);if(status===503)res.set("Retry-After","5");if(err.code==="P4501")res.set("Retry-After","3600");process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:err.code==="P4501"?"Financial access limit reached; retry later":status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":status===503?"Request capacity temporarily unavailable":"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
 if(process.env.NODE_ENV==="production"){
- try{await health();}
+ try{if(!await readiness.check())throw new Error("Not ready");}
  catch{process.stderr.write("Production database readiness checks failed; refusing to start.\n");await import("./db.js").then(m=>m.pool.end());process.exit(1);}
  startRateLimitRetention();securityMonitor.start();
 }
