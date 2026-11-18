@@ -10,6 +10,7 @@ import {withTenant,health,checkIdentitySession} from "./db.js";
 import {validateProductionSecrets} from "./production-config.js";
 import {MAX_BATCH_ROWS,createRequestAdmission,enforceJsonBudget} from "./request-budget.js";
 import {proxyTrust,corsOrigins,createBoundedServer} from "./network-boundary.js";
+import {importIntakeGate,promotionProof} from "./intake-security.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
 import {quarantineConfig,sealQuarantine,MAX_QUARANTINE_BYTES} from "./quarantine.js";
@@ -33,6 +34,7 @@ app.use("/v1/tenants/:tenantId",(req,res,next)=>req.method==="POST"?mutationLimi
 app.get("/health",async(req,res)=>{try{await health();res.json({status:"ok",database:"connected"});}catch{res.status(503).json({status:"unavailable"});}});
 app.use("/v1",authRequired());
 app.use("/v1",sessionRequired(checkIdentitySession));
+app.use("/v1/tenants/:tenantId/imports",importIntakeGate());
 app.use("/v1",express.json({limit:"100kb",inflate:false}));
 app.use("/v1",enforceJsonBudget);
 const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -229,7 +231,7 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/file/approve",membership,requir
  const batch=req.params.batchId.toLowerCase(),tenant=req.membership.tenantId;
  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(batch)||Object.keys(req.body||{}).length!==0)return res.status(400).json({error:"Invalid approval request"});
  try{
-  const approved=await requestTenant(req,tenant,async c=>(await c.query("SELECT private.approve_quarantine_promotion($1,$2) AS approved",[tenant,batch])).rows[0].approved);
+  const approved=await requestTenant(req,tenant,async c=>(await c.query("SELECT private.approve_quarantine_promotion_attested($1,$2,$3,$4,$5,$6,$7,$8,$9) AS approved",promotionProof(tenant,batch,req.identity))).rows[0].approved);
   if(!approved)return res.status(404).json({error:"Import batch not found"});
   res.status(202).json({batchId:batch,status:"approved_for_processing"});
  }catch(e){
