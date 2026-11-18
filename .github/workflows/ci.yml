@@ -142,6 +142,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/030_invoice_batch_budget.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/031_minimized_financial_reads.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/032_financial_access_budgets.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/033_startup_key_attestation.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
 
