@@ -12,6 +12,13 @@ BEGIN
    ))
   ORDER BY c.relname
  LOOP
+  IF NOT has_table_privilege(current_user,format('public.%I',r.relname),'SELECT') AND NOT has_any_column_privilege(current_user,format('public.%I',r.relname),'SELECT') THEN
+   BEGIN
+    EXECUTE format('SELECT count(*) FROM public.%I',r.relname) INTO n;
+    RAISE EXCEPTION 'Restricted table % unexpectedly readable',r.relname;
+   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+   checked:=checked+1; CONTINUE;
+  END IF;
   EXECUTE format('SELECT count(*) FROM public.%I',r.relname) INTO n;
   IF n<>0 THEN RAISE EXCEPTION 'Unscoped runtime role can read % row(s) from public.%',n,r.relname; END IF;
   checked:=checked+1;
