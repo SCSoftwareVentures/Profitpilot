@@ -28,13 +28,22 @@ export function inspectTrackedFile(path,text){
 export function validateLock(manifest,lock){
  if(lock.lockfileVersion!==3||!lock.packages||!lock.packages[""])throw new Error("Expected npm lockfile v3");
  const direct={...(manifest.dependencies||{}),...(manifest.devDependencies||{}),...(manifest.optionalDependencies||{})};
+ for(const field of ["dependencies","devDependencies","optionalDependencies"]){
+  const declared=manifest[field]||{},locked=lock.packages[""][field]||{};
+  if(Object.keys(declared).length!==Object.keys(locked).length||Object.entries(declared).some(([name,version])=>locked[name]!==version))
+   throw new Error("Manifest and lockfile root dependencies differ");
+ }
  for(const [name,version] of Object.entries(direct)){
   if(typeof version!=="string"||!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(version)||lock.packages["node_modules/"+name]?.version!==version)throw new Error("Direct dependencies must use exact locked versions");
  }
  for(const [path,entry] of Object.entries(lock.packages)){
   if(!path)continue;
+  const name=path.split("node_modules/").at(-1);
+  const namePattern=/^(?:@[a-z0-9._-]+\/)?[a-z0-9._-]+$/;
+  if(!path.startsWith("node_modules/")||!namePattern.test(name)||!/^(\d+\.\d+\.\d+)(?:-[0-9A-Za-z.-]+)?$/.test(entry.version)||entry.name&&entry.name!==name)
+   throw new Error("Dependency identity does not match a locked registry package");
   let url;try{url=new URL(entry.resolved);}catch{throw new Error("Dependency has no valid registry source");}
-  if(url.origin!=="https://registry.npmjs.org"||url.username||url.password||url.search||url.hash||!url.pathname.endsWith(".tgz")||
+  if(url.origin!=="https://registry.npmjs.org"||url.username||url.password||url.search||url.hash||url.pathname!=="/"+name+"/-/"+name.split("/").at(-1)+"-"+entry.version+".tgz"||
    typeof entry.integrity!=="string"||!/^sha512-[A-Za-z0-9+/]{86}==$/.test(entry.integrity)||entry.link||entry.hasInstallScript)
     throw new Error("Dependency violates registry integrity or install-script policy");
  }
