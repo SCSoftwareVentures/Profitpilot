@@ -238,3 +238,27 @@ The bounded inventory supports at most 100,000 records (32 MB package);
 larger installations must use a reviewed paginated or checkpointed protocol.
 Retention periods, destruction of old encrypted archives and legal hold
 releases require separate legal/operational approval.
+
+### Production intake and asynchronous authorization boundary
+
+Migration 038 and the intake middleware close the previously available
+production metadata, parsed-row, validation, upload and approval routes
+before body parsing. This is intentionally not a configurable bypass.
+The synthetic non-production workflow remains operational. Enabling live
+intake requires a reviewed code change after legal, scanner, identity,
+storage, retention, hosting and independent security acceptance.
+Direct access by trusted administrators is outside this API middleware
+boundary; do not expose database credentials or permit customer SQL access.
+
+Promotion approvals use a 20-second domain-separated HMAC attestation
+created from the verified recent-MFA identity, tenant, batch, authentication
+timestamp, session digest, nonce and active signing key. The previous
+unattested approval function is no longer callable by the API role.
+Previously queued approvals without a session binding fail closed and must
+be reviewed under a new import workflow. A revocation committed before
+promotion's actor lock prevents promotion; a transaction already completed
+cannot be undone. The worker checks global sign-out cutoffs against the
+authentication timestamp and targeted session revocation while holding the
+actor lock. No access token or raw session ID is persisted. Test cases
+cover proof forgery, cross-batch reuse, targeted revocation after claim and
+an unaffected separate session. This is not live IdP/scanner validation.
