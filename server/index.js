@@ -8,6 +8,7 @@ import {sharedLimiter,startRateLimitRetention} from "./shared-rate-limit.js";
 import {randomUUID,createHash} from "node:crypto";
 import {withTenant,health,checkIdentitySession} from "./db.js";
 import {validateProductionSecrets} from "./production-config.js";
+import {MAX_BATCH_ROWS,createRequestAdmission,enforceJsonBudget} from "./request-budget.js";
 import {proxyTrust,corsOrigins,createBoundedServer} from "./network-boundary.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
@@ -22,6 +23,7 @@ const securityMonitor=createSecurityMonitor();
 app.use(securityMonitor.middleware);
 // Set privacy headers even for rejected or throttled requests.
 app.use("/v1",(req,res,next)=>{res.set("Cache-Control","no-store");res.set("Pragma","no-cache");next();});
+app.use("/v1",createRequestAdmission(32));
 app.use(helmet());
 app.use(cors({origin:corsOrigins(),credentials:false,methods:["GET","POST"]}));
 app.use(process.env.NODE_ENV==="production"?sharedLimiter({windowMs:60_000,limit:100,scope:"global"}):rateLimit({windowMs:60_000,limit:100,standardHeaders:true,legacyHeaders:false}));
@@ -32,6 +34,9 @@ app.get("/health",async(req,res)=>{try{await health();res.json({status:"ok",data
 app.use("/v1",authRequired());
 app.use("/v1",sessionRequired(checkIdentitySession));
 app.use("/v1",express.json({limit:"100kb",inflate:false}));
+app.use("/v1",enforceJsonBudget);
+const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+for(const param of ["batchId","matchId","runId"])app.param(param,(req,res,next,value)=>uuidPattern.test(value)?next():res.status(400).json({error:"Invalid resource ID"}));
 const requestTenant=(req,tenantId,fn)=>withTenant(tenantId,req.identity.subject,fn,req.identity);
 
 async function membership(req,res,next){
@@ -80,16 +85,11 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requireRole("o
   if(!privacy.rows[0].safe)return {status:422,error:"Invoice rows contain unsupported fields or potentially sensitive information. Use only approved business fields and opaque references."};
   // Preflight every row number before writing any row. A retry is idempotent
   // only when the persisted payload is byte-for-byte equivalent as JSON data.
-  for(let i=0;i<rows.length;i++){
-   const existing=await client.query("SELECT payload = $4::jsonb AS same FROM raw_import_rows WHERE tenant_id=$1 AND batch_id=$2 AND row_number=$3",[req.membership.tenantId,req.params.batchId,startRowNumber+i,JSON.stringify(rows[i])]);
-   if(existing.rowCount&&!existing.rows[0].same)
-    return {status:409,error:"A source row number already exists with different content. Register a corrected source version rather than overwriting import evidence."};
-  }
-  let inserted=0;
-  for(let i=0;i<rows.length;i++){
-   const row=await client.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,$3,$4) ON CONFLICT(batch_id,row_number) DO NOTHING RETURNING id",[req.membership.tenantId,req.params.batchId,startRowNumber+i,JSON.stringify(rows[i])]);
-   inserted+=row.rowCount;
-  }
+  const args=[req.membership.tenantId,req.params.batchId,startRowNumber,JSON.stringify(rows)];
+  const existing=await client.query("SELECT count(*) FILTER (WHERE r.payload IS DISTINCT FROM v.value)::int AS conflicts FROM jsonb_array_elements($4::jsonb) WITH ORDINALITY v(value,n) JOIN raw_import_rows r ON r.tenant_id=$1 AND r.batch_id=$2 AND r.row_number=$3::integer+v.n-1",args);
+  if(existing.rows[0].conflicts)return {status:409,error:"A source row number already exists with different content. Register a corrected source version rather than overwriting import evidence."};
+  const added=await client.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) SELECT $1,$2,($3::integer+v.n-1)::integer,v.value FROM jsonb_array_elements($4::jsonb) WITH ORDINALITY v(value,n) ON CONFLICT(batch_id,row_number) DO NOTHING RETURNING id",args);
+  const inserted=added.rowCount;
   await client.query("UPDATE import_batches SET status='review' WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
   return {status:201,inserted,received:rows.length,duplicates:rows.length-inserted,startRowNumber};
  });
@@ -103,7 +103,8 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requireRol
   if(!batch.rowCount)return {status:404,error:"Import batch not found"};
   if(!["registered","review","validating"].includes(batch.rows[0].status))return {status:409,error:"Import batch is closed for validation"};
   if(!["customer_invoice","supplier_invoice"].includes(batch.rows[0].source_type))return {status:422,error:"This validator currently supports invoice CSV rows only; payroll validation is not implemented."};
-  const raw=await client.query("SELECT id,row_number,payload FROM raw_import_rows WHERE batch_id=$1 AND tenant_id=$2 ORDER BY row_number",[req.params.batchId,req.membership.tenantId]);
+  const raw=await client.query("SELECT id,row_number,payload FROM raw_import_rows WHERE batch_id=$1 AND tenant_id=$2 ORDER BY row_number LIMIT $3",[req.params.batchId,req.membership.tenantId,MAX_BATCH_ROWS+1]);
+  if(raw.rowCount>MAX_BATCH_ROWS)return {status:413,error:"Invoice batch exceeds validation capacity"};
   if(!raw.rowCount)return {status:422,error:"No persisted import rows found. Ingest rows before validation."};
   const checked=validateInvoiceRows(raw.rows.map(r=>({...r.payload,__rowNumber:String(r.row_number)})));
   let valid=0,held=0;
@@ -137,7 +138,7 @@ app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requireRol
 
 app.post("/v1/tenants/:tenantId/calculations",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
  const {contractId,siteId,periodStart,periodEnd}=req.body||{};
- if(!/^[0-9a-f-]{36}$/i.test(contractId||"")||!/^[0-9a-f-]{36}$/i.test(siteId||"")||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodEnd<periodStart)return res.status(400).json({error:"Valid contract, site and period are required"});
+ if(typeof contractId!=="string"||!uuidPattern.test(contractId)||typeof siteId!=="string"||!uuidPattern.test(siteId)||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodEnd<periodStart)return res.status(400).json({error:"Valid contract, site and period are required"});
  const result=await requestTenant(req,req.membership.tenantId,async client=>{
   const base=await client.query("SELECT c.id,cv.version_no,cv.currency,cv.tax_basis FROM contracts c JOIN contract_versions cv ON cv.contract_id=c.id AND cv.tenant_id=c.tenant_id JOIN sites s ON s.id=$2 AND s.tenant_id=c.tenant_id AND s.business_id=c.business_id WHERE c.id=$1 AND c.tenant_id=$3 AND cv.approved_at IS NOT NULL AND cv.approved_by IS NOT NULL AND cv.effective_from <= $4::date AND (cv.effective_to IS NULL OR cv.effective_to >= $5::date)",[contractId,siteId,req.membership.tenantId,periodStart,periodEnd]);
   if(!base.rowCount)return {error:"No matching contract/site and effective contract version for this period"};
@@ -240,7 +241,7 @@ app.post("/v1/tenants/:tenantId/calculations/:runId/export",membership,requireRo
  }catch(e){if(e.code==="42501")return res.status(403).json({error:"Export authority denied"});next(e);}
 });
 
-app.use((err,req,res,next)=>{const id=randomUUID();const status=err.code==="23505"?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":"Internal server error",reference:id});});
+app.use((err,req,res,next)=>{const id=randomUUID();const status=err.code==="23505"?409:err.code==="54000"?413:err.code==="22P02"||err.code==="22P05"?400:err.status===503?503:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);if(status===503)res.set("Retry-After","5");process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":status===503?"Request capacity temporarily unavailable":"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
 if(process.env.NODE_ENV==="production"){startRateLimitRetention();securityMonitor.start();}
 if(process.env.NODE_ENV!=="test")createBoundedServer(app).listen(port,()=>process.stdout.write("ProfitPilot API listening on "+port+"\n"));
