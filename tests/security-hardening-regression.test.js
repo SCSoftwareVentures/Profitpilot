@@ -1,3 +1,4 @@
+import {securityResponsePlan} from "../server/security-response-plan.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import {randomBytes,randomUUID,createHash,createHmac} from "node:crypto";
@@ -45,4 +46,16 @@ test("private references use conservative data minimisation in CSV preflight",()
   assert.throws(()=>inspectInvoiceCsv(Buffer.from(header+"INV-1,"+value+",2026-01-01,10.00")));
  }
  assert.deepEqual(inspectInvoiceCsv(Buffer.from(header+"INV-1,Site A,2026-01-01,10.00")),{rowCount:1});
+});
+
+test("incident triage never auto-releases containment and treats stale telemetry as critical",()=>{
+ const now=Date.parse("2026-11-18T10:00:00Z"),base={observedAt:new Date(now).toISOString(),catalogVerified:true,counts:{activeTenantIncidents:0,temporarilyContainedActors:0,pendingOrRetryableScans:0,pendingOrProcessingPromotions:0,failedPromotions:0}};
+ for(const snapshot of [null,{...base,observedAt:new Date(now-121000).toISOString()},{...base,catalogVerified:false},{...base,counts:{}}]){
+  assert.equal(securityResponsePlan(snapshot,now).severity,"critical");
+  assert.equal(securityResponsePlan(snapshot,now).action,"keep_release_closed_and_escalate");
+ }
+ assert.equal(securityResponsePlan({...base,counts:{...base.counts,activeTenantIncidents:1}},now).action,"retain_tenant_fence_and_escalate");
+ assert.equal(securityResponsePlan({...base,counts:{...base.counts,temporarilyContainedActors:5}},now).severity,"high");
+ assert.equal(securityResponsePlan({...base,counts:{...base.counts,failedPromotions:1}},now).category,"intake_anomaly");
+ assert.equal(securityResponsePlan(base,now).action,"continue_monitoring");
 });
