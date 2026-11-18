@@ -12,7 +12,10 @@ test("live catalog verification detects policy, permissions, trigger and functio
   await assert.rejects(()=>runtime.query("SELECT * FROM private.security_catalog_baseline"),/permission denied/i);
   await assert.rejects(()=>runtime.query("SELECT private.security_catalog_digest()"),/permission denied/i);
   await assert.rejects(()=>c.query("UPDATE private.security_catalog_baseline SET digest=repeat('0',64)"),/append-only/i);
+  const internal=(await c.query("SELECT tgname FROM pg_trigger WHERE tgrelid='public.invoices'::regclass AND tgisinternal ORDER BY tgname LIMIT 1")).rows[0].tgname;
   for(const ddl of [
+   "ALTER TABLE public.invoices DISABLE TRIGGER "+'"'+internal.replaceAll('"','""')+'"',
+   "ALTER ROLE profitpilot_context_owner LOGIN",
    "CREATE POLICY drift_allow ON public.invoices USING(true)",
    "ALTER POLICY tenant_isolation ON public.invoices USING(true)",
    "ALTER TABLE public.invoices NO FORCE ROW LEVEL SECURITY",
