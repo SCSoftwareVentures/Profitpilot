@@ -46,3 +46,15 @@ test("unauthenticated HTTP financial report request is rejected before database 
   assert.equal(body.outputs,undefined);
  }finally{await new Promise((resolve,reject)=>server.close(e=>e?reject(e):resolve()));}
 });
+
+test("reconciliation runs inside calculation creation, never match review",async()=>{
+ const {readFile}=await import("node:fs/promises");
+ const source=await readFile(new URL("../server/index.js",import.meta.url),"utf8");
+ const matchStart=source.indexOf('app.post("/v1/tenants/:tenantId/matches/:matchId/decision"');
+ const calculationStart=source.indexOf('app.post("/v1/tenants/:tenantId/calculations"');
+ const calculationRead=source.indexOf('app.get("/v1/tenants/:tenantId/calculations/:runId"');
+ assert.ok(matchStart>=0&&calculationStart>matchStart&&calculationRead>calculationStart);
+ assert.ok(!source.slice(matchStart,calculationStart).includes("reconcileFinancialReport("));
+ assert.ok(source.slice(calculationStart,calculationRead).includes("const reconciliation=reconcileFinancialReport(outputs,"));
+ assert.ok(source.slice(calculationStart,calculationRead).includes("reconciliation})"));
+});
