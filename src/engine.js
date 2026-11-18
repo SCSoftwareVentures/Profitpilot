@@ -75,11 +75,26 @@ export function matchInvoice(row,contract){
   const confidence=identity&&period&&amount?"MEDIUM":identity&&amount?"LOW":"UNMATCHED";
   return {contractId:contract.id,confidence,evidence:{identity,period,amount},requiresHumanConfirmation:true};
 }
+function contractCents(value) {
+  const cents = payrollCents(value);
+  if (cents === null) throw new Error("Invalid contract amount or unsafe cent precision");
+  return cents;
+}
 export function summariseContracts(contracts){
-  return contracts.map(c=>({...c,revenue:money(c.revenue),cost:money(c.cost),contribution:money(c.revenue-c.cost),margin:c.revenue?money((c.revenue-c.cost)/c.revenue*100):null}));
+  return contracts.map(c=>{
+    const revenueCents=contractCents(c.revenue),costCents=contractCents(c.cost);
+    const contributionCents=revenueCents-costCents;
+    if (contributionCents>BigInt(Number.MAX_SAFE_INTEGER)||contributionCents< -BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Contract contribution exceeds safe cent precision");
+    const revenue=Number(revenueCents)/100,cost=Number(costCents)/100;
+    return {...c,revenue,cost,contribution:Number(contributionCents)/100,margin:revenueCents!==0n?money(Number(contributionCents)*100/Number(revenueCents)):null};
+  });
 }
 export function aggregateMetrics(contracts){
   const rows=summariseContracts(contracts);
-  const revenue=money(rows.reduce((s,r)=>s+r.revenue,0)),cost=money(rows.reduce((s,r)=>s+r.cost,0));
-  return {revenue,cost,contribution:money(revenue-cost),margin:revenue?money((revenue-cost)/revenue*100):null,contracts:rows};
+  const revenueCents=rows.reduce((s,r)=>s+contractCents(r.revenue),0n);
+  const costCents=rows.reduce((s,r)=>s+contractCents(r.cost),0n);
+  const contributionCents=revenueCents-costCents;
+  if ([revenueCents,costCents,contributionCents].some(v=>v>BigInt(Number.MAX_SAFE_INTEGER)||v< -BigInt(Number.MAX_SAFE_INTEGER))) throw new Error("Aggregate exceeds safe cent precision");
+  const revenue=Number(revenueCents)/100,cost=Number(costCents)/100;
+  return {revenue,cost,contribution:Number(contributionCents)/100,margin:revenueCents!==0n?money(Number(contributionCents)*100/Number(revenueCents)):null,contracts:rows};
 }
