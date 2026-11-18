@@ -5,7 +5,7 @@ DECLARE t uuid:=gen_random_uuid(); other_t uuid:=gen_random_uuid(); a uuid:=gen_
  case_id_value uuid:=gen_random_uuid(); blocked_case uuid:=gen_random_uuid(); pending_case uuid:=gen_random_uuid(); order_id_value uuid:=gen_random_uuid();
  who text; actor uuid; phase text; actual_step text; scope_hash text; recipient text:=repeat('a',64); sender text:=repeat('b',64);
  authority text:=repeat('c',64); redaction text:=repeat('d',64); response_hash text:=repeat('e',64); envelope text:=repeat('f',64);
- now_s bigint; expires bigint; nonce text; session_hash text; context_sig text; proof text; key_id_value text; key_bytes bytea; approver_session text; receipt_review uuid; saved_fingerprint text;
+ now_s bigint; expires bigint; nonce text; session_hash text; context_sig text; proof text; key_id_value text; key_bytes bytea; approver_session text; receipt_review uuid; saved_fingerprint text; dispatch_deadline bigint; dispatch_challenge text; dispatch_signer text; dispatch_reason text; dispatch_evidence text; dispatch_result jsonb;
 BEGIN
  INSERT INTO public.tenants(id,legal_name) VALUES(t,'Synthetic assisted privacy delivery'),(other_t,'Synthetic other privacy delivery');
  INSERT INTO public.users(id,auth_subject,email) VALUES(a,'ci-delivery-'||a,'owner@example.invalid'),(b,'ci-delivery-'||b,'admin@example.invalid'),(r,'ci-delivery-'||r,'reader@example.invalid');
@@ -59,6 +59,70 @@ BEGIN
  IF has_function_privilege('profitpilot_app','private.record_privacy_delivery(uuid,uuid,uuid,text,text,text,text,text,text,text,text,text,bigint,bigint,text,bigint,text,text,text)','EXECUTE')
  OR has_any_column_privilege('profitpilot_app','private.privacy_delivery_authorizations','SELECT,INSERT,UPDATE,REFERENCES') THEN RAISE EXCEPTION 'Privacy release internals exposed'; END IF;
  RAISE NOTICE 'Assisted privacy release, identity gate, exact recipient/envelope scope, independent approval, revocation, replay and privilege checks passed';
+
+
+ -- Persistent single-use dispatch fence: the fixture uses synthetic digests;
+ -- no transport permission is returned even when a reservation is burned.
+ dispatch_deadline:=floor(extract(epoch FROM clock_timestamp()))::bigint+120;
+ dispatch_challenge:=repeat('1',64);dispatch_signer:=repeat('3',64);
+ saved_fingerprint:=private.sensitive_recovery_fingerprint();
+ IF private.privacy_dispatch_status(t,case_id_value,order_id_value)->>'state' IS DISTINCT FROM 'unreserved' THEN RAISE EXCEPTION 'Unexpected initial dispatch state'; END IF;
+ FOREACH phase IN ARRAY ARRAY['privacy_dispatch_burn','privacy_dispatch_reserve','privacy_dispatch_burn','privacy_dispatch_revoke'] LOOP
+  actor:=a;who:='ci-delivery-'||actor;
+  now_s:=floor(extract(epoch FROM clock_timestamp()))::bigint;expires:=now_s+20;
+  nonce:=encode(public.gen_random_bytes(16),'hex');session_hash:=encode(public.digest(actor::text,'sha256'),'hex');
+  context_sig:=encode(public.hmac(convert_to(t::text||E'\n'||who||E'\n'||expires||E'\n'||nonce||E'\n'||key_id_value,'UTF8'),key_bytes,'sha256'),'hex');
+  PERFORM set_config('app.tenant_id',t::text,true),set_config('app.tenant_subject',who,true),set_config('app.tenant_expires',expires::text,true),set_config('app.tenant_nonce',nonce,true),set_config('app.tenant_key_id',key_id_value,true),set_config('app.tenant_signature',context_sig,true);
+  IF phase='privacy_dispatch_revoke' THEN
+   dispatch_challenge:=NULL;dispatch_signer:=NULL;dispatch_deadline:=NULL;
+   dispatch_reason:='ambiguous_dispatch';dispatch_evidence:=repeat('6',64);
+  END IF;
+  scope_hash:=encode(public.digest(convert_to('profitpilot-privacy-dispatch-v1'||E'\n'||case_id_value||E'\n'||order_id_value||E'\n'||phase||E'\n'||coalesce(dispatch_challenge,'')||E'\n'||coalesce(dispatch_signer,'')||E'\n'||coalesce(dispatch_deadline::text,'')||E'\n'||coalesce(dispatch_reason,'')||E'\n'||coalesce(dispatch_evidence,''),'UTF8'),'sha256'),'hex');
+  proof:=encode(public.hmac(convert_to('profitpilot-sensitive-api-v1'||E'\n'||t||E'\n'||order_id_value||E'\n'||phase||E'\n'||scope_hash||E'\n'||who||E'\n'||now_s||E'\n'||now_s||E'\n'||session_hash||E'\n'||expires||E'\n'||nonce||E'\n'||key_id_value,'UTF8'),key_bytes,'sha256'),'hex');
+  BEGIN
+   PERFORM private.record_privacy_dispatch(other_t,case_id_value,order_id_value,phase,dispatch_challenge,dispatch_signer,dispatch_deadline,dispatch_reason,dispatch_evidence,scope_hash,now_s,now_s,session_hash,expires,nonce,key_id_value,proof);
+   RAISE EXCEPTION 'Cross tenant dispatch accepted'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  IF phase='privacy_dispatch_burn' AND NOT EXISTS(SELECT 1 FROM private.privacy_dispatch_reservations WHERE tenant_id=t AND release_order_id=order_id_value) THEN
+   BEGIN
+    PERFORM private.record_privacy_dispatch(t,case_id_value,order_id_value,phase,dispatch_challenge,dispatch_signer,dispatch_deadline,dispatch_reason,dispatch_evidence,scope_hash,now_s,now_s,session_hash,expires,nonce,key_id_value,proof);
+    RAISE EXCEPTION 'Unreserved dispatch accepted'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+   CONTINUE;
+  END IF;
+  IF phase='privacy_dispatch_reserve' THEN
+   BEGIN
+    INSERT INTO private.privacy_dispatch_revocations(tenant_id,release_order_id,actor_id,reason_code,evidence_digest) VALUES(t,order_id_value,a,'identity_uncertain',repeat('7',64));
+    BEGIN PERFORM private.record_privacy_dispatch(t,case_id_value,order_id_value,phase,dispatch_challenge,dispatch_signer,dispatch_deadline,NULL,NULL,scope_hash,now_s,now_s,session_hash,expires,nonce,key_id_value,proof);
+      RAISE EXCEPTION 'Revoked release reserved'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+    RAISE SQLSTATE 'P7777' USING MESSAGE='Rollback synthetic pre-reservation revocation';
+   EXCEPTION WHEN SQLSTATE 'P7777' THEN NULL; END;
+   BEGIN
+    INSERT INTO private.revoked_identity_sessions(user_id,session_digest) VALUES(b,approver_session);
+    PERFORM private.record_privacy_dispatch(t,case_id_value,order_id_value,phase,dispatch_challenge,dispatch_signer,dispatch_deadline,NULL,NULL,scope_hash,now_s,now_s,session_hash,expires,nonce,key_id_value,proof);
+    RAISE EXCEPTION 'Revoked original approver accepted'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  END IF;
+  IF phase='privacy_dispatch_burn' THEN
+   BEGIN
+    PERFORM private.record_privacy_dispatch(t,case_id_value,order_id_value,phase,repeat('9',64),dispatch_signer,dispatch_deadline,NULL,NULL,scope_hash,now_s,now_s,session_hash,expires,nonce,key_id_value,proof);
+    RAISE EXCEPTION 'Substituted challenge accepted'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  END IF;
+  dispatch_result:=private.record_privacy_dispatch(t,case_id_value,order_id_value,phase,dispatch_challenge,dispatch_signer,dispatch_deadline,dispatch_reason,dispatch_evidence,scope_hash,now_s,now_s,session_hash,expires,nonce,key_id_value,proof);
+  IF dispatch_result->>'mayTransmit' IS DISTINCT FROM 'false' OR dispatch_result->>'deliveryVerified' IS DISTINCT FROM 'false'
+   OR dispatch_result->>'state' IS DISTINCT FROM (CASE phase WHEN 'privacy_dispatch_reserve' THEN 'reserved' WHEN 'privacy_dispatch_burn' THEN 'attempt-spent' ELSE 'revoked' END)
+  THEN RAISE EXCEPTION 'Dispatch state or safety boundary incorrect'; END IF;
+  BEGIN
+   PERFORM private.record_privacy_dispatch(t,case_id_value,order_id_value,phase,dispatch_challenge,dispatch_signer,dispatch_deadline,dispatch_reason,dispatch_evidence,scope_hash,now_s,now_s,session_hash,expires,nonce,key_id_value,proof);
+   RAISE EXCEPTION 'Dispatch action replay accepted'; EXCEPTION WHEN unique_violation THEN NULL; END;
+ END LOOP;
+ IF private.privacy_dispatch_status(t,case_id_value,order_id_value)->>'attemptSpent' IS DISTINCT FROM 'true'
+ OR private.sensitive_recovery_fingerprint() IS NOT DISTINCT FROM saved_fingerprint THEN RAISE EXCEPTION 'Dispatch state or fingerprint missing'; END IF;
+ BEGIN DELETE FROM private.privacy_dispatch_burns WHERE tenant_id=t; RAISE EXCEPTION 'Spent attempt mutable'; EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL; END;
+ BEGIN DELETE FROM private.privacy_dispatch_revocations WHERE tenant_id=t; RAISE EXCEPTION 'Revocation mutable'; EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL; END;
+ IF has_function_privilege('profitpilot_app','private.record_privacy_dispatch(uuid,uuid,uuid,text,text,text,bigint,text,text,text,bigint,bigint,text,bigint,text,text,text)','EXECUTE')
+ OR has_any_column_privilege('profitpilot_app','private.privacy_dispatch_reservations','SELECT,INSERT,UPDATE,REFERENCES')
+ OR has_any_column_privilege('profitpilot_app','private.privacy_dispatch_burns','SELECT,INSERT,UPDATE,REFERENCES')
+ OR has_any_column_privilege('profitpilot_app','private.privacy_dispatch_revocations','SELECT,INSERT,UPDATE,REFERENCES')
+ THEN RAISE EXCEPTION 'Dispatch internals exposed'; END IF;
+ RAISE NOTICE 'Durable dispatch reserve, burn, revocation, prior approval revocation, replay and recovery fence checks passed';
 
  -- Reconcile verified-offline evidence as a separate dual-reviewed work order.
  -- Synthetic digests do not claim actual cryptographic receipt or delivery.

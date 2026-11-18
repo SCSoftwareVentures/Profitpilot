@@ -77,7 +77,13 @@ test("synthetic logical backup restores all source rows and preserves tenant bou
   assert.notEqual(receivedEvidence[0].review_order_id,delivery[0].order_id);
   await assert.rejects(()=>runtime.query("SELECT * FROM private.privacy_receipt_evidence"),/permission denied/i);
   await assert.rejects(()=>restored.query("DELETE FROM private.privacy_receipt_evidence WHERE tenant_id=$1 AND release_order_id=$2",[delivery[0].tenant_id,delivery[0].order_id]),e=>e.code==="55000");
-  console.log("Assisted privacy release authorization, receipt evidence and immutable audit restored");
+  const dispatchArgs=[delivery[0].tenant_id,delivery[0].case_id,delivery[0].order_id];
+  const dispatchState=(await restored.query("SELECT private.privacy_dispatch_status($1,$2,$3) AS s",dispatchArgs)).rows[0].s;
+  assert.deepEqual(dispatchState,{state:"revoked",attemptSpent:true,receiptEvidenceRecorded:true,mayTransmit:false,deliveryVerified:false});
+  await assert.rejects(()=>runtime.query("SELECT * FROM private.privacy_dispatch_burns"),/permission denied/i);
+  await assert.rejects(()=>restored.query("DELETE FROM private.privacy_dispatch_burns WHERE tenant_id=$1 AND release_order_id=$2",[dispatchArgs[0],dispatchArgs[2]]),e=>e.code==="55000");
+  await assert.rejects(()=>restored.query("DELETE FROM private.privacy_dispatch_revocations WHERE tenant_id=$1 AND release_order_id=$2",[dispatchArgs[0],dispatchArgs[2]]),e=>e.code==="55000");
+  console.log("Assisted privacy release authorization, receipt evidence, spent dispatch and revocation restored");
   const tenant="33333333-3333-4333-8333-333333333333",subject="isolation-tenant-c";
   const result=await restored.query("SELECT key_id,secret FROM private.tenant_context_keys WHERE active ORDER BY key_id LIMIT 1");
   assert.equal(result.rowCount,1,"restored database must have active tenant context key");
@@ -172,6 +178,21 @@ test("synthetic logical backup restores all source rows and preserves tenant bou
    assert.equal(await isSessionActive(),true);
   }finally{await financialSource.query("ROLLBACK");financialSource.release();}
   console.log("Populated retention and backup records restored; newer signed hold and plan inventories deny older snapshots");
+  const dispatchSource=await source.connect();
+  try{
+   await dispatchSource.query("BEGIN");
+   // Existing API fixture release has no dispatch ledger yet. Trusted admin
+   // simulates a post-snapshot protective revocation, solely to test fencing.
+   const later=(await dispatchSource.query("SELECT a.tenant_id,a.order_id,w.requested_by FROM private.privacy_delivery_authorizations a JOIN private.security_work_orders w ON w.tenant_id=a.tenant_id AND w.id=a.order_id JOIN public.tenants t ON t.id=a.tenant_id WHERE t.legal_name='Synthetic privacy operator API'")).rows[0];
+   assert.ok(later);
+   await dispatchSource.query("INSERT INTO private.privacy_dispatch_revocations(tenant_id,release_order_id,actor_id,reason_code,evidence_digest) VALUES($1,$2,$3,'security_incident',$4)",[later.tenant_id,later.order_id,later.requested_by,"8".repeat(64)]);
+   const dispatchInventory=await readSecurityInventory(dispatchSource);
+   assert.notEqual(dispatchInventory.sensitive[0].digest,secInventory.sensitive[0].digest);
+   const dispatchDoc=signSecurityRecovery(dispatchInventory,archive,keys.privateKey);
+   await assert.rejects(()=>replaySecurityRecovery(restored,dispatchDoc,keys.publicKey,{backupSha256:archive,expectedManifestSha256:securityRecoveryDigest(dispatchDoc)}),/isolated/);
+   assert.equal(await isSessionActive(),true);
+  }finally{await dispatchSource.query("ROLLBACK");dispatchSource.release();}
+  console.log("Post-snapshot dispatch revocation prevents recovery of an older snapshot");
   const applied=await replaySecurityRecovery(restored,securityDoc,keys.publicKey,securityBinding);
   assert.equal(applied.sessions,1);assert.equal(applied.incidents,1);
   assert.ok(Object.values(await replaySecurityRecovery(restored,securityDoc,keys.publicKey,securityBinding)).every(n=>n===0));
