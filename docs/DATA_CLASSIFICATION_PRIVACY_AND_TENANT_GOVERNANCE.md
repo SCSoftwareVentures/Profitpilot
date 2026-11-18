@@ -18,7 +18,7 @@ ProfitPilot should adopt the following defaults:
 6. Use purpose-bound, time-limited support access with customer visibility and immutable audit.
 7. Do not collect TFNs, identity documents, health information, bank account details or full card data in the first release unless a documented product need, lawful basis, security design and accountable approval exist. Prefer tokenised/provider-held values.
 8. Customer deletion requests trigger a verified workflow, not immediate indiscriminate cascading deletion. Preserve only records that must lawfully be retained or are subject to a documented hold; isolate them and restrict use.
-9. Use a proposed 35-day rolling backup expiry as an operational target only, subject to restore testing and privacy/legal approval. This is not a statutory retention period.
+9. Use a proposed 30-day rolling backup expiry as an operational target only, subject to restore testing and privacy/legal approval. This supersedes the previous proposed 35-day target; it is not a statutory retention period. See the current Australian privacy/legal review for the required record-specific and hold-aware approval.
 10. No customer data enters ProfitPilot until private object storage, malware scanning, retention/deletion, access logging, incident response and tenant-isolation controls are implemented and independently reviewed.
 
 ## 2. Roles and responsibility model
