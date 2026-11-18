@@ -81,6 +81,7 @@ services:
       - ./database/migrations/063_reviewed_payroll_intake.sql:/docker-entrypoint-initdb.d/065-reviewed-payroll-intake.sql:ro
       - ./database/migrations/064_payroll_intake_operator_api.sql:/docker-entrypoint-initdb.d/066-payroll-intake-operator-api.sql:ro
       - ./database/migrations/065_payroll_allocation_builder.sql:/docker-entrypoint-initdb.d/067-payroll-allocation-builder.sql:ro
+      - ./database/migrations/066_workspace_commercial_baselines.sql:/docker-entrypoint-initdb.d/068-workspace-commercial-baselines.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s

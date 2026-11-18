@@ -967,6 +967,90 @@ paths:
         "409": { description: Ineligible or conflicting source }
         "503": { description: Unavailable }
 
+
+  /tenants/{tenantId}/workspace/records/{recordId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: recordId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Create immutable managed workspace record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirm, kind, parentId, relatedId, label]
+              properties:
+                confirm: { const: true }
+                kind: { enum: [business, customer, site, contract, contract_site] }
+                parentId: { type: [string, 'null'], format: uuid }
+                relatedId: { type: [string, 'null'], format: uuid }
+                label: { type: [string, 'null'], maxLength: 80 }
+      responses:
+        "201": { description: Record created }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting scope }
+  /tenants/{tenantId}/workspace/records-by-kind/{kind}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: kind
+        in: path
+        required: true
+        schema: { enum: [business, customer, site, contract, contract_site] }
+      - name: cursor
+        in: query
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read one page of managed workspace records
+      responses:
+        "200": { description: Page of up to 50 records }
+        "403": { description: Authority denied }
+  /tenants/{tenantId}/workspace/contracts/{contractId}/versions/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: contractId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read exact proposed commercial baseline terms and approval status
+      responses:
+        "200": { description: Terms and order state }
+        "403": { description: Authority denied }
+    post:
+      summary: Record exact independent commercial baseline approval action
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirm, step, versionId, periodStart, periodEnd, price, taxBasis, billingBasis, evidenceDigest]
+              properties:
+                confirm: { const: true }
+                step: { enum: [request, approve, reject, consume] }
+                versionId: { type: string, format: uuid }
+                periodStart: { type: string, format: date }
+                periodEnd: { type: string, format: date }
+                price: { type: string, pattern: '^(0|[1-9][0-9]{0,11})[.][0-9]{2}$' }
+                taxBasis: { enum: [gst_inclusive, gst_exclusive, no_gst] }
+                billingBasis: { enum: [monthly, weekly, fixed_period, per_service] }
+                evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        "200": { description: Immutable order state }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting baseline }
+
 components:
   schemas:
     ErrorResponse:

@@ -14,9 +14,10 @@ import {proxyTrust,corsOrigins,createBoundedServer} from "./network-boundary.js"
 import {importIntakeGate,promotionProof} from "./intake-security.js";
 import {createReadinessGuard} from "./readiness-guard.js";
 import {productionReleaseGate} from "./release-gate.js";
-import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof,privacyCaseProof,payrollCorrectionPreviewProof,payrollCorrectionStatusProof,payrollCorrectionStepProof,privacyDeliveryPreviewProof,privacyDeliveryStatusProof,privacyDeliveryStepProof,privacyReceiptPreviewProof,privacyReceiptStatusProof,privacyReceiptStepProof,privacyDispatchStatusProof,privacyDispatchStepProof,payrollIntakePreviewProof,payrollIntakeStatusProof,payrollIntakeStepProof,payrollAllocationBuildProof,payrollAllocationStatusProof} from "./sensitive-operation-proof.js";
+import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof,privacyCaseProof,payrollCorrectionPreviewProof,payrollCorrectionStatusProof,payrollCorrectionStepProof,privacyDeliveryPreviewProof,privacyDeliveryStatusProof,privacyDeliveryStepProof,privacyReceiptPreviewProof,privacyReceiptStatusProof,privacyReceiptStepProof,privacyDispatchStatusProof,privacyDispatchStepProof,payrollIntakePreviewProof,payrollIntakeStatusProof,payrollIntakeStepProof,payrollAllocationBuildProof,payrollAllocationStatusProof,workspaceCreateProof,workspaceReadProof,workspaceVersionProof,workspaceVersionStatusProof} from "./sensitive-operation-proof.js";
 import {canonicalPayrollRows} from "../src/payroll-source-intake.js";
 import {canonicalAllocationMapping} from "../src/payroll-allocation-mapping.js";
+import {WORKSPACE_KINDS,workspaceRecordFields,workspaceVersionFields} from "../src/workspace-records.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
 import {quarantineConfig,sealQuarantine,MAX_QUARANTINE_BYTES} from "./quarantine.js";
@@ -51,7 +52,7 @@ app.use("/v1/tenants/:tenantId/imports",importIntakeGate());
 app.use("/v1",express.json({limit:"100kb",inflate:false}));
 app.use("/v1",enforceJsonBudget);
 const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-for(const param of ["batchId","matchId","runId","proposalId","orderId","caseId","reviewId","poolId"])app.param(param,(req,res,next,value)=>uuidPattern.test(value)?next():res.status(400).json({error:"Invalid resource ID"}));
+for(const param of ["batchId","matchId","runId","proposalId","orderId","caseId","reviewId","poolId","recordId","contractId"])app.param(param,(req,res,next,value)=>uuidPattern.test(value)?next():res.status(400).json({error:"Invalid resource ID"}));
 const requestTenant=(req,tenantId,fn)=>withTenant(tenantId,req.identity.subject,fn,req.identity);
 
 async function membership(req,res,next){
@@ -171,7 +172,7 @@ app.post("/v1/tenants/:tenantId/calculations",membership,requireRole("owner","ad
  const {contractId,siteId,periodStart,periodEnd}=req.body||{};
  if(typeof contractId!=="string"||!uuidPattern.test(contractId)||typeof siteId!=="string"||!uuidPattern.test(siteId)||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodEnd<periodStart)return res.status(400).json({error:"Valid contract, site and period are required"});
  const result=await requestTenant(req,req.membership.tenantId,async client=>{
-  const base=await client.query("SELECT c.id,cv.version_no,cv.currency,cv.tax_basis FROM contracts c JOIN contract_versions cv ON cv.contract_id=c.id AND cv.tenant_id=c.tenant_id JOIN sites s ON s.id=$2 AND s.tenant_id=c.tenant_id AND s.business_id=c.business_id WHERE c.id=$1 AND c.tenant_id=$3 AND cv.approved_at IS NOT NULL AND cv.approved_by IS NOT NULL AND cv.effective_from <= $4::date AND (cv.effective_to IS NULL OR cv.effective_to >= $5::date)",[contractId,siteId,req.membership.tenantId,periodStart,periodEnd]);
+  const base=await client.query("SELECT c.id,cv.version_no,cv.currency,cv.tax_basis FROM contracts c JOIN contract_versions cv ON cv.contract_id=c.id AND cv.tenant_id=c.tenant_id JOIN sites s ON s.id=$2 AND s.tenant_id=c.tenant_id AND s.business_id=c.business_id WHERE c.id=$1 AND c.tenant_id=$3 AND private.workspace_contract_site_allowed(c.tenant_id,c.id,s.id) AND cv.approved_at IS NOT NULL AND cv.approved_by IS NOT NULL AND cv.effective_from <= $4::date AND (cv.effective_to IS NULL OR cv.effective_to >= $5::date)",[contractId,siteId,req.membership.tenantId,periodStart,periodEnd]);
   if(!base.rowCount)return {error:"No matching contract/site and effective contract version for this period"};
   if(base.rowCount!==1)return {error:"Overlapping contract versions make this period ambiguous. Correct the contract baseline before calculating."};
   const ledger=await client.query("SELECT to_regclass('public.allocation_lines') IS NOT NULL AS available");
@@ -531,6 +532,35 @@ app.get("/v1/tenants/:tenantId/payroll/pools/:poolId/allocations/:runId",members
   return res.json(await sensitiveQuery(req,"SELECT private.api_payroll_allocation_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",payrollAllocationStatusProof(...allocationIds(req),req.identity)));
  }catch(e){return failSensitive(e,res,next);}
 });
+
+app.post("/v1/tenants/:tenantId/workspace/records/:recordId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;if(!emptyQuery(req)||!exactBody(b,["kind","parentId","relatedId","label","confirm"])||b.confirm!==true)return res.status(400).json({error:"Explicit workspace creation required"});
+  const {confirm,...input}=b;if(!workspaceRecordFields(input))return res.status(400).json({error:"Invalid managed record"});
+  return res.status(201).json(await sensitiveQuery(req,"SELECT private.api_workspace_create($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) AS result",workspaceCreateProof(req.membership.tenantId,req.params.recordId.toLowerCase(),input,req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/workspace/records-by-kind/:kind",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const {cursor}=req.query;
+  if(!WORKSPACE_KINDS.includes(req.params.kind)||Object.keys(req.query).some(k=>k!=="cursor")||(cursor!==undefined&&(typeof cursor!=="string"||!uuidPattern.test(cursor))))return res.status(400).json({error:"Invalid workspace page"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_workspace_read($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) AS result",workspaceReadProof(req.membership.tenantId,req.params.kind,cursor?.toLowerCase()??null,req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/workspace/contracts/:contractId/versions/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;if(!emptyQuery(req)||!exactBody(b,["versionId","periodStart","periodEnd","price","taxBasis","billingBasis","evidenceDigest","step","confirm"])||b.confirm!==true||!["request","approve","reject","consume"].includes(b.step))return res.status(400).json({error:"Explicit baseline action required"});
+  const {confirm,step,...input}=b;if(!workspaceVersionFields(input))return res.status(400).json({error:"Invalid commercial baseline terms"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_workspace_version_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) AS result",workspaceVersionProof(req.membership.tenantId,req.params.contractId.toLowerCase(),req.params.orderId.toLowerCase(),input,step,req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/workspace/contracts/:contractId/versions/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_workspace_version_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",workspaceVersionStatusProof(req.membership.tenantId,req.params.contractId.toLowerCase(),req.params.orderId.toLowerCase(),req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+
 app.use((err,req,res,next)=>{if(res.destroyed||res.writableEnded)return;if(res.headersSent)return next(err);const id=randomUUID();const status=err.code==="P4501"?429:(err.code==="23505"||err.code==="P4502")?409:err.code==="54000"?413:err.code==="22P02"||err.code==="22P05"?400:err.status===503?503:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);if(status===503)res.set("Retry-After","5");if(err.code==="P4501")res.set("Retry-After","3600");process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:err.code==="P4501"?"Financial access limit reached; retry later":err.code==="P4502"?"Payroll evidence was corrected; recalculate before relying on this result":status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":status===503?"Request capacity temporarily unavailable":"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
 if(process.env.NODE_ENV==="production"){

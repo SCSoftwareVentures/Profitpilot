@@ -1,5 +1,6 @@
 import {createHmac,createHash,randomBytes} from "node:crypto";
 import {hasRecentMfa} from "./auth.js";
+import {WORKSPACE_KINDS,workspaceRecordFields,workspaceVersionFields} from "../src/workspace-records.js";
 import {canonicalAllocationMapping} from "../src/payroll-allocation-mapping.js";
 
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
@@ -178,4 +179,25 @@ export function payrollAllocationStatusProof(tenant,pool,run,identity,env=proces
  if(![tenant,pool,run].every(x=>typeof x==="string"&&uuid.test(x)))denied();
  const scope=createHash("sha256").update(["payroll-allocation-status-v1",pool].join("\n")).digest("hex");
  return [...signedAction("profitpilot-sensitive-api-v1",[tenant,run,"payroll_allocation_status",scope],identity,env,now),pool];
+}
+
+export function workspaceCreateProof(tenant,id,input,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ const f=workspaceRecordFields(input);if(!uuid.test(tenant)||!uuid.test(id)||!f)denied();
+ const scope=createHash("sha256").update(["workspace-create-v1",...f.map(x=>x??"")].join("\n")).digest("hex");
+ return [...signedAction("profitpilot-sensitive-api-v1",[tenant,id,"workspace_create",scope],identity,env,now),...f];
+}
+export function workspaceReadProof(tenant,kind,cursor,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ if(!uuid.test(tenant)||!WORKSPACE_KINDS.includes(kind)||(cursor!==null&&!uuid.test(cursor)))denied();
+ const scope=createHash("sha256").update(["workspace-read-v1",kind,cursor??""].join("\n")).digest("hex");
+ return [...signedAction("profitpilot-sensitive-api-v1",[tenant,tenant,"workspace_read",scope],identity,env,now),kind,cursor];
+}
+export function workspaceVersionProof(tenant,contract,order,input,step,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ const f=workspaceVersionFields(input);if(![tenant,contract,order].every(x=>typeof x==="string"&&uuid.test(x))||!f)denied();
+ const scope=createHash("sha256").update(["workspace-version-v1",contract,...f].join("\n")).digest("hex");
+ return [tenant,contract,order,...f,scope,step,...securityWorkProof(tenant,order,"privileged_operation",scope,step,identity,env,now).slice(5)];
+}
+export function workspaceVersionStatusProof(tenant,contract,order,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ if(![tenant,contract,order].every(x=>typeof x==="string"&&uuid.test(x)))denied();
+ const scope=createHash("sha256").update(["workspace-version-status-v1",contract].join("\n")).digest("hex");
+ return [...signedAction("profitpilot-sensitive-api-v1",[tenant,order,"workspace_version_status",scope],identity,env,now),contract];
 }
