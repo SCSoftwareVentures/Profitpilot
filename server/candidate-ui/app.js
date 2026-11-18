@@ -1,0 +1,45 @@
+"use strict";
+const el=id=>document.getElementById(id),uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,sha=/^[a-f0-9]{64}$/;
+let busy=false,epoch=0,controller=null;
+const clean=id=>{const v=el(id).value.trim().toLowerCase();if(!uuid.test(v))throw Error("Enter a valid "+id+" UUID.");return v;};
+const digest=id=>{const v=el(id).value.trim();if(!sha.test(v))throw Error("Enter the exact "+id+" digest.");return v;};
+const checked=id=>{if(!el(id).checked)throw Error("Explicit confirmation is required.");};
+function clear(){epoch++;controller?.abort();controller=null;for(const node of document.querySelectorAll("input")){if(node.type==="checkbox")node.checked=false;else node.value="";}el("result").textContent="";el("status").textContent="Session cleared.";}
+el("clear").addEventListener("click",clear);
+el("new-order").addEventListener("click",()=>{if(!busy)el("order").value=crypto.randomUUID();});
+window.addEventListener("pagehide",clear);
+async function operation(action){
+ if(busy)return;
+ const current=++epoch;
+ let active=false;
+ el("result").textContent="";
+ try{
+  const t=clean("tenant"),token=el("token").value.trim();
+  if(!token||token.length>8192||/\s/.test(token))throw Error("Enter a current synthetic access token.");
+  let path,body;
+  switch(action){
+   case "submit":path="/payroll/runs/"+clean("run")+"/submit";body={submit:true};break;
+   case "review":path="/payroll/proposals/"+clean("proposal");break;
+   case "confirm":checked("payroll-confirm");path="/payroll/proposals/"+clean("proposal")+"/confirm";body={confirm:true,evidenceDigest:digest("digest")};el("payroll-confirm").checked=false;break;
+   case "account":path="/privacy/account";break;
+   case "correct":checked("email-confirm");path="/privacy/account/correct-email";body={confirm:true};el("email-confirm").checked=false;break;
+   case "preview":path="/privacy/invoices/"+clean("batch")+"/disposal-preview";body={};break;
+   case "disposal":checked("dispose-confirm");path="/privacy/invoices/"+clean("batch")+"/disposals/"+clean("order");body={step:el("step").value,scopeDigest:digest("scope"),confirm:true};el("dispose-confirm").checked=false;break;
+   default:throw Error("Unknown operation.");
+  }
+  busy=true;active=true;controller=new AbortController();
+  for(const b of document.querySelectorAll("button[data-operation],#new-order"))b.disabled=true;
+  el("status").textContent="Request in progress.";
+  const res=await fetch("/v1/tenants/"+t+path,{method:body===undefined?"GET":"POST",headers:{Authorization:"Bearer "+token,...(body===undefined?{}:{"Content-Type":"application/json"})},credentials:"omit",cache:"no-store",redirect:"error",signal:controller.signal,body:body===undefined?undefined:JSON.stringify(body)});
+  const data=await res.json();
+  if(current!==epoch)return;
+  el("status").textContent=(res.ok?"Accepted":"Denied")+" · HTTP "+res.status;
+  el("result").textContent=JSON.stringify(data,null,2);
+  if(res.ok&&["submit","review"].includes(action)&&uuid.test(data.proposalId||"")&&sha.test(data.evidenceDigest||"")){
+   el("proposal").value=data.proposalId;el("digest").value=data.evidenceDigest;
+  }
+  if(res.ok&&action==="preview"&&sha.test(data.scopeDigest||""))el("scope").value=data.scopeDigest;
+ }catch(e){if(current===epoch)el("status").textContent=e.name==="AbortError"?"Request cancelled.":(active?"Request unavailable.":e.message);}
+ finally{if(active){busy=false;controller=null;for(const b of document.querySelectorAll("button[data-operation],#new-order"))b.disabled=false;}}
+}
+for(const node of document.querySelectorAll("button[data-operation]"))node.addEventListener("click",()=>operation(node.dataset.operation));
