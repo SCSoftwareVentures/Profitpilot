@@ -56,6 +56,7 @@ services:
       - ./database/migrations/038_session_bound_promotion.sql:/docker-entrypoint-initdb.d/040-session-bound-promotion.sql:ro
       - ./database/migrations/039_live_security_catalog.sql:/docker-entrypoint-initdb.d/041-live-security-catalog.sql:ro
       - ./database/migrations/040_emergency_tenant_containment.sql:/docker-entrypoint-initdb.d/042-emergency-tenant-containment.sql:ro
+      - ./database/migrations/041_security_command_snapshot.sql:/docker-entrypoint-initdb.d/043-security-command-snapshot.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
