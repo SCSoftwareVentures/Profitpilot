@@ -1,5 +1,6 @@
 import {createHmac,createHash,randomBytes} from "node:crypto";
 import {hasRecentMfa} from "./auth.js";
+import {invoiceIntakeFields} from "../src/invoice-intake.js";
 import {workspaceJobFields} from "../src/workspace-jobs.js";
 import {WORKSPACE_KINDS,workspaceRecordFields,workspaceVersionFields} from "../src/workspace-records.js";
 import {canonicalAllocationMapping} from "../src/payroll-allocation-mapping.js";
@@ -212,4 +213,19 @@ export function workspaceJobReadProof(tenant,target,mode,cursor,identity,env=pro
  if(!uuid.test(tenant)||!uuid.test(target)||!["list","status"].includes(mode)||(mode==="list"&&target!==tenant)||(mode==="status"&&cursor!==null)||(cursor!==null&&!uuid.test(cursor)))denied();
  const scope=createHash("sha256").update(["workspace-job-read-v1",mode,cursor??""].join("\n")).digest("hex");
  return [...signedAction("profitpilot-sensitive-api-v1",[tenant,target,"workspace_job_read",scope],identity,env,now),mode,cursor];
+}
+
+export function invoiceIntakePreviewProof(tenant,batch,order,input,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ const f=invoiceIntakeFields(input);if(![tenant,batch,order].every(x=>typeof x==="string"&&uuid.test(x))||!f)denied();
+ const scope=createHash("sha256").update(["invoice-intake-preview-v1",batch,...f].join("\n")).digest("hex");
+ return [...signedAction("profitpilot-sensitive-api-v1",[tenant,order,"invoice_intake_preview",scope],identity,env,now),batch,...f];
+}
+export function invoiceIntakeStatusProof(tenant,batch,order,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ if(![tenant,batch,order].every(x=>typeof x==="string"&&uuid.test(x)))denied();
+ const scope=createHash("sha256").update(["invoice-intake-status-v1",batch].join("\n")).digest("hex");
+ return [...signedAction("profitpilot-sensitive-api-v1",[tenant,order,"invoice_intake_status",scope],identity,env,now),batch];
+}
+export function invoiceIntakeStepProof(tenant,batch,order,input,scope,step,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ const f=invoiceIntakeFields(input);if(![tenant,batch,order].every(x=>typeof x==="string"&&uuid.test(x))||!f)denied();
+ return [tenant,batch,order,...f,scope,step,...securityWorkProof(tenant,order,"privileged_operation",scope,step,identity,env,now).slice(5)];
 }

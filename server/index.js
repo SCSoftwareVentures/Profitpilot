@@ -14,11 +14,12 @@ import {proxyTrust,corsOrigins,createBoundedServer} from "./network-boundary.js"
 import {importIntakeGate,promotionProof} from "./intake-security.js";
 import {createReadinessGuard} from "./readiness-guard.js";
 import {productionReleaseGate} from "./release-gate.js";
-import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof,privacyCaseProof,payrollCorrectionPreviewProof,payrollCorrectionStatusProof,payrollCorrectionStepProof,privacyDeliveryPreviewProof,privacyDeliveryStatusProof,privacyDeliveryStepProof,privacyReceiptPreviewProof,privacyReceiptStatusProof,privacyReceiptStepProof,privacyDispatchStatusProof,privacyDispatchStepProof,payrollIntakePreviewProof,payrollIntakeStatusProof,payrollIntakeStepProof,payrollAllocationBuildProof,payrollAllocationStatusProof,workspaceCreateProof,workspaceReadProof,workspaceVersionProof,workspaceVersionStatusProof,workspaceJobWriteProof,workspaceJobReadProof} from "./sensitive-operation-proof.js";
+import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof,privacyCaseProof,payrollCorrectionPreviewProof,payrollCorrectionStatusProof,payrollCorrectionStepProof,privacyDeliveryPreviewProof,privacyDeliveryStatusProof,privacyDeliveryStepProof,privacyReceiptPreviewProof,privacyReceiptStatusProof,privacyReceiptStepProof,privacyDispatchStatusProof,privacyDispatchStepProof,payrollIntakePreviewProof,payrollIntakeStatusProof,payrollIntakeStepProof,payrollAllocationBuildProof,payrollAllocationStatusProof,workspaceCreateProof,workspaceReadProof,workspaceVersionProof,workspaceVersionStatusProof,workspaceJobWriteProof,workspaceJobReadProof,invoiceIntakePreviewProof,invoiceIntakeStatusProof,invoiceIntakeStepProof} from "./sensitive-operation-proof.js";
 import {canonicalPayrollRows} from "../src/payroll-source-intake.js";
 import {canonicalAllocationMapping} from "../src/payroll-allocation-mapping.js";
 import {WORKSPACE_KINDS,workspaceRecordFields,workspaceVersionFields} from "../src/workspace-records.js";
 import {workspaceJobFields,verifiedJobSummary} from "../src/workspace-jobs.js";
+import {invoiceIntakeFields,invoiceDigest} from "../src/invoice-intake.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
 import {quarantineConfig,sealQuarantine,MAX_QUARANTINE_BYTES} from "./quarantine.js";
@@ -583,6 +584,27 @@ app.get("/v1/tenants/:tenantId/workspace/jobs",membership,requireRole("owner","a
   const {cursor}=req.query;if(Object.keys(req.query).some(k=>k!=="cursor")||(cursor!==undefined&&(typeof cursor!=="string"||!uuidPattern.test(cursor))))return res.status(400).json({error:"Invalid job page"});
   const tenant=req.membership.tenantId,result=await sensitiveQuery(req,"SELECT private.api_workspace_job_read($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) AS result",workspaceJobReadProof(tenant,tenant,"list",cursor?.toLowerCase()??null,req.identity));
   return res.json({...result,items:result.items.map(verifiedJobSummary)});
+ }catch(e){return failSensitive(e,res,next);}
+});
+
+const invoiceIntakeIds=req=>[req.membership.tenantId,req.params.batchId.toLowerCase(),req.params.orderId.toLowerCase()];
+app.post("/v1/tenants/:tenantId/invoice-intakes/:batchId/orders/:orderId/preview",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!invoiceIntakeFields(req.body))return res.status(400).json({error:"Exact invoice control totals and evidence required"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_invoice_intake_preview($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) AS result",invoiceIntakePreviewProof(...invoiceIntakeIds(req),req.body,req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/invoice-intakes/:batchId/orders/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_invoice_intake_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",invoiceIntakeStatusProof(...invoiceIntakeIds(req),req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/invoice-intakes/:batchId/orders/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;if(!emptyQuery(req)||!exactBody(b,["controlTotal","rowCount","evidenceDigest","scopeDigest","step","confirm"])||b.confirm!==true||!invoiceDigest(b.scopeDigest)||!["request","approve","reject","consume"].includes(b.step))return res.status(400).json({error:"Explicit invoice review action required"});
+  const {scopeDigest,step,confirm,...input}=b;if(!invoiceIntakeFields(input))return res.status(400).json({error:"Invalid invoice controls"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_invoice_intake_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) AS result",invoiceIntakeStepProof(...invoiceIntakeIds(req),input,scopeDigest,step,req.identity)));
  }catch(e){return failSensitive(e,res,next);}
 });
 app.use((err,req,res,next)=>{if(res.destroyed||res.writableEnded)return;if(res.headersSent)return next(err);const id=randomUUID();const status=err.code==="P4501"?429:(err.code==="23505"||err.code==="P4502")?409:err.code==="54000"?413:err.code==="22P02"||err.code==="22P05"?400:err.status===503?503:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);if(status===503)res.set("Retry-After","5");if(err.code==="P4501")res.set("Retry-After","3600");process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:err.code==="P4501"?"Financial access limit reached; retry later":err.code==="P4502"?"Payroll evidence was corrected; recalculate before relying on this result":status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":status===503?"Request capacity temporarily unavailable":"Internal server error",reference:id});});

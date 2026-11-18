@@ -24,5 +24,5 @@ test("candidate frontend action and element wiring; no persistent credential sto
  assert.match(app,/credentials:"omit",cache:"no-store",redirect:"error"/);
  assert.doesNotMatch(app,/\b(?:localStorage|sessionStorage|innerHTML|document\.cookie|eval)\b/);
  assert.doesNotMatch(html,/\b(?:src|href)="https?:/i);
- assert.match(html,/Synthetic candidate/);assert.match(html,/Invoice import validation and matching infrastructure exist/);
+ assert.match(html,/Synthetic candidate/);assert.match(html,/Customer invoices must be scanned/);
 });

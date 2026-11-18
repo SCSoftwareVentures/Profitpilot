@@ -124,6 +124,40 @@ async function action(name){
    case "report-build":{const [periodStart,periodEnd]=range(value("report-start"),value("report-end"));report(await read("/calculations",{contractId:uid("report-contract"),siteId:uid("report-site"),periodStart,periodEnd}));break;}
    case "report-read":report(await read("/calculations/"+uid("report-id")));break;
    case "report-export":confirmed("report-confirm");show("report-result",await read("/calculations/"+uid("report-id")+"/export",{purpose:value("report-purpose")}));break;
+   case "invoice-register":{
+    confirmed("invoice-register-confirm");const f=el("invoice-file").files[0];if(!f||f.size<1||f.size>65536)throw Error("Choose 1–65536 byte synthetic CSV.");
+    const [periodStart,periodEnd]=range(value("invoice-start"),value("invoice-end")),bytes=await f.arrayBuffer();
+    const sha256=[...new Uint8Array(await crypto.subtle.digest("SHA-256",bytes))].map(x=>x.toString(16).padStart(2,"0")).join("");
+    if(start!==epoch)throw Error("Session changed.");
+    const d=await read("/imports",{sourceType:"customer_invoice",fileName:"synthetic-invoice.csv",sha256,permissionReference:"reviewed-invoice-authority",periodStart,periodEnd});
+    set("invoice-batch",d.batch.id);show("invoice-source-result",d);break;
+   }
+   case "invoice-upload":{
+    confirmed("invoice-upload-confirm");const f=el("invoice-file").files[0];if(!f||f.size<1||f.size>65536)throw Error("Choose the same synthetic CSV.");
+    const target=tenantPath(session.tenant,"/imports/"+uid("invoice-batch")+"/file");
+    const res=await fetch(target,{method:"POST",headers:{Authorization:"Bearer "+credentials().token,"Content-Type":"text/csv"},body:f,credentials:"omit",cache:"no-store",redirect:"error",signal:controller.signal});
+    if(start!==epoch)throw Error("Session changed.");
+    const d=await res.json();if(!res.ok)throw Error("Upload denied or result unknown. Reconcile the exact registered batch before retrying. HTTP "+res.status);
+    show("invoice-source-result",d);el("invoice-file").value="";break;
+   }
+   case "invoice-promote":confirmed("invoice-promote-confirm");show("invoice-source-result",await read("/imports/"+uid("invoice-batch")+"/file/approve",{}));break;
+   case "invoice-new":newId("invoice-order");set("invoice-scope","");break;
+   case "invoice-preview":
+   case "invoice-status":
+   case "invoice-step":{
+    const path="/invoice-intakes/"+uid("invoice-batch")+"/orders/"+uid("invoice-order");
+    let d;
+    if(name==="invoice-status")d=await read(path);
+    else{
+     const count=Number(value("invoice-count"));
+     if(!Number.isSafeInteger(count)||count<1||count>200)throw Error("Enter the independent source row count (1–200).");
+     const body={controlTotal:amount(value("invoice-total")),rowCount:count,evidenceDigest:evidence("invoice-evidence")};
+     if(name==="invoice-preview")d=await read(path+"/preview",body);
+     else{confirmed("invoice-review-confirm");d=await read(path,{...body,scopeDigest:evidence("invoice-scope"),step:value("invoice-step"),confirm:true});}
+    }
+    set("invoice-total",d.controlTotal);set("invoice-count",d.rowCount);set("invoice-evidence",d.evidenceDigest);set("invoice-scope",d.scopeDigest);
+    show("invoice-review-result",d);break;
+   }
    default:throw Error("Unsupported action.");
   }
   if(start===epoch)status("Completed. Review the returned state before continuing.");
