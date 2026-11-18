@@ -13,6 +13,8 @@ function raw(request){
  });
 }
 async function main(){
+ const remaining=60000-Date.now()%60000;
+ if(remaining<12000)await new Promise(resolve=>setTimeout(resolve,remaining+250));
  const started=performance.now();
  const probe=await fetch(base+"/health",{signal:AbortSignal.timeout(5000)});
  assert.equal(probe.status,200);assert.equal((await probe.json()).database,"connected");
