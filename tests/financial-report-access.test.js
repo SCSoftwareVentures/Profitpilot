@@ -58,3 +58,18 @@ test("reconciliation runs inside calculation creation, never match review",async
  assert.ok(source.slice(calculationStart,calculationRead).includes("const reconciliation=reconcileFinancialReport(outputs,"));
  assert.ok(source.slice(calculationStart,calculationRead).includes("reconciliation})"));
 });
+
+test("financial calculation persists bounded source-row fingerprints, not source identifiers",async()=>{
+ const {readFile}=await import("node:fs/promises");
+ const source=await readFile(new URL("../server/index.js",import.meta.url),"utf8");
+ const start=source.indexOf('app.post("/v1/tenants/:tenantId/calculations"');
+ const end=source.indexOf('app.get("/v1/tenants/:tenantId/calculations/:runId"');
+ assert.ok(start>=0&&end>start);
+ const route=source.slice(start,end);
+ assert.match(route,/const invoiceEvidence=await client\.query/);
+ assert.match(route,/const costEvidence=await client\.query/);
+ assert.match(route,/mr\.decision='confirmed'/);
+ assert.match(route,/ar\.status='confirmed'/);
+ assert.match(route,/sourceEvidence\}\)/);
+ assert.match(route,/Source evidence counts changed during calculation/);
+});
