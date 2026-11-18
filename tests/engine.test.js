@@ -40,3 +40,14 @@ test("payroll rejects missing site and missing amount",()=>{
  assert.equal(allocatePayroll({pool:100,direct:[{site:"",amount:10}]}).reconciles,false);
  assert.equal(allocatePayroll({pool:100,direct:[{site:"A"}]}).reconciles,false);
 });
+
+test("portfolio totals sum exact cents across repeated small contracts",()=>{
+ const contracts=Array.from({length:100},()=>({revenue:"0.10",cost:"0.03"}));
+ const r=aggregateMetrics(contracts);
+ assert.deepEqual([r.revenue,r.cost,r.contribution],[10,3,7]);
+});
+test("portfolio rejects malformed and unsafe financial amounts",()=>{
+ for(const revenue of ["abc","0.001","90071992547409.92"]){
+  assert.throws(()=>aggregateMetrics([{revenue,cost:0}]),/Invalid contract amount/);
+ }
+});
