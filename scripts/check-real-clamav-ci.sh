@@ -10,15 +10,32 @@ cleanup(){ if [ -n "$PID" ]; then kill "$PID" 2>/dev/null || true; wait "$PID" 2
 trap cleanup EXIT
 # Freshclam's distribution setup may already have the current official
 # database; refresh only if the required version is missing or stale.
-if ! clamd --version | node -e 'let s="";process.stdin.on("data",b=>s+=b);process.stdin.on("end",async()=>{const {signaturesFresh}=await import("./server/clamav.js");if(!signaturesFresh(s.trim()))process.exitCode=1})'; then
+if ! sudo clamd --version | node -e 'let s="";process.stdin.on("data",b=>s+=b);process.stdin.on("end",async()=>{const {signaturesFresh}=await import("./server/clamav.js");if(!signaturesFresh(s.trim()))process.exitCode=1})'; then
   sudo freshclam --stdout
 fi
 test -d /var/lib/clamav
+# The distro freshclam user owns signature files. Copy only the official
+# database files into a private, runner-owned directory; never broaden
+# the system database permissions or run the scanner daemon as root.
+mkdir "$WORK/db"
+for name in main daily bytecode; do
+  selected=""
+  for extension in cvd cld; do
+    candidate="/var/lib/clamav/$name.$extension"
+    if sudo test -f "$candidate"; then
+      test -z "$selected"
+      sudo test ! -L "$candidate"
+      selected="$candidate"
+    fi
+  done
+  test -n "$selected"
+  sudo install -m 0600 -o "$(id -u)" -g "$(id -g)" "$selected" "$WORK/db/"
+done
 cat > "$WORK/clamd.conf" <<EOF
 Foreground yes
 LocalSocket $WORK/clamd.sock
 LocalSocketMode 0600
-DatabaseDirectory /var/lib/clamav
+DatabaseDirectory $WORK/db
 MaxThreads 2
 StreamMaxLength 64K
 EOF
