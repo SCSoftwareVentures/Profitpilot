@@ -179,12 +179,14 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/047_security_work_authority.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/048_sensitive_api_capabilities.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/049_privacy_rights_cases.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/050_payroll_correction_supersession.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/payroll-proposal-review.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/payroll-attested-confirmation.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/security-work-authority.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/payroll-correction-supersession.sql
 
       - name: Audit every tenant-scoped table and tenant-to-tenant foreign key
         env:
