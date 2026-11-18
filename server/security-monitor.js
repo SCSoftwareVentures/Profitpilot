@@ -1,7 +1,7 @@
 import {performance} from "node:perf_hooks";
 import {createSecurityAlertPolicy} from "./security-alert-policy.js";
 
-function newCounters(){return {requests:0,success:0,authDenied:0,roleDenied:0,rateLimited:0,otherClientError:0,unavailable:0,serverError:0,aborted:0,slow:0};}
+function newCounters(){return {requests:0,success:0,authDenied:0,roleDenied:0,rateLimited:0,actorContained:0,otherClientError:0,unavailable:0,serverError:0,aborted:0,slow:0};}
 // Aggregate only fixed enumerated fields. Never record headers, URLs,
 // identity, IP, body, user-controlled labels or exception contents.
 export function createSecurityMonitor({clock=()=>performance.now(),sink=event=>process.stdout.write(JSON.stringify(event)+"\n")}={}){
@@ -19,7 +19,7 @@ export function createSecurityMonitor({clock=()=>performance.now(),sink=event=>p
    const status=res.statusCode;
    if(status===401)counters.authDenied++;
    else if(status===403)counters.roleDenied++;
-   else if(status===429)counters.rateLimited++;
+   else if(status===429){counters.rateLimited++;if(res.locals?.actorContained===true)counters.actorContained++;}
    else if(status===503)counters.unavailable++;
    else if(status>=500)counters.serverError++;
    else if(status>=400)counters.otherClientError++;
