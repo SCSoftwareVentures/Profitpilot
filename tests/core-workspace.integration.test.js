@@ -37,21 +37,25 @@ test("core workspace is atomic, idempotent, tenant-scoped and financially unappr
   assert.deepEqual(responses.map(r=>r.status).sort(),[200,201]);
   const receipts=await Promise.all(responses.map(r=>r.json()));
   assert.equal(receipts[0].businessId,receipts[1].businessId);assert.equal(receipts[0].siteId,receipts[1].siteId);assert.equal(receipts[0].versionId,receipts[1].versionId);
-  assert.equal(receipts[0].contractId,setupId);assert.equal(receipts[0].versionStatus,"draft");
+  const contractId=receipts[0].contractId;assert.equal(receipts[1].contractId,contractId);assert.notEqual(contractId,setupId);assert.equal(receipts[0].setupId,setupId);assert.equal(receipts[0].versionStatus,"draft");
   assert.equal((await req(tenant,ownerSubject,"POST","",{...body,price:"1.00"})).status,409);
-  // A same-ID collision from another legitimate tenant must not retain
-  // the attempted business or site record when contract insertion fails.
-  assert.equal((await req(other,otherSubject,"POST","",body)).status,409);
-  assert.equal((await admin.query("SELECT count(*)::int AS n FROM public.businesses WHERE tenant_id=$1",[other])).rows[0].n,0);
-  assert.equal((await admin.query("SELECT count(*)::int AS n FROM public.sites WHERE tenant_id=$1",[other])).rows[0].n,0);
+  // The same client-generated setup ID is independently usable by another
+  // tenant, with no existence oracle or shared contract identity.
   assert.equal((await req(other,otherSubject,"GET","/"+setupId)).status,404);
+  const independent=await req(other,otherSubject,"POST","",{...body,price:"1.00"});
+  assert.equal(independent.status,201);const otherReceipt=await independent.json();
+  assert.notEqual(otherReceipt.contractId,contractId);assert.notEqual(otherReceipt.businessId,receipts[0].businessId);
+  const otherDetail=await req(other,otherSubject,"GET","/"+setupId);
+  assert.equal(otherDetail.status,200);assert.equal((await otherDetail.json()).contract_id,otherReceipt.contractId);
+  assert.equal((await admin.query("SELECT count(*)::int AS n FROM public.businesses WHERE tenant_id=$1",[tenant])).rows[0].n,1);
+  assert.equal((await admin.query("SELECT count(*)::int AS n FROM public.sites WHERE tenant_id=$1",[tenant])).rows[0].n,1);
   assert.equal((await req(tenant,otherSubject,"GET","/"+setupId)).status,403);
   const visible=await req(tenant,readerSubject,"GET","/"+setupId);assert.equal(visible.status,200);
-  const detail=await visible.json();assert.equal(detail.price,"12345.67");assert.equal(detail.version_status,"draft");assert.equal(detail.contract_id,setupId);
+  const detail=await visible.json();assert.equal(detail.price,"12345.67");assert.equal(detail.version_status,"draft");assert.equal(detail.contract_id,contractId);
   assert.ok(!Object.hasOwn(detail,"requestHash"));
-  const versions=await admin.query("SELECT version_no,price::text,approved_by,approved_at FROM public.contract_versions WHERE tenant_id=$1 AND contract_id=$2",[tenant,setupId]);
+  const versions=await admin.query("SELECT version_no,price::text,approved_by,approved_at FROM public.contract_versions WHERE tenant_id=$1 AND contract_id=$2",[tenant,contractId]);
   assert.deepEqual(versions.rows,[{version_no:1,price:"12345.67",approved_by:null,approved_at:null}]);
-  assert.equal((await admin.query("SELECT count(*)::int AS n FROM public.audit_events WHERE tenant_id=$1 AND object_id=$2 AND action='core_workspace_created'",[tenant,setupId])).rows[0].n,1);
+  assert.equal((await admin.query("SELECT count(*)::int AS n FROM public.audit_events WHERE tenant_id=$1 AND object_id=$2 AND action='core_workspace_created'",[tenant,contractId])).rows[0].n,1);
   assert.equal((await admin.query("SELECT private.verify_audit_chain($1) AS ok",[tenant])).rows[0].ok,true);
   const incident=randomUUID();
   await admin.query("SELECT private.activate_tenant_emergency($1,$2,'suspected_compromise','CI_WORKSPACE_CONTAIN')",[tenant,incident]);
