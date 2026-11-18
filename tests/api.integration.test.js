@@ -132,7 +132,9 @@ test("authenticated API enforces tenant membership, role permissions and import 
     for(const query of ["?limit=101","?limit=0","?limit=1&limit=2","?cursor=bad","?cursor="+contractA+"&cursor="+contractB,"?tenantId="+tenantB]){
      assert.equal((await request(listPath+query,{subject:"ci-api-reader"})).status,400);
     }
-    assert.equal((await request(listPath+"?cursor="+contractB,{subject:"ci-api-reader"})).status,200,"foreign cursor is a lower-bound value, not an object lookup");
+    const foreignCursor=await request(listPath+"?cursor="+contractB,{subject:"ci-api-reader"});
+    assert.equal(foreignCursor.status,200,"foreign cursor is a lower-bound value, not an object lookup");
+    assert.deepEqual(await foreignCursor.json(),{items:[],nextCursor:null});
     await admin.query("DELETE FROM contracts WHERE tenant_id=$1 AND id=$2",[tenantA,secondContract]);
     const ownIdentityRows=await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT auth_subject FROM users ORDER BY auth_subject"));
     assert.deepEqual(ownIdentityRows.rows.map(row=>row.auth_subject),["ci-api-analyst"],"a signed subject may read only its own global identity row");
