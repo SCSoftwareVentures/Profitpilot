@@ -31,6 +31,7 @@ export function prepareInvoiceReview(rows, contract) {
 
 export function syntheticPeriodReport({rows, decisions, contract}) {
   if (!Array.isArray(decisions)) throw new TypeError("Decisions must be an array");
+  if (decisions.some(d => !d || typeof d !== "object" || Array.isArray(d) || !Number.isSafeInteger(Number(d.rowNumber)) || String(d.rowNumber).trim() === "")) throw new TypeError("Decision must identify a valid source row");
   const reviewed = prepareInvoiceReview(rows, contract);
   const seen = new Set();
   const rowIds = reviewed.map(item => String(item.rowNumber));
