@@ -1,6 +1,16 @@
 // Synthetic-only workflow presenter. Never authorises an invoice or a financial result.
 // No external effects, network calls, storage or customer data.
-import {validateInvoiceRows, matchInvoice, money} from "./engine.js";
+import {validateInvoiceRows, matchInvoice} from "./engine.js";
+
+function amountInCents(value) {
+  const text = String(value);
+  if (!/^(?:0|[1-9]\\d*)(?:\\.\\d{1,2})?$/.test(text)) throw new Error("Invalid currency decimal");
+  const [whole, fraction = ""] = text.split(".");
+  const cents = BigInt(whole) * 100n + BigInt((fraction + "00").slice(0, 2));
+  if (cents > 99999999999999n) throw new Error("Invoice amount exceeds supported maximum");
+  return cents;
+}
+
 
 export function prepareInvoiceReview(rows, contract) {
   if (!Array.isArray(rows)) throw new TypeError("Invoice rows must be an array");
@@ -26,7 +36,7 @@ export function syntheticPeriodReport({rows, decisions, contract}) {
   const rowIds = reviewed.map(item => String(item.rowNumber));
   if (new Set(rowIds).size !== rowIds.length) throw new Error("Duplicate source row numbers");
   if (decisions.some(d => !rowIds.includes(String(d.rowNumber)))) throw new Error("Decision references unknown row");
-  let confirmedInvoiceAmount = 0;
+  let confirmedInvoiceCents = 0n;
   const entries = reviewed.map(item => {
     const matches = decisions.filter(d => String(d.rowNumber) === String(item.rowNumber));
     if (matches.length > 1) throw new Error("Conflicting or duplicate decisions");
@@ -40,7 +50,8 @@ export function syntheticPeriodReport({rows, decisions, contract}) {
       const invoiceId = item.record.invoice_id;
       if (seen.has(invoiceId)) throw new Error("Duplicate confirmed invoice ID");
       seen.add(invoiceId);
-      confirmedInvoiceAmount = money(confirmedInvoiceAmount + Number(item.record.amount));
+      confirmedInvoiceCents += amountInCents(item.record.amount);
+      if (confirmedInvoiceCents > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Confirmed invoice total exceeds safe precision");
     }
     return {rowNumber:item.rowNumber, invoiceId:item.record.invoice_id ?? null,
       status:item.status === "held" ? "held" : (decision?.status ?? "pending"),
@@ -48,7 +59,7 @@ export function syntheticPeriodReport({rows, decisions, contract}) {
   });
   // An invoice-only prototype is not an audited contribution or complete revenue measure.
   return {contractId:contract.id, periodStart:contract.periodStart, periodEnd:contract.periodEnd,
-    confirmedInvoiceAmount:money(confirmedInvoiceAmount), currency:"AUD",
+    confirmedInvoiceAmount:Number(confirmedInvoiceCents) / 100, currency:"AUD",
     eligibleRevenue:null, deliveryCosts:null, contribution:null,
     completeness:"incomplete", exclusions:["Other revenue sources not verified","Payroll and other delivery costs not reconciled"],
     entries};
