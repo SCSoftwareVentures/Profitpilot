@@ -681,6 +681,89 @@ paths:
         "409": { description: Conflicting state }
         "503": { description: Live processing closed or unavailable }
 
+  /tenants/{tenantId}/privacy/cases/{caseId}/deliveries/{orderId}/receipts/{reviewId}/preview:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: caseId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: reviewId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Preview exact receipt evidence scope
+      description: Owner/admin with recent MFA; independent offline evidence verification required. No actual transport or delivery assertion.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [challengeDigest, receiptDigest, receiptKeyDigest, verificationEvidenceDigest]
+              properties:
+                challengeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                receiptDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                receiptKeyDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                verificationEvidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        "200": { description: Minimized scope or review state }
+        "400": { description: Invalid request }
+        "403": { description: Authority denied }
+        "409": { description: Already reconciled or conflicting state }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/privacy/cases/{caseId}/deliveries/{orderId}/receipts/{reviewId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: caseId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: reviewId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read minimized receipt-review status
+      responses:
+        "200": { description: Evidence status, not proof of delivery }
+        "403": { description: Authority denied }
+    post:
+      summary: Record scoped receipt review action
+      description: Owner/admin with recent MFA; independent offline evidence verification required. No actual transport or delivery assertion.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [challengeDigest, receiptDigest, receiptKeyDigest, verificationEvidenceDigest, scopeDigest, step, confirm]
+              properties:
+                challengeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                receiptDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                receiptKeyDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                verificationEvidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                scopeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                step: { enum: [request, approve, reject, consume] }
+                confirm: { const: true }
+      responses:
+        "200": { description: Minimized scope or review state }
+        "400": { description: Invalid request }
+        "403": { description: Authority denied }
+        "409": { description: Already reconciled or conflicting state }
+        "503": { description: Live processing closed or unavailable }
+
 components:
   schemas:
     ErrorResponse:

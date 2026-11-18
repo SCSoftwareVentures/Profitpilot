@@ -14,7 +14,7 @@ import {proxyTrust,corsOrigins,createBoundedServer} from "./network-boundary.js"
 import {importIntakeGate,promotionProof} from "./intake-security.js";
 import {createReadinessGuard} from "./readiness-guard.js";
 import {productionReleaseGate} from "./release-gate.js";
-import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof,privacyCaseProof,payrollCorrectionPreviewProof,payrollCorrectionStatusProof,payrollCorrectionStepProof,privacyDeliveryPreviewProof,privacyDeliveryStatusProof,privacyDeliveryStepProof} from "./sensitive-operation-proof.js";
+import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof,privacyCaseProof,payrollCorrectionPreviewProof,payrollCorrectionStatusProof,payrollCorrectionStepProof,privacyDeliveryPreviewProof,privacyDeliveryStatusProof,privacyDeliveryStepProof,privacyReceiptPreviewProof,privacyReceiptStatusProof,privacyReceiptStepProof} from "./sensitive-operation-proof.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
 import {quarantineConfig,sealQuarantine,MAX_QUARANTINE_BYTES} from "./quarantine.js";
@@ -49,7 +49,7 @@ app.use("/v1/tenants/:tenantId/imports",importIntakeGate());
 app.use("/v1",express.json({limit:"100kb",inflate:false}));
 app.use("/v1",enforceJsonBudget);
 const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-for(const param of ["batchId","matchId","runId","proposalId","orderId","caseId"])app.param(param,(req,res,next,value)=>uuidPattern.test(value)?next():res.status(400).json({error:"Invalid resource ID"}));
+for(const param of ["batchId","matchId","runId","proposalId","orderId","caseId","reviewId"])app.param(param,(req,res,next,value)=>uuidPattern.test(value)?next():res.status(400).json({error:"Invalid resource ID"}));
 const requestTenant=(req,tenantId,fn)=>withTenant(tenantId,req.identity.subject,fn,req.identity);
 
 async function membership(req,res,next){
@@ -418,6 +418,35 @@ app.post("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId",membe
    typeof b.scopeDigest!=="string"||!/^[a-f0-9]{64}$/.test(b.scopeDigest)||/^0+$/.test(b.scopeDigest))return res.status(400).json({error:"Explicit scoped privacy action required"});
   const args=privacyDeliveryStepProof(req.membership.tenantId,req.params.caseId.toLowerCase(),req.params.orderId.toLowerCase(),deliveryFields.map(k=>b[k]),b.scopeDigest,b.step,req.identity);
   return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_delivery_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) AS result",args));
+ }catch(e){return failSensitive(e,res,next);}
+});
+
+
+const receiptFields=["challengeDigest","receiptDigest","receiptKeyDigest","verificationEvidenceDigest"];
+const validReceiptInput=b=>receiptFields.every(k=>typeof b[k]==="string"&&/^[a-f0-9]{64}$/.test(b[k])&&!/^0+$/.test(b[k]))&&b.challengeDigest!==b.receiptDigest;
+const receiptIds=req=>[req.membership.tenantId,req.params.caseId.toLowerCase(),req.params.orderId.toLowerCase(),req.params.reviewId.toLowerCase()];
+app.post("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId/receipts/:reviewId/preview",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;
+  if(!emptyQuery(req)||!exactBody(b,receiptFields)||!validReceiptInput(b))return res.status(400).json({error:"Exact receipt evidence scope required"});
+  const args=privacyReceiptPreviewProof(...receiptIds(req),receiptFields.map(k=>b[k]),req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_receipt_preview($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) AS result",args));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId/receipts/:reviewId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  const args=privacyReceiptStatusProof(...receiptIds(req),req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_receipt_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) AS result",args));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId/receipts/:reviewId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;
+  if(!emptyQuery(req)||!exactBody(b,[...receiptFields,"scopeDigest","step","confirm"])||!validReceiptInput(b)||b.confirm!==true||!["request","approve","reject","consume"].includes(b.step)||
+   typeof b.scopeDigest!=="string"||!/^[a-f0-9]{64}$/.test(b.scopeDigest)||/^0+$/.test(b.scopeDigest))return res.status(400).json({error:"Explicit scoped receipt action required"});
+  const args=privacyReceiptStepProof(...receiptIds(req),receiptFields.map(k=>b[k]),b.scopeDigest,b.step,req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_receipt_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) AS result",args));
  }catch(e){return failSensitive(e,res,next);}
 });
 

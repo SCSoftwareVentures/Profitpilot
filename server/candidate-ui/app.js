@@ -10,6 +10,7 @@ el("new-order").addEventListener("click",()=>{if(!busy)el("order").value=crypto.
 el("new-case").addEventListener("click",()=>{if(!busy)el("case").value=crypto.randomUUID();});
 el("new-correction").addEventListener("click",()=>{if(!busy)el("correction-order").value=crypto.randomUUID();});
 el("new-delivery").addEventListener("click",()=>{if(!busy)el("delivery-order").value=crypto.randomUUID();});
+el("new-receipt").addEventListener("click",()=>{if(!busy)el("receipt-review").value=crypto.randomUUID();});
 window.addEventListener("pagehide",clear);
 async function operation(action){
  if(busy)return;
@@ -58,10 +59,20 @@ async function operation(action){
     }
     break;
    }
+   case "receipt-preview":
+   case "receipt-status":
+   case "receipt-step":{
+    path="/privacy/cases/"+clean("receipt-case")+"/deliveries/"+clean("receipt-release")+"/receipts/"+clean("receipt-review");
+    if(action!=="receipt-status"){
+     body={challengeDigest:digest("receipt-challenge"),receiptDigest:digest("receipt-digest"),receiptKeyDigest:digest("receipt-signer"),verificationEvidenceDigest:digest("receipt-evidence")};
+     if(action==="receipt-preview")path+="/preview";
+     else{checked("receipt-confirm");body.step=el("receipt-step").value;body.scopeDigest=digest("receipt-scope");body.confirm=true;el("receipt-confirm").checked=false;}
+    }break;
+   }
    default:throw Error("Unknown operation.");
   }
   busy=true;active=true;controller=new AbortController();
-  for(const b of document.querySelectorAll("button[data-operation],#new-order,#new-case,#new-correction,#new-delivery"))b.disabled=true;
+  for(const b of document.querySelectorAll("button[data-operation],#new-order,#new-case,#new-correction,#new-delivery,#new-receipt"))b.disabled=true;
   el("status").textContent="Request in progress.";
   const res=await fetch("/v1/tenants/"+t+path,{method:body===undefined?"GET":"POST",headers:{Authorization:"Bearer "+token,...(body===undefined?{}:{"Content-Type":"application/json"})},credentials:"omit",cache:"no-store",redirect:"error",signal:controller.signal,body:body===undefined?undefined:JSON.stringify(body)});
   const data=await res.json();
@@ -72,6 +83,7 @@ async function operation(action){
    el("proposal").value=data.proposalId;el("digest").value=data.evidenceDigest;
   }
   if(res.ok&&action==="preview"&&sha.test(data.scopeDigest||""))el("scope").value=data.scopeDigest;
+  if(res.ok&&["receipt-preview","receipt-status"].includes(action)&&sha.test(data.scopeDigest||"")){el("receipt-scope").value=data.scopeDigest;el("receipt-confirm").checked=false;}
   if(res.ok&&["delivery-preview","delivery-status"].includes(action)&&sha.test(data.scopeDigest||"")){el("delivery-scope").value=data.scopeDigest;el("delivery-confirm").checked=false;}
   if(res.ok&&action==="correction-preview"&&sha.test(data.scopeDigest||"")&&sha.test(data.proposalDigest||"")){
    el("correction-scope").value=data.scopeDigest;el("correction-digest").value=data.proposalDigest;
@@ -81,6 +93,6 @@ async function operation(action){
    el("correction-confirm").checked=false;
   }
  }catch(e){if(current===epoch)el("status").textContent=e.name==="AbortError"?"Request cancelled.":(active?"Request unavailable.":e.message);}
- finally{if(active){busy=false;controller=null;for(const b of document.querySelectorAll("button[data-operation],#new-order,#new-case,#new-correction,#new-delivery"))b.disabled=false;}}
+ finally{if(active){busy=false;controller=null;for(const b of document.querySelectorAll("button[data-operation],#new-order,#new-case,#new-correction,#new-delivery,#new-receipt"))b.disabled=false;}}
 }
 for(const node of document.querySelectorAll("button[data-operation]"))node.addEventListener("click",()=>operation(node.dataset.operation));

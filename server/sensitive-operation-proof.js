@@ -99,3 +99,26 @@ export function privacyDeliveryStepProof(tenant,caseId,order,input,scope,step,id
  const signed=securityWorkProof(tenant,order,"privileged_operation",scope,step,identity,env,now);
  return [tenant,caseId,order,...input,scope,step,...signed.slice(5)];
 }
+
+function receiptIds(tenant,caseId,release,review){
+ if(![tenant,caseId,release,review].every(x=>typeof x==="string"&&uuid.test(x))||release===review)denied();
+}
+function receiptInput(tenant,caseId,release,review,input){
+ receiptIds(tenant,caseId,release,review);
+ if(!Array.isArray(input)||input.length!==4||!input.every(x=>typeof x==="string"&&digest.test(x)&&!/^0+$/.test(x))||input[0]===input[1])denied();
+}
+export function privacyReceiptPreviewProof(tenant,caseId,release,review,input,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ receiptInput(tenant,caseId,release,review,input);
+ const scope=createHash("sha256").update(["privacy-receipt-preview-v1",caseId,release,...input].join("\n")).digest("hex");
+ return [...signedAction("profitpilot-sensitive-api-v1",[tenant,review,"privacy_receipt_preview",scope],identity,env,now),caseId,release,...input];
+}
+export function privacyReceiptStatusProof(tenant,caseId,release,review,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ receiptIds(tenant,caseId,release,review);
+ const scope=createHash("sha256").update(["privacy-receipt-status-v1",caseId,release].join("\n")).digest("hex");
+ return [...signedAction("profitpilot-sensitive-api-v1",[tenant,review,"privacy_receipt_status",scope],identity,env,now),caseId,release];
+}
+export function privacyReceiptStepProof(tenant,caseId,release,review,input,scope,step,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ receiptInput(tenant,caseId,release,review,input);
+ const signed=securityWorkProof(tenant,review,"privileged_operation",scope,step,identity,env,now);
+ return [tenant,caseId,release,review,...input,scope,step,...signed.slice(5)];
+}

@@ -93,6 +93,42 @@ test("actual authenticated privacy case and release API",{skip:!process.env.TEST
   assert.equal((await expect("reviewer",deliveryPath,200)).status,"release-authorized");
   await assert.rejects(()=>runtime.query("SELECT * FROM private.privacy_delivery_requests"),e=>e.code==="42501");
   await assert.rejects(()=>runtime.query("SELECT * FROM private.privacy_delivery_authorizations"),e=>e.code==="42501");
+
+  // Evidence-only reconciliation: no submitted key material, signatures, or
+  // assertion of delivery. The release and review orders must be distinct.
+  const reviewId=randomUUID(),receiptPath=deliveryPath+"/receipts/"+reviewId;
+  const input={challengeDigest:hash("synthetic challenge"),receiptDigest:hash("synthetic acknowledgement"),receiptKeyDigest:hash("independently checked signing key"),verificationEvidenceDigest:hash("independent offline verification")};
+  assert.equal((await expect("owner",deliveryPath,200)).receiptEvidenceRecorded,false);
+  await expect("reader",receiptPath+"/preview",403,{body:input});
+  await expect("reviewer",receiptPath+"/preview",403,{tenant:other,body:input});
+  await expect("owner",receiptPath+"/preview",403,{body:input,claims:{amr:["pwd"]}});
+  await expect("owner",receiptPath+"/preview",400,{body:{...input,delivered:true}});
+  await expect("owner",receiptPath+"/preview",403,{body:{...input,receiptKeyDigest:deliveryInput.senderKeyDigest}});
+  await expect("owner",deliveryPath+"/receipts/"+deliveryOrder+"/preview",403,{body:input});
+  await expect("owner",casePath+"/deliveries/"+randomUUID()+"/receipts/"+reviewId+"/preview",403,{body:input});
+  const preview=await expect("owner",receiptPath+"/preview",200,{body:input});
+  assert.equal(preview.deliveryVerified,false);assert.equal(preview.receiptEvidenceRecorded,false);
+  const op=(step,change={})=>({...input,scopeDigest:preview.scopeDigest,step,confirm:true,...change});
+  await expect("owner",receiptPath,403,{body:op("consume")});
+  await expect("owner",receiptPath,403,{body:op("request",{scopeDigest:hash("forgery")})});
+  assert.equal((await expect("owner",receiptPath,200,{body:op("request")})).status,"requested");
+  await expect("reader",receiptPath,403);
+  await expect("reviewer",receiptPath,403,{tenant:other});
+  await expect("owner",receiptPath,403,{body:op("approve")});
+  await expect("reviewer",receiptPath,403,{body:op("approve",{receiptDigest:hash("substitute")})});
+  assert.equal((await expect("reviewer",receiptPath,200,{body:op("approve")})).status,"approved");
+  await expect("reviewer",receiptPath,403,{body:op("consume")});
+  const recorded=await expect("owner",receiptPath,200,{body:op("consume")});
+  assert.equal(recorded.status,"evidence-recorded");assert.equal(recorded.receiptEvidenceRecorded,true);assert.equal(recorded.deliveryVerified,false);
+  assert.ok(!Object.hasOwn(recorded,"receiptDigest")&&!Object.hasOwn(recorded,"verificationEvidenceDigest"));
+  await expect("owner",receiptPath,409,{body:op("consume")});
+  const receiptStatus=await expect("reviewer",receiptPath,200);
+  assert.equal(receiptStatus.status,"evidence-recorded");
+  const releaseStatus=await expect("owner",deliveryPath,200);
+  assert.equal(releaseStatus.receiptEvidenceRecorded,true);assert.equal(releaseStatus.deliveryVerified,false);
+  await expect("owner",deliveryPath+"/receipts/"+randomUUID()+"/preview",409,{body:input});
+  await assert.rejects(()=>runtime.query("SELECT * FROM private.privacy_receipt_requests"),e=>e.code==="42501");
+  await assert.rejects(()=>runtime.query("SELECT * FROM private.privacy_receipt_evidence"),e=>e.code==="42501");
   assert.equal((await admin.query("SELECT private.verify_audit_chain($1) AS ok",[t])).rows[0].ok,true);
  }finally{await new Promise(r=>api.close(r));await new Promise(r=>keys.close(r));await Promise.all([admin.end(),runtime.end()]);}
 });
