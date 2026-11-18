@@ -8,6 +8,7 @@ const next={...baseline,users:[{...baseline.users[0],status:"disabled"}],members
 const {privateKey,publicKey}=generateKeyPairSync("ed25519"),backup="c".repeat(64);
 const bind=doc=>({backupSha256:backup,expectedManifestSha256:securityRecoveryDigest(doc)});
 test("security recovery binds exact canonical inventory and independently approved archive",()=>{
+ assert.throws(()=>signSecurityRecovery(next,backup,privateKey,"1970-01-01T00:00:01.000Z"),/postdates/);
  const doc=signSecurityRecovery(next,backup,privateKey);
  assert.deepEqual(verifySecurityRecovery(doc,publicKey,bind(doc)),canonicalSecurityInventory(next));
  const forged={...doc,payload:{...doc.payload,inventory:baseline}};
