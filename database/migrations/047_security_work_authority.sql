@@ -119,6 +119,41 @@ BEGIN
 END $fn$;
 REVOKE ALL ON FUNCTION private.security_work_actor(uuid,uuid,text,text,text,bigint,bigint,text,bigint,text,text,text),private.record_security_work(uuid,uuid,text,text,text,bigint,bigint,text,bigint,text,text,text) FROM PUBLIC,profitpilot_app;
 
+-- Bind a disposal work order to the current due, approved invoice staging.
+-- Existing core checks exclude payroll, financial evidence, active holds,
+-- and referenced rows. This does not grant broad data erasure.
+CREATE FUNCTION private.invoice_disposal_work_scope(p_tenant uuid,p_batch uuid)
+RETURNS text LANGUAGE plpgsql SET search_path=pg_catalog SET timezone='UTC' AS $fn$
+DECLARE file_hash text; authority text; until_at timestamptz; content_hash text;
+BEGIN
+ IF private.current_tenant_id() IS DISTINCT FROM p_tenant OR private.lock_tenant_available(p_tenant) IS DISTINCT FROM true THEN
+  RAISE EXCEPTION 'Disposal work scope denied' USING ERRCODE='42501'; END IF;
+ file_hash:=private.assert_disposable_import(p_tenant,p_batch);
+ SELECT approval_ref,retention_until INTO authority,until_at FROM private.import_disposal_controls WHERE tenant_id=p_tenant AND batch_id=p_batch;
+ IF authority IS NULL OR until_at IS NULL OR until_at>clock_timestamp() THEN RAISE EXCEPTION 'Retention approval missing or not due'; END IF;
+ PERFORM 1 FROM public.raw_import_rows WHERE tenant_id=p_tenant AND batch_id=p_batch FOR UPDATE;
+ SELECT encode(public.digest(convert_to(coalesce(jsonb_agg(jsonb_build_array(id,row_number,payload) ORDER BY row_number,id),'[]'::jsonb)::text,'UTF8'),'sha256'),'hex')
+ INTO content_hash FROM public.raw_import_rows WHERE tenant_id=p_tenant AND batch_id=p_batch;
+ RETURN encode(public.digest(convert_to(jsonb_build_array('profitpilot-invoice-disposal-v1',p_tenant,p_batch,file_hash,authority,until_at,content_hash)::text,'UTF8'),'sha256'),'hex');
+END $fn$;
+
+CREATE FUNCTION private.execute_attested_invoice_disposal(
+ p_tenant uuid,p_order uuid,p_batch uuid,p_scope text,p_auth bigint,p_iat bigint,
+ p_session text,p_expires bigint,p_nonce text,p_key text,p_signature text)
+RETURNS integer LANGUAGE plpgsql SET search_path=pg_catalog AS $fn$
+DECLARE removed integer;
+BEGIN
+ -- Authenticate and lock actor/tenant before loading the target.
+ PERFORM private.security_work_actor(p_tenant,p_order,'privacy_disposal',p_scope,'consume',p_auth,p_iat,p_session,p_expires,p_nonce,p_key,p_signature);
+ IF private.invoice_disposal_work_scope(p_tenant,p_batch) IS DISTINCT FROM p_scope THEN
+  RAISE EXCEPTION 'Disposal scope changed' USING ERRCODE='42501'; END IF;
+ PERFORM private.record_security_work(p_tenant,p_order,'privacy_disposal',p_scope,'consume',p_auth,p_iat,p_session,p_expires,p_nonce,p_key,p_signature);
+ removed:=private.execute_import_disposal(p_tenant,p_batch);
+ RETURN removed;
+END $fn$;
+REVOKE ALL ON FUNCTION private.invoice_disposal_work_scope(uuid,uuid),
+ private.execute_attested_invoice_disposal(uuid,uuid,uuid,text,bigint,bigint,text,bigint,text,text,text) FROM PUBLIC,profitpilot_app;
+
 -- More conservative reference classification in both JSON and CSV paths.
 -- Preserve existing structured amount/date/UUID exceptions in the caller.
 CREATE OR REPLACE FUNCTION private.import_reference_safe(p_value text,p_max integer,p_filename boolean DEFAULT false)
@@ -235,6 +270,41 @@ BEGIN
  VALUES(p_tenant,actor,'security_work_'||p_step,'security_work_order',p_order,jsonb_build_object('kind',p_kind,'scopeDigest',p_scope));
 END $fn$;
 REVOKE ALL ON FUNCTION private.security_work_actor(uuid,uuid,text,text,text,bigint,bigint,text,bigint,text,text,text),private.record_security_work(uuid,uuid,text,text,text,bigint,bigint,text,bigint,text,text,text) FROM PUBLIC,profitpilot_app;
+
+-- Bind a disposal work order to the current due, approved invoice staging.
+-- Existing core checks exclude payroll, financial evidence, active holds,
+-- and referenced rows. This does not grant broad data erasure.
+CREATE FUNCTION private.invoice_disposal_work_scope(p_tenant uuid,p_batch uuid)
+RETURNS text LANGUAGE plpgsql SET search_path=pg_catalog SET timezone='UTC' AS $fn$
+DECLARE file_hash text; authority text; until_at timestamptz; content_hash text;
+BEGIN
+ IF private.current_tenant_id() IS DISTINCT FROM p_tenant OR private.lock_tenant_available(p_tenant) IS DISTINCT FROM true THEN
+  RAISE EXCEPTION 'Disposal work scope denied' USING ERRCODE='42501'; END IF;
+ file_hash:=private.assert_disposable_import(p_tenant,p_batch);
+ SELECT approval_ref,retention_until INTO authority,until_at FROM private.import_disposal_controls WHERE tenant_id=p_tenant AND batch_id=p_batch;
+ IF authority IS NULL OR until_at IS NULL OR until_at>clock_timestamp() THEN RAISE EXCEPTION 'Retention approval missing or not due'; END IF;
+ PERFORM 1 FROM public.raw_import_rows WHERE tenant_id=p_tenant AND batch_id=p_batch FOR UPDATE;
+ SELECT encode(public.digest(convert_to(coalesce(jsonb_agg(jsonb_build_array(id,row_number,payload) ORDER BY row_number,id),'[]'::jsonb)::text,'UTF8'),'sha256'),'hex')
+ INTO content_hash FROM public.raw_import_rows WHERE tenant_id=p_tenant AND batch_id=p_batch;
+ RETURN encode(public.digest(convert_to(jsonb_build_array('profitpilot-invoice-disposal-v1',p_tenant,p_batch,file_hash,authority,until_at,content_hash)::text,'UTF8'),'sha256'),'hex');
+END $fn$;
+
+CREATE FUNCTION private.execute_attested_invoice_disposal(
+ p_tenant uuid,p_order uuid,p_batch uuid,p_scope text,p_auth bigint,p_iat bigint,
+ p_session text,p_expires bigint,p_nonce text,p_key text,p_signature text)
+RETURNS integer LANGUAGE plpgsql SET search_path=pg_catalog AS $fn$
+DECLARE removed integer;
+BEGIN
+ -- Authenticate and lock actor/tenant before loading the target.
+ PERFORM private.security_work_actor(p_tenant,p_order,'privacy_disposal',p_scope,'consume',p_auth,p_iat,p_session,p_expires,p_nonce,p_key,p_signature);
+ IF private.invoice_disposal_work_scope(p_tenant,p_batch) IS DISTINCT FROM p_scope THEN
+  RAISE EXCEPTION 'Disposal scope changed' USING ERRCODE='42501'; END IF;
+ PERFORM private.record_security_work(p_tenant,p_order,'privacy_disposal',p_scope,'consume',p_auth,p_iat,p_session,p_expires,p_nonce,p_key,p_signature);
+ removed:=private.execute_import_disposal(p_tenant,p_batch);
+ RETURN removed;
+END $fn$;
+REVOKE ALL ON FUNCTION private.invoice_disposal_work_scope(uuid,uuid),
+ private.execute_attested_invoice_disposal(uuid,uuid,uuid,text,bigint,bigint,text,bigint,text,text,text) FROM PUBLIC,profitpilot_app;
 
 -- More conservative reference classification in both JSON and CSV paths.
 -- Preserve existing structured amount/date/UUID exceptions in the caller.
