@@ -10,6 +10,7 @@ export function jsonWithinBudget(body){
   const {value,depth}=pending.pop();
   if(++seen>MAX_JSON_NODES||depth>MAX_JSON_DEPTH)return false;
   if(typeof value==="string"){if(/[\u0000\uD800-\uDFFF]/u.test(value))return false;continue;}
+  if(typeof value==="number"&&!Number.isFinite(value))return false;
   if(value===null||typeof value!=="object")continue;
   for(const k of Object.keys(value)){
    if(k==="__proto__"||k==="constructor"||k==="prototype"||/[\u0000\uD800-\uDFFF]/u.test(k))return false;
