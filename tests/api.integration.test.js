@@ -159,6 +159,17 @@ test("authenticated API enforces tenant membership, role permissions and import 
     });
     assert.equal(readerWrite.status,403,"read_only members must not create imports");
 
+    const financialRun="99999999-9999-4999-8999-999999999998";
+    const financialPath=`/v1/tenants/${tenantA}/calculations/${financialRun}`;
+    const financialReader=await request(financialPath,{subject:"ci-api-reader"});
+    assert.equal(financialReader.status,403,"read_only tenant members must not access financial calculation reports");
+    const financialAnalyst=await request(financialPath,{subject:"ci-api-analyst"});
+    assert.equal(financialAnalyst.status,404,"authorised analysts must reach the report lookup, not the role denial");
+    const financialOtherTenant=await request(financialPath,{subject:"ci-api-tenant-b-only"});
+    assert.equal(financialOtherTenant.status,403,"tenant B members must not read tenant A financial reports");
+    const financialUnauthenticated=await request(financialPath);
+    assert.equal(financialUnauthenticated.status,401,"financial report requests require authentication");
+
     await admin.query("UPDATE tenant_memberships SET status='revoked' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);
     const revoked=await request(`/v1/tenants/${tenantA}/contracts`,{subject:"ci-api-analyst"});
     assert.equal(revoked.status,403,"revoked memberships must lose access immediately");
