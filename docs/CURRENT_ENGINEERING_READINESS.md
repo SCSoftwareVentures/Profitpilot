@@ -1,0 +1,20 @@
+# Current engineering and acquisition readiness
+**Date:** 18 November 2026  
+**Active draft:** PR #40, core/payroll-reconciliation-20261118, stacked on security PR #38. Neither is merged or deployed.  
+**Latest fully verified baseline at time of writing:** commit `da65c3f0c5a49c83252ab4f1503452e0d472a74a`, [CI #2092](https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44303086497), six successful jobs. Connected candidate workspace changes follow this baseline and require a fresh exact-head CI.  
+**Decision:** build-to-sell, no production activation, no paid services or spend, no external release without owner approval. No valuation or independent assurance claimed.
+
+| Workstream | Repository candidate status | Remaining acceptance |
+|---|---|---|
+| Foundational security / supply chain | Automated security gates passed through migration 067; least privilege, MFA, signed provenance, restricted runtime, scanner and synthetic recovery | Independent penetration test, production network/load, operational key custody, live backup/recovery and legal/privacy acceptance |
+| Privacy rights / delivery | Assisted cases, identity-reviewed release scope, encrypted envelope, receipt evidence, dispatch revocation and key lifecycle implementation | No live external delivery or independently verified identity/custody; production acceptance |
+| Payroll intake / source mapping | Canonical minimized AUD source, exact totals, reviewed intake / allocation, independent confirmation, correction and report path tested with synthetic PostgreSQL data | Approved policy for overlapping entities/negative adjustments, full correction population equivalence, provider onboarding, actual finance review |
+| Businesses, customers, contracts and sites | Managed creation, bounded read, site assignment, independently approved nonoverlapping exact baseline and immutable history | Tenant bootstrap, delegated membership workflows, archive/edit/versioned scope amendments, expanded commercial detail and other currencies |
+| Job readiness | Shared readiness engine integrated with persisted job ledger, approved date/site baseline and exact lifecycle gate | Scheduling/roster, field user roles, job amendment, customer participation, actual evidence and safety review |
+| Frontend | Connected nonproduction workspace with actual API calls plus separate operator workbench | Exact-head CI, real browser/iPhone/accessibility testing, coherent identity onboarding, invoice workflow, customer portal, formatted report export |
+| Invoice import/match | Registration, constrained staging, quarantine/validation/promotion infrastructure and match review controls | Seamless invoice materialization, source-to-invoice lineage and end-to-end invoice creation/mapping; scope/evidence validation |
+| Financial reporting | Confirmed invoice/payroll management output, provenance/limitation checks and scoped export | Other costs, variation and coverage workflows; meaningful complete profit/margin remains withheld; enhanced reports |
+| Six differentiators | Job Readiness integrated; Promise Ledger, Verified Value Ledger, Profit Leak Radar, SwitchProof and Field Knowledge have tested pure prototype logic | Persistent domain integration, authorization and buyer-facing operational journeys for the other five |
+| Acquisition | Draft engineering assets, synthetic automated acceptance, architecture and handover documents | Consolidated buyer demo, reproducible setup, complete traceability/IP diligence, independent assessment, buyer testing and commercial evidence |
+
+Proceed in this order: (1) verify connected candidate UI, (2) finish end-to-end invoice promotion and mapping, (3) identity/admin and business lifecycle, (4) remaining differentiator domain/UI integration, (5) variation/financial completeness and reports, (6) buyer demo, acceptance and handover. External validation and production release remain separate decisions. This current snapshot supersedes older branch and feature-status assertions in historical register sections; no prior recorded evidence is deleted.

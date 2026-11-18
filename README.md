@@ -6,13 +6,11 @@ ProfitPilot is a proposed business operations and customer transaction-managemen
 
 ProfitPilot is an **unreleased software prototype and acquisition-readiness project**. The target product is contract-economics reconciliation and exception control for Australian independent commercial cleaning contractors with recurring multi-site B2B contracts. It is not a deployed SaaS service, an accounting/payroll replacement, a verified accounting system or a commercially validated business.
 
-- PR #25 and PR #26 are historical source/review branches.
-- PR #27 is the combined security/product-design integration candidate.
-- PR #28 (`hardening/financial-security-followup`) is the current draft hardening branch, based on PR #27. It remains open, draft and unmerged.
-- PR #28 contains exact decimal-string money boundaries, PostgreSQL TLS fail-closed configuration, reviewer/actor database controls through migration 014, property tests and related financial/security hardening.
-- Current PR #28 CI evidence and its exact commit are recorded in the pull request. Passing CI proves only the configured automated tests on the stated commit; it is not independent security assurance, accounting/tax approval, privacy/legal clearance, customer validation or production readiness.
-
-The browser dashboard is a **synthetic local demonstration**. It does not connect to the API, authenticate users, persist customer data or provide secure server-side import. Invoice CSV validation runs in the browser only. Payroll ingestion remains deliberately disabled.
+- Active work: draft PR #40, core/payroll-reconciliation-20261118, stacked on security PR #38. Earlier PRs and their evidence are historical.
+- Latest fully verified baseline at documentation time: migration 067, commit da65c3f0c5a49c83252ab4f1503452e0d472a74a; CI #2092 passed all six jobs. New connected UI changes require fresh exact-head verification.
+- Synthetic-only secure payroll intake and allocation, independent confirmation, commercial workspace creation, contract baseline review and persisted job readiness are implemented in the candidate.
+- The connected candidate workspace is at `/candidate/workspace/` when explicitly enabled in a nonproduction test environment. The separate `/candidate/security/` workbench handles controlled privacy and security actions. `app/index.html` remains the legacy offline visual demonstration.
+- [Current readiness register](docs/CURRENT_ENGINEERING_READINESS.md) · [Connected workspace instructions](docs/CONNECTED_CANDIDATE_WORKSPACE.md). Real data, external transmission, production activation and merge remain disabled or unauthorised. Passing CI is not independent security, financial, privacy or legal acceptance.
 
 ## Initial validation approach
 

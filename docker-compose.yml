@@ -94,6 +94,7 @@ services:
     environment:
       # Local loopback development only; production requires a separate TLS-enabled deployment.
       NODE_ENV: development
+      SYNTHETIC_SECURITY_UI_ENABLED: ${SYNTHETIC_SECURITY_UI_ENABLED:-false}
       PORT: 8080
       DATABASE_URL: postgres://profitpilot_app:${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD}@db:5432/profitpilot
       DATABASE_SSL: "false"

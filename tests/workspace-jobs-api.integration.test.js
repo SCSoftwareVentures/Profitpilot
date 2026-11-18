@@ -29,6 +29,9 @@ test("approved commercial baseline through jobs and readiness lifecycle",{skip:!
  const expect=async(role,path,status,opts={})=>{const result=await call(role,path,opts);assert.equal(result.status,status,path+" / "+role+" "+JSON.stringify(result.data));return result.data;};
  const hash=s=>createHash("sha256").update(s).digest("hex");
  try{
+  const product=await fetch(base+"/candidate/workspace/");
+  assert.equal(product.status,200);assert.match(product.headers.get("cache-control"),/no-store/);assert.match(product.headers.get("content-security-policy"),/script-src 'self'/);assert.match(await product.text(),/Operations &amp; evidence/);
+  for(const asset of ["app.js","core.js","style.css"]){const response=await fetch(base+"/candidate/workspace/"+asset);assert.equal(response.status,200);assert.match(response.headers.get("cache-control"),/no-store/);}
   const screen=await fetch(base+"/candidate/security/");
   assert.equal(screen.status,200);assert.match(screen.headers.get("cache-control"),/no-store/);assert.match(screen.headers.get("content-security-policy"),/script-src 'self'/);
   assert.match(await screen.text(),/Non-production, synthetic records only/);

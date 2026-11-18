@@ -46,6 +46,7 @@ app.get("/health",async(req,res)=>{try{if(process.env.NODE_ENV==="production"){i
 app.use(productionReleaseGate());
 if(process.env.NODE_ENV!=="production"&&process.env.SYNTHETIC_SECURITY_UI_ENABLED==="true"){
  app.use("/candidate/security",express.static(fileURLToPath(new URL("./candidate-ui/",import.meta.url)),{index:"index.html",dotfiles:"deny",fallthrough:false,redirect:true,etag:false,lastModified:false}));
+ app.use("/candidate/workspace",express.static(fileURLToPath(new URL("./product-ui/",import.meta.url)),{index:"index.html",dotfiles:"deny",fallthrough:false,redirect:true,etag:false,lastModified:false}));
 }
 app.use("/v1",authRequired());
 app.use("/v1",sessionRequired(checkIdentitySession));
