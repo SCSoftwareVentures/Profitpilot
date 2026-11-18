@@ -121,6 +121,8 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/025_identity_admin_recovery.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/026_quarantine_promotion.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/027_audit_checkpoint_reader.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/028_private_privilege_boundary.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
 
       - name: Audit every tenant-scoped table and tenant-to-tenant foreign key
@@ -237,6 +239,7 @@ jobs:
           RESTORE_ADMIN_URL="postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot_restore_ci"
           RESTORE_APP_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot_restore_ci"
           psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.catalog.sql
+          psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$RESTORE_APP_URL" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.runtime.sql
           TEST_RESTORE_ADMIN_DATABASE_URL="$RESTORE_ADMIN_URL" TEST_RESTORE_APP_DATABASE_URL="$RESTORE_APP_URL" node --test tests/backup-restore.integration.test.js
           psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DROP DATABASE profitpilot_restore_ci'
