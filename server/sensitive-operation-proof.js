@@ -40,3 +40,13 @@ export function sensitiveApiProof(tenant,target,action,scope,identity,env=proces
  (action==="account_correct_email" ? /^0+$/.test(scope) : !/^0+$/.test(scope)))denied();
  return signedAction("profitpilot-sensitive-api-v1",[tenant,target,action,scope],identity,env,now);
 }
+
+export function privacyCaseProof(tenant,caseId,action,kind,reason,evidence,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ if(!uuid.test(tenant)||!uuid.test(caseId)||!["privacy_case_request","privacy_case_intake","privacy_case_status","privacy_case_acknowledge","privacy_case_resolve","privacy_case_refuse"].includes(action))denied();
+ const opening=["privacy_case_request","privacy_case_intake"].includes(action),outcome=["privacy_case_resolve","privacy_case_refuse"].includes(action);
+ if(opening? !["access","correction","disposal","complaint"].includes(kind)||reason!==null :kind!==null)denied();
+ if(outcome? !((action==="privacy_case_resolve"?["fulfilled","partially_fulfilled"]:["lawful_refusal","retention_required","identity_not_verified"]).includes(reason)):reason!==null)denied();
+ if(action==="privacy_case_intake"||outcome){if(typeof evidence!=="string"||!digest.test(evidence)||/^0+$/.test(evidence))denied();}else if(evidence!==null)denied();
+ const scope=opening||outcome?createHash("sha256").update(["privacy-rights-v1",action,kind??"",reason??"",evidence??""].join("\n")).digest("hex"):"0".repeat(64);
+ return signedAction("profitpilot-sensitive-api-v1",[tenant,caseId,action,scope],identity,env,now);
+}
