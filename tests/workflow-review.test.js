@@ -58,3 +58,10 @@ test("invoice aggregation fails closed on totals beyond safe cent precision",()=
  const decisions=large.map(r=>({rowNumber:Number(r.__rowNumber),status:"confirmed",reviewer:"synthetic",evidenceRef:"synthetic:"+r.invoice_id}));
  assert.throws(()=>syntheticPeriodReport({rows:large,decisions,contract}),/safe precision/);
 });
+
+test("rejects impossible or malformed contract dates",()=>{
+ for(const periodStart of ["2026-02-30","2026-13-01","2026-1-01","not-a-date"]){
+  assert.throws(()=>prepareInvoiceReview(rows,{...contract,periodStart}),/Invalid contract period/);
+ }
+ assert.throws(()=>prepareInvoiceReview(rows,{...contract,periodEnd:"2026-11-31"}),/Invalid contract period/);
+});
