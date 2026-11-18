@@ -45,6 +45,26 @@ test("synthetic logical backup restores all source rows and preserves tenant bou
   await assert.rejects(()=>restored.query("DELETE FROM private.payroll_confirmation_receipts WHERE tenant_id=$1 AND allocation_run_id=$2",[restoredPayroll.tenant_id,restoredPayroll.allocation_run_id]),e=>e.code==="55000");
   await assert.rejects(()=>restored.query("UPDATE public.payroll_pools SET source_ref='restore-probe' WHERE tenant_id=$1 AND id=$2",[restoredPayroll.tenant_id,restoredPayroll.pool_id]),e=>e.code==="55000");
   console.log("Confirmed payroll receipt, chained audit and immutable evidence verified in isolated encrypted restore");
+  const retained=(await restored.query(`SELECT p.tenant_id,p.allocation_run_id,p.order_id,o.requested_by,d.decided_by,c.consumed_by
+   FROM private.financial_backup_plans p JOIN public.tenants t ON t.id=p.tenant_id
+   JOIN private.security_work_orders o ON o.tenant_id=p.tenant_id AND o.id=p.order_id
+   JOIN private.security_work_decisions d ON d.tenant_id=p.tenant_id AND d.order_id=p.order_id AND d.decision='approved'
+   JOIN private.security_work_consumptions c ON c.tenant_id=p.tenant_id AND c.order_id=p.order_id
+   WHERE t.legal_name='Synthetic payroll supersession'`)).rows;
+  assert.equal(retained.length,1,"populated dual-approved backup plan must survive encrypted restore");
+  const retainedPlan=retained[0];
+  assert.notEqual(retainedPlan.requested_by,retainedPlan.decided_by);
+  assert.equal(retainedPlan.requested_by,retainedPlan.consumed_by);
+  const retainedArgs=[retainedPlan.tenant_id,retainedPlan.allocation_run_id];
+  const retainedStatus=(await restored.query("SELECT private.financial_retention_dependency_status($1,$2) AS s",retainedArgs)).rows[0].s;
+  assert.equal(retainedStatus.retention,"hold-recorded");
+  assert.equal(retainedStatus.correctionLineage,true);assert.equal(retainedStatus.overlappingCalculations,true);
+  assert.equal(retainedStatus.batchHold,true);assert.equal(retainedStatus.backupPlan,"recorded-unverified");
+  assert.equal(retainedStatus.authorizesDisposal,false);
+  assert.equal((await restored.query("SELECT private.verify_audit_chain($1) AS ok",[retainedPlan.tenant_id])).rows[0].ok,true);
+  await assert.rejects(()=>runtime.query("SELECT * FROM private.financial_backup_plans"),/permission denied/i);
+  await assert.rejects(()=>restored.query("DELETE FROM private.financial_backup_plans WHERE tenant_id=$1 AND order_id=$2",[retainedPlan.tenant_id,retainedPlan.order_id]),e=>e.code==="55000");
+  await assert.rejects(()=>restored.query("DELETE FROM private.financial_retention_holds WHERE tenant_id=$1 AND allocation_run_id=$2",retainedArgs),e=>e.code==="55000");
   assert.equal((await runtime.query("SELECT id FROM public.contracts")).rowCount,0,"unsigned connections must not enumerate restored contracts");
   await assert.rejects(()=>runtime.query("SELECT secret FROM private.tenant_context_keys"),/permission denied/i);
   const tenant="33333333-3333-4333-8333-333333333333",subject="isolation-tenant-c";
@@ -117,6 +137,30 @@ test("synthetic logical backup restores all source rows and preserves tenant bou
    const emailDoc=signSecurityRecovery(changedEmail,archive,keys.privateKey);
    await assert.rejects(()=>replaySecurityRecovery(restored,emailDoc,keys.publicKey,{backupSha256:archive,expectedManifestSha256:securityRecoveryDigest(emailDoc)}),/isolated/);
   }finally{await sensitiveSource.query("ROLLBACK");sensitiveSource.release();}
+  // Isolate a restore when post-snapshot financial protection differs.
+  // The trusted admin simulates new authoritative records, not actual legal evidence.
+  const financialSource=await source.connect();
+  try{
+   await financialSource.query("BEGIN");
+   await financialSource.query("INSERT INTO private.financial_retention_holds(tenant_id,allocation_run_id,hold_id,evidence_digest) VALUES($1,$2,$3,$4)",[...retainedArgs,randomUUID(),"a".repeat(64)]);
+   const holdInventory=await readSecurityInventory(financialSource);
+   assert.notEqual(holdInventory.sensitive[0].digest,secInventory.sensitive[0].digest);
+   const holdDoc=signSecurityRecovery(holdInventory,archive,keys.privateKey);
+   await assert.rejects(()=>replaySecurityRecovery(restored,holdDoc,keys.publicKey,{backupSha256:archive,expectedManifestSha256:securityRecoveryDigest(holdDoc)}),/isolated/);
+   await financialSource.query("ROLLBACK");
+   await financialSource.query("BEGIN");
+   // The existing order and decision are left unchanged; a separate plan is
+   // inserted under the trusted administrator boundary using an existing
+   // consumed correction order solely to isolate the plan fingerprint check.
+   const newOrder=(await financialSource.query("SELECT order_id FROM private.payroll_supersessions WHERE tenant_id=$1 AND old_run_id=$2",retainedArgs)).rows[0].order_id;
+   await financialSource.query("INSERT INTO private.financial_backup_plans(tenant_id,allocation_run_id,order_id,inventory_digest,disposition_digest,checked_on) VALUES($1,$2,$3,$4,$5,(clock_timestamp() AT TIME ZONE 'UTC')::date)",[...retainedArgs,newOrder,"c".repeat(64),"d".repeat(64)]);
+   const planInventory=await readSecurityInventory(financialSource);
+   assert.notEqual(planInventory.sensitive[0].digest,secInventory.sensitive[0].digest);
+   const planDoc=signSecurityRecovery(planInventory,archive,keys.privateKey);
+   await assert.rejects(()=>replaySecurityRecovery(restored,planDoc,keys.publicKey,{backupSha256:archive,expectedManifestSha256:securityRecoveryDigest(planDoc)}),/isolated/);
+   assert.equal(await isSessionActive(),true);
+  }finally{await financialSource.query("ROLLBACK");financialSource.release();}
+  console.log("Populated retention and backup records restored; newer signed hold and plan inventories deny older snapshots");
   const applied=await replaySecurityRecovery(restored,securityDoc,keys.publicKey,securityBinding);
   assert.equal(applied.sessions,1);assert.equal(applied.incidents,1);
   assert.ok(Object.values(await replaySecurityRecovery(restored,securityDoc,keys.publicKey,securityBinding)).every(n=>n===0));

@@ -207,4 +207,13 @@ BEGIN
 END $test$;
 -- Check deferred link to the new confirmation receipt before rolling back.
 SET CONSTRAINTS ALL IMMEDIATE;
-ROLLBACK;
+-- Persist only in the disposable CI backup exercise.
+\if :{?persist_recovery_fixture}
+  \if :persist_recovery_fixture
+    COMMIT;
+  \else
+    ROLLBACK;
+  \endif
+\else
+  ROLLBACK;
+\endif

@@ -342,6 +342,7 @@ jobs:
           PG_CONTAINER=profitpilot-postgres-ci
           test -n "$PG_CONTAINER"
           psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -v persist_recovery_fixture=1 -f tests/payroll-attested-confirmation.sql
+          psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -v persist_recovery_fixture=1 -f tests/payroll-correction-supersession.sql
           backup_start=$(date +%s)
           docker exec -e PGPASSWORD "$PG_CONTAINER" pg_dump -h 127.0.0.1 -U profitpilot_admin -Fc profitpilot | node scripts/secure-backup.js encrypt-stdin "$ARCHIVE"
           restore_start=$(date +%s)
