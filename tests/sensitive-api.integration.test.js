@@ -58,6 +58,47 @@ test("actual authenticated sensitive API: payroll review, own verified account c
   await expect("reviewer",reviewPath+"/confirm",403,{body:{...confirm,evidenceDigest:"e".repeat(64)}});
   const confirmed=await expect("reviewer",reviewPath+"/confirm",200,{body:confirm});
   assert.equal(confirmed.status,"confirmed");await expect("reviewer",reviewPath+"/confirm",409,{body:confirm});
+
+  // Correction operator: a separate analyst submits the replacement, an owner
+  // requests/executes and an independent admin approves the exact scope.
+  const replacementBatch=randomUUID(),replacementPool=randomUUID(),replacementRaw=randomUUID(),replacementSource=randomUUID(),replacementRun=randomUUID(),correctionOrder=randomUUID();
+  await admin.query("INSERT INTO public.import_batches(id,tenant_id,source_type,source_period_start,source_period_end,permission_ref,status,file_sha256,file_name,created_by) VALUES($1,$2,'payroll','2026-11-01','2026-11-14','Synthetic correction authority','accepted',$3,'synthetic.csv',$4)",[replacementBatch,t,hash(replacementBatch),analyst]);
+  await admin.query("INSERT INTO public.raw_import_rows(id,tenant_id,batch_id,row_number,payload) VALUES($1,$2,$3,1,$4)",[replacementRaw,t,replacementBatch,{source_row_key:"row-a",amount:"0.50",currency:"AUD"}]);
+  await admin.query("INSERT INTO public.payroll_pools(id,tenant_id,batch_id,period_start,period_end,total_amount,currency,source_ref) VALUES($1,$2,$3,'2026-11-01','2026-11-14',0.50,'AUD','source-a')",[replacementPool,t,replacementBatch]);
+  await admin.query("INSERT INTO public.payroll_source_rows(id,tenant_id,payroll_pool_id,raw_import_row_id,source_row_key,row_sha256,amount,currency) VALUES($1,$2,$3,$4,'row-a',$5,0.50,'AUD')",[replacementSource,t,replacementPool,replacementRaw,hash("row-a\n0.50\nAUD")]);
+  await admin.query("INSERT INTO public.allocation_runs(id,tenant_id,payroll_pool_id,method_version,status,direct_amount,residual_amount) VALUES($1,$2,$3,'synthetic-v1','review',0.50,0)",[replacementRun,t,replacementPool]);
+  await admin.query("INSERT INTO public.allocation_lines(tenant_id,allocation_run_id,site_id,bucket_type,amount,source_ref,payroll_source_row_id) VALUES($1,$2,$3,'direct',0.50,'evidence-a',$4)",[t,replacementRun,site,replacementSource]);
+  const replacement=await expect("analyst","/payroll/runs/"+replacementRun+"/submit",200,{body:{submit:true}});
+  const previewPath="/payroll/runs/"+run+"/correction-preview";
+  const input={proposalId:replacement.proposalId,reason:"source_correction",authorityEvidenceDigest:hash("verified synthetic correction population")};
+  await expect("reader",previewPath,403,{body:input});
+  await expect("reviewer",previewPath,403,{tenant:other,body:input});
+  await expect("owner",previewPath,403,{body:input,claims:{amr:["pwd"]}});
+  const reviewed=await expect("owner",previewPath,200,{body:input});
+  assert.equal(reviewed.oldTotal,"0.30");assert.equal(reviewed.replacementTotal,"0.50");
+  assert.equal(reviewed.proposalDigest,replacement.evidenceDigest);
+  const correctionPath="/payroll/corrections/"+correctionOrder;
+  const operation=(step,extra={})=>({oldRunId:run,...input,scopeDigest:reviewed.scopeDigest,step,confirm:true,...(step==="consume"?{proposalDigest:reviewed.proposalDigest}:{}),...extra});
+  await expect("owner",correctionPath,403,{body:operation("consume")});
+  await expect("owner",correctionPath,403,{body:operation("request",{scopeDigest:hash("tampered scope")})});
+  assert.equal((await expect("owner",correctionPath,200,{body:operation("request")})).status,"requested");
+  await expect("analyst",correctionPath,403);
+  await expect("reviewer",correctionPath,403,{tenant:other});
+  await expect("owner",correctionPath,403,{body:operation("approve")});
+  await expect("reviewer","/payroll/proposals/"+replacement.proposalId+"/confirm",403,{body:{confirm:true,evidenceDigest:replacement.evidenceDigest}});
+  await expect("reviewer",correctionPath,403,{body:operation("approve",{reason:"allocation_error"})});
+  assert.equal((await expect("reviewer",correctionPath,200,{body:operation("approve")})).status,"approved");
+  const approved=await expect("owner",correctionPath,200);
+  assert.equal(approved.status,"approved");assert.ok(approved.approvalExpiresAt);
+  await expect("reviewer",correctionPath,403,{body:operation("consume")});
+  await expect("owner",correctionPath,403,{body:operation("consume",{proposalDigest:hash("forged replacement digest")})});
+  assert.equal((await expect("owner",correctionPath,200,{body:operation("consume")})).status,"executed");
+  assert.equal((await expect("reviewer",reviewPath,200)).status,"superseded");
+  assert.equal((await expect("reviewer",correctionPath,200)).status,"executed");
+  await expect("owner",correctionPath,403,{body:operation("consume")});
+  assert.equal((await admin.query("SELECT count(*)::int AS n FROM private.payroll_supersessions WHERE tenant_id=$1 AND old_run_id=$2 AND new_run_id=$3",[t,run,replacementRun])).rows[0].n,1);
+  assert.equal((await admin.query("SELECT count(*)::int AS n FROM private.payroll_confirmation_receipts WHERE tenant_id=$1",[t])).rows[0].n,2);
+  await assert.rejects(()=>runtime.query("SELECT * FROM private.payroll_correction_reservations"),e=>e.code==="42501");
   // Account access is self-only, and correction requires the current verified
   // issuer email, never a user-supplied replacement or cross-tenant target.
   const privacy="/privacy/account";
