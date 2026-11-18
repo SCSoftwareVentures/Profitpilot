@@ -11,6 +11,7 @@ on:
       - feature/job-readiness-engine
       - feature/promise-ledger
       - feature/verified-value-ledger
+      - security/tenant-isolation-release-gate-20261118
   workflow_dispatch:
 
 permissions:
@@ -171,9 +172,11 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/042_security_catalog_internal_integrity.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/043_security_recovery_inventory.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/044_recovery_catalog_gate.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/045_payroll_proposal_review.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/payroll-proposal-review.sql
 
       - name: Audit every tenant-scoped table and tenant-to-tenant foreign key
         env:
