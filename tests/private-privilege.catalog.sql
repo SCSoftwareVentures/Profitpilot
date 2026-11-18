@@ -3,7 +3,7 @@
 DO $audit$
 DECLARE role_name text; p record; t record; privilege text; allowed boolean; expected text[];
 BEGIN
- FOREACH role_name IN ARRAY ARRAY['profitpilot_app','profitpilot_scanner','profitpilot_identity_operator','profitpilot_audit_reader','profitpilot_recovery_reader'] LOOP
+ FOREACH role_name IN ARRAY ARRAY['profitpilot_app','profitpilot_scanner','profitpilot_identity_operator','profitpilot_audit_reader','profitpilot_recovery_reader','profitpilot_incident_operator','profitpilot_incident_recovery'] LOOP
   IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=role_name AND NOT (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication))
    OR EXISTS(SELECT 1 FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.member WHERE r.rolname=role_name)
    OR has_schema_privilege(role_name,'public','CREATE') OR has_schema_privilege(role_name,'private','CREATE')
@@ -17,7 +17,7 @@ BEGIN
     'private.quarantine_status(uuid,uuid)','private.session_authorized(text,bigint,bigint,text,bigint,text,text,text)',
     'private.approve_quarantine_promotion_attested(uuid,uuid,bigint,bigint,text,bigint,text,text,text)',
     'private.site_payroll_summary(uuid,uuid,date,date)','private.read_calculation_summary(uuid,uuid)',
-    'private.verify_security_catalog()','private.verify_startup_signing_key(text,bigint,text,text)','private.admit_actor_request(uuid)',
+    'private.verify_security_catalog()','private.verify_startup_signing_key(text,bigint,text,text)','private.admit_actor_request(uuid)','private.lock_tenant_available(uuid)',
     'public.consume_api_rate_limit(text)','public.purge_api_rate_limits()'];
    WHEN 'profitpilot_scanner' THEN expected:=ARRAY[
     'private.claim_quarantine_scan()','private.expire_quarantine_bytes()',
@@ -25,6 +25,8 @@ BEGIN
     'private.claim_quarantine_promotion()','private.finish_quarantine_promotion(uuid,uuid,uuid,jsonb)'];
    WHEN 'profitpilot_identity_operator' THEN expected:=ARRAY[
     'private.provision_verified_identity(text,text,text)','private.administer_membership(uuid,uuid,text,text,text)'];
+   WHEN 'profitpilot_incident_operator' THEN expected:=ARRAY['private.activate_tenant_emergency(uuid,uuid,text,text)'];
+   WHEN 'profitpilot_incident_recovery' THEN expected:=ARRAY['private.release_tenant_emergency(uuid,uuid,text)'];
    WHEN 'profitpilot_recovery_reader' THEN expected:=ARRAY['private.privacy_recovery_inventory()'];
    WHEN 'profitpilot_audit_reader' THEN expected:=ARRAY[
     'private.audit_checkpoint_heads()','private.audit_checkpoint_matches(uuid,bigint,text)'];
