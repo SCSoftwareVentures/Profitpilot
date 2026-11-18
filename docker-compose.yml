@@ -67,6 +67,7 @@ services:
       - ./database/migrations/049_privacy_rights_cases.sql:/docker-entrypoint-initdb.d/051-privacy-rights-cases.sql:ro
       - ./database/migrations/050_payroll_correction_supersession.sql:/docker-entrypoint-initdb.d/052-payroll-correction-supersession.sql:ro
       - ./database/migrations/051_sensitive_recovery_fence.sql:/docker-entrypoint-initdb.d/053-sensitive-recovery-fence.sql:ro
+      - ./database/migrations/052_payroll_correction_operator_api.sql:/docker-entrypoint-initdb.d/054-payroll-correction-operator-api.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
