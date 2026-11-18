@@ -1,6 +1,7 @@
 import pg from "pg";
 import {createHmac,createHash,randomBytes} from "node:crypto";
 import {databaseSslConfig} from "./db-config.js";
+import {verifyDatabaseReadiness} from "./database-readiness.js";
 import {createWorkBudget} from "./request-budget.js";
 const boundedDbWork=createWorkBudget(16);
 const {Pool}=pg;
@@ -63,7 +64,9 @@ async function tenantTransaction(tenantId,subject,fn,identity){
  finally{if(!discarded)client.release();}
 }
 export async function health(){
- const r=await pool.query("SELECT current_user AS runtime_role, NOT (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication) AS restricted FROM pg_roles WHERE rolname=current_user");
- if(r.rowCount!==1||!r.rows[0].restricted||(process.env.NODE_ENV==="production"&&r.rows[0].runtime_role!=="profitpilot_app"))throw new Error("Unsafe runtime database role");
- return true;
+ return boundedDbWork(async()=>{
+  const client=await pool.connect();
+  try{return await verifyDatabaseReadiness(client);}
+  finally{client.release();}
+ });
 }
