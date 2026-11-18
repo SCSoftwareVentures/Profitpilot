@@ -33,3 +33,10 @@ export function securityWorkProof(tenant,order,kind,scope,step,identity,env=proc
  !["request","approve","reject","consume"].includes(step))denied();
  return signedAction("profitpilot-security-work-v1",[tenant,order,kind,scope,step],identity,env,now);
 }
+
+export function sensitiveApiProof(tenant,target,action,scope,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ if(!uuid.test(tenant)||!uuid.test(target)||!digest.test(scope)||
+ !["payroll_submit","payroll_read","account_read","account_correct_email","invoice_disposal_preview"].includes(action)||
+ (action==="account_correct_email" ? /^0+$/.test(scope) : !/^0+$/.test(scope)))denied();
+ return signedAction("profitpilot-sensitive-api-v1",[tenant,target,action,scope],identity,env,now);
+}
