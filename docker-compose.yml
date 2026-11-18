@@ -43,6 +43,7 @@ services:
       - ./database/migrations/028_quarantine_expiry_recovery.sql:/docker-entrypoint-initdb.d/030-quarantine-expiry-recovery.sql:ro
       - ./database/migrations/029_private_privilege_boundary.sql:/docker-entrypoint-initdb.d/031-private-privilege-boundary.sql:ro
       - ./database/migrations/030_invoice_batch_budget.sql:/docker-entrypoint-initdb.d/032-invoice-batch-budget.sql:ro
+      - ./database/migrations/031_minimized_financial_reads.sql:/docker-entrypoint-initdb.d/033-minimized-financial-reads.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
