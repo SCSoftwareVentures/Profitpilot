@@ -12,6 +12,7 @@ import {MAX_BATCH_ROWS,createRequestAdmission,enforceJsonBudget} from "./request
 import {proxyTrust,corsOrigins,createBoundedServer} from "./network-boundary.js";
 import {importIntakeGate,promotionProof} from "./intake-security.js";
 import {createReadinessGuard} from "./readiness-guard.js";
+import {productionReleaseGate} from "./release-gate.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
 import {quarantineConfig,sealQuarantine,MAX_QUARANTINE_BYTES} from "./quarantine.js";
@@ -35,6 +36,8 @@ app.use(process.env.NODE_ENV==="production"?sharedLimiter({windowMs:60_000,limit
 const mutationLimiter=process.env.NODE_ENV==="production"?sharedLimiter({windowMs:60_000,limit:60,scope:"write"}):rateLimit({windowMs:60_000,limit:60,standardHeaders:true,legacyHeaders:false,message:{error:"Too many write requests; retry later"}});
 app.use("/v1/tenants/:tenantId",(req,res,next)=>req.method==="POST"?mutationLimiter(req,res,next):next());
 app.get("/health",async(req,res)=>{try{if(process.env.NODE_ENV==="production"){if(!await readiness.check())throw new Error("Not ready");}else await health();res.json({status:"ok",database:"connected"});}catch{res.status(503).json({status:"unavailable"});}});
+// Global default-deny after bounded health, before any business endpoint.
+app.use(productionReleaseGate());
 app.use("/v1",authRequired());
 app.use("/v1",sessionRequired(checkIdentitySession));
 app.use("/v1/tenants/:tenantId/imports",importIntakeGate());
