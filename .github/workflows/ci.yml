@@ -26,10 +26,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - name: Checkout
+      - name: Checkout complete reachable history
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Set up Node.js 22
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
@@ -38,6 +39,9 @@ jobs:
 
       - name: Check source credentials and locked dependency integrity
         run: node scripts/source-security-preflight.js
+
+      - name: Scan all fetched reachable Git history for credential shapes
+        run: node scripts/scan-git-history.js
 
       - name: Verify reviewed migration and bootstrap inventory
         run: node scripts/verify-migration-inventory.js
@@ -292,6 +296,7 @@ jobs:
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/financial-access-budget.integration.test.js tests/actor-threat-containment.integration.test.js tests/live-catalog-drift.integration.test.js
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/emergency-containment.integration.test.js
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/security-command-centre.integration.test.js
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/emergency-race.integration.test.js
 
       - name: Prepare quarantine expiry recovery fixture
         env:
@@ -462,9 +467,39 @@ jobs:
           test "$(docker image inspect profitpilot-postgres:scan --format '{{len .RootFS.Layers}}')" = 1
           docker run --rm --network none --entrypoint sh profitpilot-postgres:scan -ec 'test ! -e /usr/local/bin/gosu; test ! -L /usr/local/bin/gosu; test -x /sbin/su-exec; postgres --version'
           result=0
-          "$SCANNER" image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed=false --exit-code 1 --no-progress --timeout 5m --ignorefile /dev/null profitpilot-api:scan || result=1
-          "$SCANNER" image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed=false --exit-code 1 --no-progress --timeout 5m --ignorefile /dev/null profitpilot-postgres:scan || result=1
+          "$SCANNER" image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed=false --exit-code 1 --no-progress --timeout 5m --ignorefile /dev/null --format json --output "$RUNNER_TEMP/api-scan.json" profitpilot-api:scan || result=1
+          "$SCANNER" image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed=false --exit-code 1 --no-progress --timeout 5m --ignorefile /dev/null --format json --output "$RUNNER_TEMP/database-scan.json" profitpilot-postgres:scan || result=1
           exit "$result"
+
+      - name: Package exact scanned image archives and public build evidence
+        if: ${{ github.repository == 'luxhustle01-ux/Profitpilot' && ((github.event_name == 'push' && github.ref == 'refs/heads/security/tenant-isolation-release-gate-20261118') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'security/tenant-isolation-release-gate-20261118')) }}
+        run: |
+          set -euo pipefail
+          umask 077
+          DIR="$RUNNER_TEMP/profitpilot-candidate"
+          mkdir "$DIR"
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(docker image inspect profitpilot-api:scan --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
+          test "$(docker image inspect profitpilot-postgres:scan --format '{{.Os}}/{{.Architecture}}')" = linux/amd64
+          git archive --format=tar "$GITHUB_SHA" | gzip -n > "$DIR/source.tar.gz"
+          docker save profitpilot-api:scan | gzip -n > "$DIR/api-image.tar.gz"
+          docker save profitpilot-postgres:scan | gzip -n > "$DIR/database-image.tar.gz"
+          cp /tmp/profitpilot-sbom.json "$DIR/sbom.json"
+          cp "$RUNNER_TEMP/api-scan.json" "$DIR/api-scan.json"
+          cp "$RUNNER_TEMP/database-scan.json" "$DIR/database-scan.json"
+          node scripts/release-candidate-manifest.js build "$DIR" "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" \
+            "$(docker image inspect profitpilot-api:scan --format '{{.Id}}')" \
+            "$(docker image inspect profitpilot-postgres:scan --format '{{.Id}}')"
+
+      - name: Retain immutable candidate artifact for verification
+        if: ${{ github.repository == 'luxhustle01-ux/Profitpilot' && ((github.event_name == 'push' && github.ref == 'refs/heads/security/tenant-isolation-release-gate-20261118') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'security/tenant-isolation-release-gate-20261118')) }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: profitpilot-candidate-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/profitpilot-candidate/
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
 
   security-gate:
     name: Security CI release gate
@@ -496,3 +531,69 @@ jobs:
             echo "- Container and software supply-chain audit: $SUPPLY_CHAIN_RESULT"
             echo "- Scope: automated repository CI only; not penetration testing or production certification"
           } >> "$GITHUB_STEP_SUMMARY"
+
+
+  provenance:
+    name: Signed candidate provenance and independent byte verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [security-gate]
+    if: ${{ github.repository == 'luxhustle01-ux/Profitpilot' && ((github.event_name == 'push' && github.ref == 'refs/heads/security/tenant-isolation-release-gate-20261118') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'security/tenant-isolation-release-gate-20261118')) }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      actions: read
+    steps:
+      - name: Checkout exact tested commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Download artifact from the same run and attempt
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: profitpilot-candidate-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/profitpilot-verified
+
+      - name: Verify candidate identity, artifact inventory and all digests
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          node scripts/release-candidate-manifest.js verify "$RUNNER_TEMP/profitpilot-verified" "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+          # Independently reconstruct the source archive and verify the two
+          # image identities from the exact exported, scanned image bytes.
+          git archive --format=tar "$GITHUB_SHA" | gzip -n | cmp - "$RUNNER_TEMP/profitpilot-verified/source.tar.gz"
+          docker load --input "$RUNNER_TEMP/profitpilot-verified/api-image.tar.gz"
+          docker load --input "$RUNNER_TEMP/profitpilot-verified/database-image.tar.gz"
+          test "$(docker image inspect profitpilot-api:scan --format '{{.Id}}')" = "$(jq -r .apiImage "$RUNNER_TEMP/profitpilot-verified/manifest.json")"
+          test "$(docker image inspect profitpilot-postgres:scan --format '{{.Id}}')" = "$(jq -r .databaseImage "$RUNNER_TEMP/profitpilot-verified/manifest.json")"
+
+      - name: Attest verified candidate manifest with GitHub OIDC provenance
+        id: attest
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: ${{ runner.temp }}/profitpilot-verified/manifest.json
+          push-to-registry: false
+
+      - name: Verify cryptographic provenance against repository, workflow, source ref and commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          test -s "$BUNDLE"
+          gh attestation verify "$RUNNER_TEMP/profitpilot-verified/manifest.json" \
+            --bundle "$BUNDLE" --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml" \
+            --source-ref "$GITHUB_REF" --source-digest "$GITHUB_SHA" \
+            --deny-self-hosted-runners
+          cp "$BUNDLE" "$RUNNER_TEMP/provenance-bundle.jsonl"
+
+      - name: Retain signed provenance for candidate handover
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: profitpilot-provenance-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/provenance-bundle.jsonl
+          if-no-files-found: error
+          retention-days: 7
