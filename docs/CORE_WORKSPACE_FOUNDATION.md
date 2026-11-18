@@ -11,9 +11,9 @@ branch; no production authorization follows from this work.
   transaction. An active tenant member can retrieve that setup by its UUID.
 - Client-generated UUIDv4 setupId gives safe retry semantics scoped to the
   creating actor and the exact canonical input. Different inputs or actor
-  conflict; a failed insert rolls back all linked records. A duplicate
-  globally unique contract UUID in another tenant yields a generic conflict,
-  not the other tenant's data.
+  conflict; a failed insert rolls back all linked records. Setup IDs are
+  unique only within each tenant; server-generated contract IDs prevent a
+  cross-tenant identifier-existence oracle.
 - Explicit AUD, monthly billing, tax-basis enum (unknown permitted only
   as draft), effective date 2000–2099 and canonical nonnegative two-decimal
   price within NUMERIC(14,2). Names follow a deliberately narrow bounded
@@ -32,7 +32,7 @@ branch; no production authorization follows from this work.
 Unit tests cover strict money/date/field schemas and closed production gate.
 Dedicated authenticated integration tests cover unauthorized and wrong-
 tenant requests, direct unsigned/reader SQL attempts, concurrent identical
-retries, changed-payload conflicts, cross-tenant collision rollback, exact
+retries, changed-payload conflicts, independent cross-tenant identifier reuse, exact
 decimal persistence, draft status, chained audit event and emergency
 containment. Full existing security CI remains mandatory. Record actual
 exact-head status in the branch CI; this document does not assert test success.
