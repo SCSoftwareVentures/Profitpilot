@@ -131,10 +131,16 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(protectedTables.rowCount,20,"the exhaustive fixture must cover every tenant-owned/root identity and payroll evidence table");
     for(const {relname} of protectedTables.rows){
       const tableQuery=`SELECT count(*)::int AS count FROM public."${relname.replaceAll('"','""')}"`;
+      if(["payroll_source_rows","allocation_lines"].includes(relname)){
+        for(const [tenantId,subject] of [["33333333-3333-4333-8333-333333333333","isolation-tenant-c"],["44444444-4444-4444-8444-444444444444","isolation-tenant-d"]]){
+          await assert.rejects(()=>withTenant(tenantId,subject,client=>client.query(tableQuery)),/permission denied/i);
+        }
+        continue;
+      }
       const tenantCCount=await withTenant("33333333-3333-4333-8333-333333333333","isolation-tenant-c",client=>client.query(tableQuery));
       const tenantDCount=await withTenant("44444444-4444-4444-8444-444444444444","isolation-tenant-d",client=>client.query(tableQuery));
-      assert.equal(tenantCCount.rows[0].count,["tenant_memberships","import_batches","raw_import_rows"].includes(relname)?2:1,`tenant C must see only its own fixture rows in ${relname}`);
-      assert.equal(tenantDCount.rows[0].count,["import_batches","raw_import_rows"].includes(relname)?2:1,`tenant D must see only its own fixture row in ${relname}`);
+      assert.equal(tenantCCount.rows[0].count,["tenant_memberships","import_batches"].includes(relname)?2:1,`tenant C must see only its own fixture rows in ${relname}`);
+      assert.equal(tenantDCount.rows[0].count,relname==="import_batches"?2:1,`tenant D must see only its own fixture row in ${relname}`);
     }
     await assert.rejects(()=>withTenant("33333333-3333-4333-8333-333333333333","isolation-tenant-c",client=>client.query("SELECT amount,currency FROM payroll_source_rows")),/permission denied/i,"runtime must not read individual payroll evidence");
     await assert.rejects(()=>withTenant("33333333-3333-4333-8333-333333333333","isolation-tenant-c",client=>client.query("INSERT INTO payroll_source_rows(tenant_id,payroll_pool_id,raw_import_row_id,source_row_key,row_sha256,amount,currency) VALUES ($1,$2,$3,'runtime-attempt',$4,1,'AUD')",["33333333-3333-4333-8333-333333333333","16161616-1616-4616-8616-161616161616","18181818-1818-4818-8818-181818181818","a".repeat(64)])),/permission denied/i,"runtime role must not write payroll source evidence");
