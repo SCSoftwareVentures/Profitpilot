@@ -43,9 +43,17 @@ async function membership(req,res,next){
  const tenantId=req.params.tenantId;
  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(tenantId))return res.status(400).json({error:"Invalid tenant ID"});
  try{
-  const r=await requestTenant(req,tenantId,client=>client.query("SELECT role FROM tenant_memberships tm JOIN users u ON u.id=tm.user_id JOIN tenants t ON t.id=tm.tenant_id WHERE tm.tenant_id=$1 AND u.auth_subject=$2 AND tm.status='active' AND u.status='active' AND t.status='active'",[tenantId,req.identity.subject]));
-  if(!r.rowCount)return res.status(403).json({error:"No active membership for this tenant"});
-  req.membership={tenantId:tenantId.toLowerCase(),role:r.rows[0].role};next();
+  const admission=await requestTenant(req,tenantId,async client=>{
+   const r=await client.query("SELECT role FROM tenant_memberships tm JOIN users u ON u.id=tm.user_id JOIN tenants t ON t.id=tm.tenant_id WHERE tm.tenant_id=$1 AND u.auth_subject=$2 AND tm.status='active' AND u.status='active' AND t.status='active'",[tenantId,req.identity.subject]);
+   if(!r.rowCount)return null;
+   const result=await client.query("SELECT private.admit_actor_request($1) AS retry",[tenantId]);
+   const retry=result.rows[0]?.retry;
+   if(!Number.isInteger(retry)||retry<0||retry>300)throw new Error("Invalid containment response");
+   return {role:r.rows[0].role,retry};
+  });
+  if(!admission)return res.status(403).json({error:"No active membership for this tenant"});
+  if(admission.retry){res.locals.actorContained=true;res.set("Retry-After",String(admission.retry));return res.status(429).json({error:"Temporary request restriction; retry later"});}
+  req.membership={tenantId:tenantId.toLowerCase(),role:admission.role};next();
  }catch(e){next(e);}
 }
 app.get("/v1/me",async(req,res)=>{res.json({subject:req.identity.subject,email:req.identity.email,membershipsEndpoint:"Membership discovery is not exposed until a separately reviewed security-definer function is installed."});});
