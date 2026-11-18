@@ -39,3 +39,13 @@ Repeat assessment before changes to code, feature scope, settings, hosting, subp
 
 ## Status
 No gate has external approval. The offline checker verifies signed document shape, exact release binding, freshness and all required approvals; it cannot validate a lawyer's qualification, evidence truth, key custody, real configuration or legal compliance. It is not itself a deployed enforcement boundary; make it mandatory in the independently controlled production release pipeline before any live use. No production activation, contact, payment or publication authorised.
+
+## Offline release evidence verification
+
+The checker is `scripts/verify-australian-compliance.js`. A protected release operator supplies a private bundle and independently established release commit, scope/configuration digest, distinct counsel and owner public keys and their pinned SHA-256 fingerprints (SPKI DER). Each signer signs the byte-for-byte canonical statement from `canonicalApproval(record)` using its separately controlled Ed25519 private key. The record contains policy, commit, scopeSha256, approvedAt, expiresAt and ordered AU01–AU12 gates; each gate must be approved and bind a nonzero SHA-256 digest of its private evidence. Bundle fields are record, counselSignature and ownerSignature (canonical base64). Store the approval bundle outside the public repository.
+
+```sh
+node scripts/verify-australian-compliance.js PRIVATE_BUNDLE EXACT_COMMIT SCOPE_SHA256 COUNSEL_PUBLIC_KEY OWNER_PUBLIC_KEY COUNSEL_FINGERPRINT OWNER_FINGERPRINT
+```
+
+Nonzero exit denies approval. The verifier does not currently run as a production deployment gate because no production pipeline or independently pinned trust roots exist. Integrate under an independently controlled protected release workflow with no bypass before production. Never use generated synthetic signers or a CI pass as authority. On legal changes, configuration changes or compromised keys, revoke the current release approval externally and run the gate against the new independent trust configuration. No genuine approval bundle has been created.
