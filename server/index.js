@@ -14,7 +14,8 @@ import {proxyTrust,corsOrigins,createBoundedServer} from "./network-boundary.js"
 import {importIntakeGate,promotionProof} from "./intake-security.js";
 import {createReadinessGuard} from "./readiness-guard.js";
 import {productionReleaseGate} from "./release-gate.js";
-import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof,privacyCaseProof,payrollCorrectionPreviewProof,payrollCorrectionStatusProof,payrollCorrectionStepProof,privacyDeliveryPreviewProof,privacyDeliveryStatusProof,privacyDeliveryStepProof,privacyReceiptPreviewProof,privacyReceiptStatusProof,privacyReceiptStepProof,privacyDispatchStatusProof,privacyDispatchStepProof} from "./sensitive-operation-proof.js";
+import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof,privacyCaseProof,payrollCorrectionPreviewProof,payrollCorrectionStatusProof,payrollCorrectionStepProof,privacyDeliveryPreviewProof,privacyDeliveryStatusProof,privacyDeliveryStepProof,privacyReceiptPreviewProof,privacyReceiptStatusProof,privacyReceiptStepProof,privacyDispatchStatusProof,privacyDispatchStepProof,payrollIntakePreviewProof,payrollIntakeStatusProof,payrollIntakeStepProof} from "./sensitive-operation-proof.js";
+import {canonicalPayrollRows} from "../src/payroll-source-intake.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
 import {quarantineConfig,sealQuarantine,MAX_QUARANTINE_BYTES} from "./quarantine.js";
@@ -473,6 +474,44 @@ app.post("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId/dispat
   }
   const args=privacyDispatchStepProof(...dispatchIds(req),b.step,input,req.identity);
   return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_dispatch_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) AS result",args));
+ }catch(e){return failSensitive(e,res,next);}
+});
+
+
+const intakeFields=["poolId","sourceNamespace","controlTotal","rowCount","authorityDigest","policyDigest","controlDigest","rows"];
+const intakeIds=req=>[req.membership.tenantId,req.params.batchId.toLowerCase(),req.params.orderId.toLowerCase()];
+function validatedPayrollIntake(b){
+ if(!b||!uuidPattern.test(b.poolId||"")||!uuidPattern.test(b.sourceNamespace||"")||typeof b.poolId!=="string"||typeof b.sourceNamespace!=="string"||
+ typeof b.controlTotal!=="string"||!/^(0|[1-9][0-9]{0,11})\.[0-9]{2}$/.test(b.controlTotal)||!Number.isSafeInteger(b.rowCount)||
+ ![b.authorityDigest,b.policyDigest,b.controlDigest].every(validDispatchDigest))return null;
+ const bytes=canonicalPayrollRows(b.rows);
+ if(!bytes||b.rows.length!==b.rowCount)return null;
+ const fileSha256=createHash("sha256").update(bytes).digest("hex");
+ if(new Set(b.rows.map(r=>r.source_row_key)).size!==b.rowCount||b.rows.reduce((n,r)=>n+BigInt(r.amount.replace(".","")),0n)!==BigInt(b.controlTotal.replace(".","")))return null;
+ return {...Object.fromEntries(intakeFields.map(k=>[k,b[k]])),poolId:b.poolId.toLowerCase(),sourceNamespace:b.sourceNamespace.toLowerCase(),fileSha256};
+}
+app.post("/v1/tenants/:tenantId/payroll/intakes/:batchId/orders/:orderId/preview",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!exactBody(req.body,intakeFields))return res.status(400).json({error:"Exact minimized payroll source required"});
+  const input=validatedPayrollIntake(req.body);
+  if(!input)return res.status(400).json({error:"Minimized payroll source or controls invalid"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_payroll_intake_preview($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) AS result",payrollIntakePreviewProof(...intakeIds(req),input,req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/payroll/intakes/:batchId/orders/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_payroll_intake_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",payrollIntakeStatusProof(...intakeIds(req),req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/payroll/intakes/:batchId/orders/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;
+  if(!emptyQuery(req)||!exactBody(b,[...intakeFields,"step","scopeDigest","confirm"])||b.confirm!==true||!["request","approve","reject","consume"].includes(b.step)||!validDispatchDigest(b.scopeDigest))
+   return res.status(400).json({error:"Explicit scoped intake action required"});
+  const input=validatedPayrollIntake(b);
+  if(!input)return res.status(400).json({error:"Minimized payroll source or controls invalid"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_payroll_intake_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) AS result",payrollIntakeStepProof(...intakeIds(req),input,b.scopeDigest,b.step,req.identity)));
  }catch(e){return failSensitive(e,res,next);}
 });
 

@@ -140,3 +140,29 @@ export function privacyDispatchStepProof(tenant,caseId,release,step,input,identi
  const signed=signedAction("profitpilot-sensitive-api-v1",[tenant,release,action,scope],identity,env,now);
  return [tenant,caseId,release,action,...input,scope,...signed.slice(4)];
 }
+
+function intakeIds(tenant,batch,order){if(![tenant,batch,order].every(x=>typeof x==="string"&&uuid.test(x)))denied();}
+const intakeDig=x=>typeof x==="string"&&digest.test(x)&&!/^0+$/.test(x);
+function intakeFields(input){
+ if(!input||![input.poolId,input.sourceNamespace].every(x=>typeof x==="string"&&uuid.test(x))||
+ typeof input.controlTotal!=="string"||!/^(0|[1-9][0-9]{0,11})\.[0-9]{2}$/.test(input.controlTotal)||
+ !Number.isSafeInteger(input.rowCount)||input.rowCount<1||input.rowCount>200||
+ ![input.authorityDigest,input.policyDigest,input.controlDigest,input.fileSha256].every(intakeDig)||
+ !Array.isArray(input.rows)||input.rows.length!==input.rowCount)denied();
+ return [input.poolId,input.sourceNamespace,input.controlTotal,input.rowCount,input.authorityDigest,input.policyDigest,input.controlDigest];
+}
+export function payrollIntakePreviewProof(tenant,batch,order,input,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ intakeIds(tenant,batch,order);const f=intakeFields(input);
+ const scope=createHash("sha256").update(["payroll-intake-preview-v1",batch,...f,input.fileSha256].join("\n")).digest("hex");
+ return [...signedAction("profitpilot-sensitive-api-v1",[tenant,order,"payroll_intake_preview",scope],identity,env,now),batch,...f,JSON.stringify(input.rows),input.fileSha256];
+}
+export function payrollIntakeStatusProof(tenant,batch,order,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ intakeIds(tenant,batch,order);
+ const scope=createHash("sha256").update(["payroll-intake-status-v1",batch].join("\n")).digest("hex");
+ return [...signedAction("profitpilot-sensitive-api-v1",[tenant,order,"payroll_intake_status",scope],identity,env,now),batch];
+}
+export function payrollIntakeStepProof(tenant,batch,order,input,scope,step,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ intakeIds(tenant,batch,order);const [pool,...f]=intakeFields(input);
+ const signed=securityWorkProof(tenant,order,"privileged_operation",scope,step,identity,env,now);
+ return [tenant,batch,pool,order,...f,JSON.stringify(input.rows),scope,step,...signed.slice(5)];
+}

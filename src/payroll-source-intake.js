@@ -2,6 +2,7 @@
 // extracts or employee identifiers, no storage, network or approval.
 import {createHash} from "node:crypto";
 import {isIsoDate} from "./engine.js";
+import {planPayrollReconciliation} from "./payroll-reconciliation.js";
 const F="minimized-payroll-v1",HEADER="source_row_key,amount,currency\n";
 const MAX=200,MAX_BYTES=65536;
 const digest=x=>typeof x==="string"&&/^[a-f0-9]{64}$/.test(x)&&!/^0+$/.test(x);
@@ -34,4 +35,26 @@ export function inspectMinimizedPayroll(bytes,manifest){
  }
  if(total!==BigInt(manifest.controlTotal.replace(".","")))return held("CONTROL_TOTAL_MISMATCH");
  return {status:"pending_independent_review",requiresHumanConfirmation:true,source:{manifest:Object.fromEntries(fields.map(k=>[k,manifest[k]])),rows}};
+}
+
+// API sends only pre-minimized canonical rows; the batch's actual period and
+// immutable registered digest are independently checked by PostgreSQL.
+export function canonicalPayrollRows(rows){
+ if(!Array.isArray(rows)||rows.length<1||rows.length>MAX)return null;
+ const out=[];for(const row of rows){
+  if(!exact(row,["source_row_key","amount","currency"])||!token(row.source_row_key)||!amount(row.amount)||row.currency!=="AUD")return null;
+  out.push(row.source_row_key+","+row.amount+",AUD\n");
+ }
+ const bytes=Buffer.from(HEADER+out.join(""),"ascii");
+ return bytes.length<=MAX_BYTES?bytes:null;
+}
+// Bridge to the existing deterministic allocation planner. The caller must
+// still fetch reviewed source facts and independently validate evidence/site
+// membership, persist the proposal and obtain confirmation before relying on it.
+export function planMinimizedPayrollAllocation(bytes,manifest,poolRef,allocations){
+ const inspected=inspectMinimizedPayroll(bytes,manifest);
+ if(inspected.status!=="pending_independent_review")return inspected;
+ return planPayrollReconciliation({pool:{poolRef,periodStart:manifest.periodStart,periodEnd:manifest.periodEnd,currency:manifest.currency,total:manifest.controlTotal},
+  sourceRows:inspected.source.rows.map(r=>({sourceRowKey:r.source_row_key,amount:r.amount,currency:r.currency,rowSha256:sha([r.source_row_key,r.amount,r.currency].join("\n"))})),
+  allocations});
 }
