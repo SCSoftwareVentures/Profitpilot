@@ -78,3 +78,24 @@ export function payrollCorrectionStepProof(tenant,order,oldRun,proposal,reason,e
  }
  return [tenant,order,oldRun,proposal,reason,evidence,scope,step,...args,proof,confirmNonce,confirmSignature];
 }
+
+export function privacyDeliveryPreviewProof(tenant,caseId,order,input,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ privacyDeliveryInput(tenant,caseId,order,input);
+ const scope=createHash("sha256").update(["privacy-delivery-preview-v1",caseId,...input].join("\n")).digest("hex");
+ return [...signedAction("profitpilot-sensitive-api-v1",[tenant,order,"privacy_delivery_preview",scope],identity,env,now),caseId,...input];
+}
+export function privacyDeliveryStatusProof(tenant,caseId,order,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ if(![tenant,caseId,order].every(x=>typeof x==="string"&&uuid.test(x)))denied();
+ const scope=createHash("sha256").update(["privacy-delivery-status-v1",caseId].join("\n")).digest("hex");
+ return [...signedAction("profitpilot-sensitive-api-v1",[tenant,order,"privacy_delivery_status",scope],identity,env,now),caseId];
+}
+function privacyDeliveryInput(tenant,caseId,order,input){
+ if(![tenant,caseId,order].every(x=>typeof x==="string"&&uuid.test(x))||!Array.isArray(input)||input.length!==7||
+ !["self","assisted_subject","authorized_representative","former_user"].includes(input[0])||
+ !input.slice(1).every(x=>typeof x==="string"&&digest.test(x)&&!/^0+$/.test(x))||input[1]===input[2])denied();
+}
+export function privacyDeliveryStepProof(tenant,caseId,order,input,scope,step,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ privacyDeliveryInput(tenant,caseId,order,input);
+ const signed=securityWorkProof(tenant,order,"privileged_operation",scope,step,identity,env,now);
+ return [tenant,caseId,order,...input,scope,step,...signed.slice(5)];
+}

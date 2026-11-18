@@ -600,6 +600,87 @@ paths:
         "409": { description: Conflicting state }
         "503": { description: Live processing closed or unavailable }
 
+  /tenants/{tenantId}/privacy/cases/{caseId}/deliveries/{orderId}/preview:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: caseId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Preview exact privacy response scope
+      description: Owner/admin with recent MFA. Candidate only; no response transport or release to a recipient.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [recipientType, recipientKeyDigest, senderKeyDigest, authorityDigest, redactionDigest, responseDigest, envelopeDigest]
+              properties:
+                recipientType: { enum: [self, assisted_subject, authorized_representative, former_user] }
+                recipientKeyDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                senderKeyDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                authorityDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                redactionDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                responseDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                envelopeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        "200": { description: Minimized scope or authorization status }
+        "400": { description: Invalid request }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting state }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/privacy/cases/{caseId}/deliveries/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: caseId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read minimized privacy release order status
+      responses:
+        "200": { description: Release status; never proof of delivery }
+        "403": { description: Authority denied }
+    post:
+      summary: Record scoped privacy release action
+      description: Owner/admin with recent MFA. Candidate only; no response transport or release to a recipient.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [recipientType, recipientKeyDigest, senderKeyDigest, authorityDigest, redactionDigest, responseDigest, envelopeDigest, scopeDigest, step, confirm]
+              properties:
+                recipientType: { enum: [self, assisted_subject, authorized_representative, former_user] }
+                recipientKeyDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                senderKeyDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                authorityDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                redactionDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                responseDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                envelopeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                scopeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                step: { enum: [request, approve, reject, consume] }
+                confirm: { const: true }
+      responses:
+        "200": { description: Minimized scope or authorization status }
+        "400": { description: Invalid request }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting state }
+        "503": { description: Live processing closed or unavailable }
+
 components:
   schemas:
     ErrorResponse:

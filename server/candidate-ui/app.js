@@ -9,6 +9,7 @@ el("clear").addEventListener("click",clear);
 el("new-order").addEventListener("click",()=>{if(!busy)el("order").value=crypto.randomUUID();});
 el("new-case").addEventListener("click",()=>{if(!busy)el("case").value=crypto.randomUUID();});
 el("new-correction").addEventListener("click",()=>{if(!busy)el("correction-order").value=crypto.randomUUID();});
+el("new-delivery").addEventListener("click",()=>{if(!busy)el("delivery-order").value=crypto.randomUUID();});
 window.addEventListener("pagehide",clear);
 async function operation(action){
  if(busy)return;
@@ -46,10 +47,21 @@ async function operation(action){
     if(step==="consume")body.proposalDigest=digest("correction-digest");
     el("correction-confirm").checked=false;break;
    }
+   case "delivery-preview":
+   case "delivery-status":
+   case "delivery-step":{
+    path="/privacy/cases/"+clean("delivery-case")+"/deliveries/"+clean("delivery-order");
+    if(action!=="delivery-status"){
+      body={recipientType:el("delivery-recipient-type").value,recipientKeyDigest:digest("delivery-recipient"),senderKeyDigest:digest("delivery-sender"),authorityDigest:digest("delivery-authority"),redactionDigest:digest("delivery-redaction"),responseDigest:digest("delivery-response"),envelopeDigest:digest("delivery-envelope")};
+      if(action==="delivery-preview")path+="/preview";
+      else{checked("delivery-confirm");body.step=el("delivery-step").value;body.scopeDigest=digest("delivery-scope");body.confirm=true;el("delivery-confirm").checked=false;}
+    }
+    break;
+   }
    default:throw Error("Unknown operation.");
   }
   busy=true;active=true;controller=new AbortController();
-  for(const b of document.querySelectorAll("button[data-operation],#new-order,#new-case,#new-correction"))b.disabled=true;
+  for(const b of document.querySelectorAll("button[data-operation],#new-order,#new-case,#new-correction,#new-delivery"))b.disabled=true;
   el("status").textContent="Request in progress.";
   const res=await fetch("/v1/tenants/"+t+path,{method:body===undefined?"GET":"POST",headers:{Authorization:"Bearer "+token,...(body===undefined?{}:{"Content-Type":"application/json"})},credentials:"omit",cache:"no-store",redirect:"error",signal:controller.signal,body:body===undefined?undefined:JSON.stringify(body)});
   const data=await res.json();
@@ -60,6 +72,7 @@ async function operation(action){
    el("proposal").value=data.proposalId;el("digest").value=data.evidenceDigest;
   }
   if(res.ok&&action==="preview"&&sha.test(data.scopeDigest||""))el("scope").value=data.scopeDigest;
+  if(res.ok&&["delivery-preview","delivery-status"].includes(action)&&sha.test(data.scopeDigest||"")){el("delivery-scope").value=data.scopeDigest;el("delivery-confirm").checked=false;}
   if(res.ok&&action==="correction-preview"&&sha.test(data.scopeDigest||"")&&sha.test(data.proposalDigest||"")){
    el("correction-scope").value=data.scopeDigest;el("correction-digest").value=data.proposalDigest;
   }
@@ -68,6 +81,6 @@ async function operation(action){
    el("correction-confirm").checked=false;
   }
  }catch(e){if(current===epoch)el("status").textContent=e.name==="AbortError"?"Request cancelled.":(active?"Request unavailable.":e.message);}
- finally{if(active){busy=false;controller=null;for(const b of document.querySelectorAll("button[data-operation],#new-order,#new-case,#new-correction"))b.disabled=false;}}
+ finally{if(active){busy=false;controller=null;for(const b of document.querySelectorAll("button[data-operation],#new-order,#new-case,#new-correction,#new-delivery"))b.disabled=false;}}
 }
 for(const node of document.querySelectorAll("button[data-operation]"))node.addEventListener("click",()=>operation(node.dataset.operation));

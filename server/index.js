@@ -14,7 +14,7 @@ import {proxyTrust,corsOrigins,createBoundedServer} from "./network-boundary.js"
 import {importIntakeGate,promotionProof} from "./intake-security.js";
 import {createReadinessGuard} from "./readiness-guard.js";
 import {productionReleaseGate} from "./release-gate.js";
-import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof,privacyCaseProof,payrollCorrectionPreviewProof,payrollCorrectionStatusProof,payrollCorrectionStepProof} from "./sensitive-operation-proof.js";
+import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof,privacyCaseProof,payrollCorrectionPreviewProof,payrollCorrectionStatusProof,payrollCorrectionStepProof,privacyDeliveryPreviewProof,privacyDeliveryStatusProof,privacyDeliveryStepProof} from "./sensitive-operation-proof.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
 import {quarantineConfig,sealQuarantine,MAX_QUARANTINE_BYTES} from "./quarantine.js";
@@ -390,6 +390,34 @@ app.post("/v1/tenants/:tenantId/payroll/corrections/:orderId",membership,require
   (consume&&(typeof b.proposalDigest!=="string"||!/^[a-f0-9]{64}$/.test(b.proposalDigest)||/^0+$/.test(b.proposalDigest))))return res.status(400).json({error:"Explicit exact correction action required"});
   const proof=payrollCorrectionStepProof(req.membership.tenantId,req.params.orderId.toLowerCase(),b.oldRunId.toLowerCase(),b.proposalId.toLowerCase(),b.reason,b.authorityEvidenceDigest,b.scopeDigest,b.step,consume?b.proposalDigest:null,req.identity);
   return res.json(await sensitiveQuery(req,"SELECT private.api_payroll_correction_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) AS result",proof));
+ }catch(e){return failSensitive(e,res,next);}
+});
+
+
+const deliveryFields=["recipientType","recipientKeyDigest","senderKeyDigest","authorityDigest","redactionDigest","responseDigest","envelopeDigest"];
+const validDeliveryInput=b=>["self","assisted_subject","authorized_representative","former_user"].includes(b.recipientType)&&deliveryFields.slice(1).every(k=>typeof b[k]==="string"&&/^[a-f0-9]{64}$/.test(b[k])&&!/^0+$/.test(b[k]))&&b.recipientKeyDigest!==b.senderKeyDigest;
+app.post("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId/preview",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;
+  if(!emptyQuery(req)||!exactBody(b,deliveryFields)||!validDeliveryInput(b))return res.status(400).json({error:"Exact privacy response scope required"});
+  const args=privacyDeliveryPreviewProof(req.membership.tenantId,req.params.caseId.toLowerCase(),req.params.orderId.toLowerCase(),deliveryFields.map(k=>b[k]),req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_delivery_preview($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) AS result",args));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  const args=privacyDeliveryStatusProof(req.membership.tenantId,req.params.caseId.toLowerCase(),req.params.orderId.toLowerCase(),req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_delivery_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",args));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;
+  if(!emptyQuery(req)||!exactBody(b,[...deliveryFields,"scopeDigest","step","confirm"])||!validDeliveryInput(b)||b.confirm!==true||!["request","approve","reject","consume"].includes(b.step)||
+   typeof b.scopeDigest!=="string"||!/^[a-f0-9]{64}$/.test(b.scopeDigest)||/^0+$/.test(b.scopeDigest))return res.status(400).json({error:"Explicit scoped privacy action required"});
+  const args=privacyDeliveryStepProof(req.membership.tenantId,req.params.caseId.toLowerCase(),req.params.orderId.toLowerCase(),deliveryFields.map(k=>b[k]),b.scopeDigest,b.step,req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_delivery_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) AS result",args));
  }catch(e){return failSensitive(e,res,next);}
 });
 
