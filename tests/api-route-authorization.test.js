@@ -17,7 +17,14 @@ const expected=new Map([
   ["GET /v1/tenants/:tenantId/calculations/:runId","member"],
   ["POST /v1/tenants/:tenantId/calculations/:runId/export","step-up"],
   ["POST /v1/tenants/:tenantId/imports/:batchId/file","step-up"],
-  ["POST /v1/tenants/:tenantId/imports/:batchId/file/approve","step-up"]
+  ["POST /v1/tenants/:tenantId/imports/:batchId/file/approve","step-up"],
+  ["POST /v1/tenants/:tenantId/payroll/runs/:runId/submit","step-up"],
+  ["GET /v1/tenants/:tenantId/payroll/proposals/:proposalId","step-up"],
+  ["POST /v1/tenants/:tenantId/payroll/proposals/:proposalId/confirm","step-up"],
+  ["GET /v1/tenants/:tenantId/privacy/account","step-up"],
+  ["POST /v1/tenants/:tenantId/privacy/account/correct-email","step-up"],
+  ["POST /v1/tenants/:tenantId/privacy/invoices/:batchId/disposal-preview","step-up"],
+  ["POST /v1/tenants/:tenantId/privacy/invoices/:batchId/disposals/:orderId","step-up"]
 ]);
 
 test("every registered API endpoint has an explicit reviewed authorization classification",()=>{
