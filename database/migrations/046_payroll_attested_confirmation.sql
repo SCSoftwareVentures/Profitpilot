@@ -81,6 +81,8 @@ BEGIN
  -- Seat the decision, immutable receipt, existing invariant checks, final
  -- status and chained audit in one transaction. Any failure rolls all back.
  PERFORM private.decide_payroll_proposal(p_tenant,p_proposal,p_digest,'reviewed');
+ IF floor(extract(epoch FROM clock_timestamp()))::bigint>p_expires OR floor(extract(epoch FROM clock_timestamp()))::bigint>p_auth+300 THEN
+  RAISE EXCEPTION 'Payroll authority expired during review' USING ERRCODE='42501'; END IF;
  INSERT INTO private.payroll_confirmation_receipts(tenant_id,allocation_run_id,proposal_id,reviewer_id,evidence_digest,session_digest,auth_time)
  VALUES(p_tenant,proposal.allocation_run_id,p_proposal,actor,p_digest,p_session,p_auth);
  UPDATE public.allocation_runs SET status='confirmed',reviewer_id=actor
@@ -107,7 +109,10 @@ BEGIN
  ELSIF TG_TABLE_NAME='payroll_pools' THEN
   IF TG_OP='INSERT' THEN t:=NEW.tenant_id; batch_id_value:=NEW.batch_id;
    PERFORM 1 FROM public.import_batches WHERE tenant_id=t AND id=batch_id_value FOR UPDATE;
-  ELSE t:=OLD.tenant_id; pool_id:=OLD.id; END IF;
+  ELSE t:=OLD.tenant_id; pool_id:=OLD.id;
+   IF TG_OP='UPDATE' AND ROW(OLD.tenant_id,OLD.id,OLD.batch_id) IS DISTINCT FROM ROW(NEW.tenant_id,NEW.id,NEW.batch_id) THEN
+    RAISE EXCEPTION 'Payroll pool lineage cannot be moved' USING ERRCODE='55000'; END IF;
+  END IF;
  ELSIF TG_TABLE_NAME='raw_import_rows' THEN
   IF TG_OP='INSERT' THEN t:=NEW.tenant_id; batch_id_value:=NEW.batch_id;
   ELSE t:=OLD.tenant_id; batch_id_value:=OLD.batch_id; END IF;
