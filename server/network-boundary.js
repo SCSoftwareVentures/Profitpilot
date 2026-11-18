@@ -53,12 +53,15 @@ export function requestBoundaryStatus(req){
  if(Number(req.headers["content-length"]||0)>102400)return 413;
  return 0;
 }
+const rejectedSockets=new WeakSet();
 function deny(res,status){
+ rejectedSockets.add(res.socket);
  res.writeHead(status,{"Connection":"close","Cache-Control":"no-store","X-Content-Type-Options":"nosniff","Content-Type":"application/json","Allow":"GET, HEAD, POST, OPTIONS"});
  res.end(JSON.stringify({error:"Request rejected at HTTP boundary"}));
 }
 export function createBoundedServer(app){
  const server=createServer({requestTimeout:15000,headersTimeout:10000,keepAliveTimeout:5000,connectionsCheckingInterval:1000,maxHeaderSize:16384,insecureHTTPParser:false},(req,res)=>{
+  if(rejectedSockets.has(req.socket))return;
   const status=requestBoundaryStatus(req);
   if(status)return deny(res,status);
   app(req,res);
