@@ -46,3 +46,15 @@ test("rejects unsupported currency and inverted contract period",()=>{
  assert.throws(()=>prepareInvoiceReview(rows,{...contract,currency:"USD"}));
  assert.throws(()=>prepareInvoiceReview(rows,{...contract,periodStart:"2026-12-01"}));
 });
+
+test("decimal invoice totals are exact to the cent",()=>{
+ const many=Array.from({length:100},(_,i)=>({...rows[0],invoice_id:"INV"+i,__rowNumber:String(i+2),amount:"0.10"}));
+ const decisions=many.map(r=>({rowNumber:Number(r.__rowNumber),status:"confirmed",reviewer:"synthetic",evidenceRef:"synthetic:"+r.invoice_id}));
+ const report=syntheticPeriodReport({rows:many,decisions,contract});
+ assert.equal(report.confirmedInvoiceAmount,10);
+});
+test("invoice aggregation fails closed on totals beyond safe cent precision",()=>{
+ const large=Array.from({length:100},(_,i)=>({...rows[0],invoice_id:"L"+i,__rowNumber:String(i+2),amount:"999999999999.99"}));
+ const decisions=large.map(r=>({rowNumber:Number(r.__rowNumber),status:"confirmed",reviewer:"synthetic",evidenceRef:"synthetic:"+r.invoice_id}));
+ assert.throws(()=>syntheticPeriodReport({rows:large,decisions,contract}),/safe precision/);
+});
