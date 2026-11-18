@@ -100,3 +100,12 @@ test("pending and held candidates have explicit reason codes and no reviewer evi
  assert.deepEqual(held.entries[0].reasonCodes,["VALIDATION_HOLD"]);
  assert.equal(held.reconciliation.heldCount,1);
 });
+
+test("synthetic audit identifiers reject email addresses, URLs and free text",()=>{
+ for(const reviewer of ["person@example.com","Jane Doe","https://example.com"]){
+  assert.throws(()=>syntheticPeriodReport({rows,decisions:[{rowNumber:2,status:"confirmed",reviewer,evidenceRef:"synthetic:proof"}],contract}),/privacy-safe/);
+ }
+ for(const evidenceRef of ["person@example.com","https://example.com/file","private evidence"]){
+  assert.throws(()=>syntheticPeriodReport({rows,decisions:[{rowNumber:2,status:"confirmed",reviewer:"reviewer_01",evidenceRef}],contract}),/privacy-safe/);
+ }
+});
