@@ -13,8 +13,15 @@ test("source preflight catches common credential shapes without returning creden
 });
 test("lock preflight rejects alternate registries, nonexact versions, scripts and missing integrity",()=>{
  assert.equal(validateLock(manifest,lock({})),1);
- for(const override of [{resolved:"http://registry.npmjs.org/example.tgz"},{resolved:"https://evil.example.invalid/example.tgz"},{resolved:"https://registry.npmjs.org@evil.example.invalid/example.tgz"},{integrity:"sha1-"+ "x".repeat(27)},{hasInstallScript:true},{link:true},{version:"1.2.4"},{resolved:undefined}]){
+ for(const override of [{resolved:"http://registry.npmjs.org/example.tgz"},{resolved:"https://evil.example.invalid/example.tgz"},{resolved:"https://registry.npmjs.org@evil.example.invalid/example.tgz"},{integrity:"sha1-"+ "x".repeat(27)},{hasInstallScript:true},{link:true},{version:"1.2.4"},{resolved:undefined},{resolved:"https://registry.npmjs.org/another/-/another-1.2.3.tgz"},{resolved:"https://registry.npmjs.org/example/-/example-1.2.4.tgz"},{name:"another"}]){
   assert.throws(()=>validateLock(manifest,lock(override)));
  }
  assert.throws(()=>validateLock({dependencies:{example:"^1.2.3"}},lock({})));
+});
+
+test("lock root and package identities must match the reviewed manifest",()=>{
+ const mismatched=lock({});mismatched.packages[""].dependencies={example:"1.2.4"};
+ assert.throws(()=>validateLock(manifest,mismatched));
+ const extra=lock({});extra.packages[""].dependencies={...manifest.dependencies,unreviewed:"1.0.0"};
+ assert.throws(()=>validateLock(manifest,extra));
 });
