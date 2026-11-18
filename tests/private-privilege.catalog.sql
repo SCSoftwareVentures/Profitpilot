@@ -19,6 +19,8 @@ BEGIN
     'private.site_payroll_summary(uuid,uuid,date,date)','private.read_calculation_summary(uuid,uuid)',
     'private.verify_security_catalog()','private.verify_startup_signing_key(text,bigint,text,text)','private.admit_actor_request(uuid)','private.lock_tenant_available(uuid)',
     'private.api_privacy_rights_case(uuid,uuid,text,text,bigint,bigint,text,bigint,text,text,text,text,text,text)',
+    'private.api_payroll_allocation_build(uuid,uuid,text,text,bigint,bigint,text,bigint,text,text,text,uuid,jsonb)',
+    'private.api_payroll_allocation_status(uuid,uuid,text,text,bigint,bigint,text,bigint,text,text,text,uuid)',
     'private.api_payroll_intake_preview(uuid,uuid,text,text,bigint,bigint,text,bigint,text,text,text,uuid,uuid,uuid,text,integer,text,text,text,jsonb,text)',
     'private.api_payroll_intake_status(uuid,uuid,text,text,bigint,bigint,text,bigint,text,text,text,uuid)',
     'private.api_payroll_intake_step(uuid,uuid,uuid,uuid,uuid,text,integer,text,text,text,jsonb,text,text,bigint,bigint,text,bigint,text,text,text)',

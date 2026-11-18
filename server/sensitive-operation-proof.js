@@ -1,5 +1,6 @@
 import {createHmac,createHash,randomBytes} from "node:crypto";
 import {hasRecentMfa} from "./auth.js";
+import {canonicalAllocationMapping} from "../src/payroll-allocation-mapping.js";
 
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const digest=/^[a-f0-9]{64}$/;
@@ -165,4 +166,16 @@ export function payrollIntakeStepProof(tenant,batch,order,input,scope,step,ident
  intakeIds(tenant,batch,order);const [pool,...f]=intakeFields(input);
  const signed=securityWorkProof(tenant,order,"privileged_operation",scope,step,identity,env,now);
  return [tenant,batch,pool,order,...f,JSON.stringify(input.rows),scope,step,...signed.slice(5)];
+}
+
+export function payrollAllocationBuildProof(tenant,pool,run,lines,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ if(![tenant,pool,run].every(x=>typeof x==="string"&&uuid.test(x)))denied();
+ const canonical=canonicalAllocationMapping(pool,lines);if(canonical===null)denied();
+ const scope=createHash("sha256").update(canonical).digest("hex");
+ return [...signedAction("profitpilot-sensitive-api-v1",[tenant,run,"payroll_allocation_build",scope],identity,env,now),pool,JSON.stringify(lines)];
+}
+export function payrollAllocationStatusProof(tenant,pool,run,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ if(![tenant,pool,run].every(x=>typeof x==="string"&&uuid.test(x)))denied();
+ const scope=createHash("sha256").update(["payroll-allocation-status-v1",pool].join("\n")).digest("hex");
+ return [...signedAction("profitpilot-sensitive-api-v1",[tenant,run,"payroll_allocation_status",scope],identity,env,now),pool];
 }

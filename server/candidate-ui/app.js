@@ -12,6 +12,7 @@ el("new-correction").addEventListener("click",()=>{if(!busy)el("correction-order
 el("new-delivery").addEventListener("click",()=>{if(!busy)el("delivery-order").value=crypto.randomUUID();});
 el("new-receipt").addEventListener("click",()=>{if(!busy)el("receipt-review").value=crypto.randomUUID();});
 el("new-intake").addEventListener("click",()=>{if(!busy){el("intake-pool").value=crypto.randomUUID();el("intake-order").value=crypto.randomUUID();el("intake-scope").value="";el("intake-confirm").checked=false;}});
+el("new-allocation").addEventListener("click",()=>{if(!busy){el("allocation-run").value=crypto.randomUUID();el("allocation-build-confirm").checked=false;}});
 window.addEventListener("pagehide",clear);
 async function operation(action){
  if(busy)return;
@@ -100,17 +101,25 @@ async function operation(action){
      else{checked("intake-confirm");body.step=el("intake-step").value;body.scopeDigest=digest("intake-scope");body.confirm=true;el("intake-confirm").checked=false;}
     }break;
    }
+   case "allocation-build":
+   case "allocation-status":{
+    path="/payroll/pools/"+clean("allocation-pool")+"/allocations/"+clean("allocation-run");
+    if(action==="allocation-build"){checked("allocation-build-confirm");let lines;try{lines=JSON.parse(el("allocation-lines").value);}catch{throw Error("Enter a synthetic mapping JSON array.");}
+     if(!Array.isArray(lines)||lines.length>400)throw Error("Use up to 400 synthetic mapping entries.");
+     body={confirm:true,lines};el("allocation-build-confirm").checked=false;}
+    break;
+   }
    default:throw Error("Unknown operation.");
   }
   busy=true;active=true;controller=new AbortController();
-  for(const b of document.querySelectorAll("button[data-operation],#new-order,#new-case,#new-correction,#new-delivery,#new-receipt,#new-intake"))b.disabled=true;
+  for(const b of document.querySelectorAll("button[data-operation],#new-order,#new-case,#new-correction,#new-delivery,#new-receipt,#new-intake,#new-allocation"))b.disabled=true;
   el("status").textContent="Request in progress.";
   const res=await fetch("/v1/tenants/"+t+path,{method:body===undefined?"GET":"POST",headers:{Authorization:"Bearer "+token,...(body===undefined?{}:{"Content-Type":"application/json"})},credentials:"omit",cache:"no-store",redirect:"error",signal:controller.signal,body:body===undefined?undefined:JSON.stringify(body)});
   const data=await res.json();
   if(current!==epoch)return;
   el("status").textContent=(res.ok?"Accepted":"Denied")+" · HTTP "+res.status;
   el("result").textContent=JSON.stringify(data,null,2);
-  if(res.ok&&["submit","review"].includes(action)&&uuid.test(data.proposalId||"")&&sha.test(data.evidenceDigest||"")){
+  if(res.ok&&["submit","review","allocation-build","allocation-status"].includes(action)&&uuid.test(data.proposalId||"")&&sha.test(data.evidenceDigest||"")){
    el("proposal").value=data.proposalId;el("digest").value=data.evidenceDigest;
   }
   if(res.ok&&action==="preview"&&sha.test(data.scopeDigest||""))el("scope").value=data.scopeDigest;
@@ -125,6 +134,6 @@ async function operation(action){
    el("correction-confirm").checked=false;
   }
  }catch(e){if(current===epoch)el("status").textContent=e.name==="AbortError"?"Request cancelled.":(active?"Request unavailable.":e.message);}
- finally{if(active){busy=false;controller=null;for(const b of document.querySelectorAll("button[data-operation],#new-order,#new-case,#new-correction,#new-delivery,#new-receipt,#new-intake"))b.disabled=false;}}
+ finally{if(active){busy=false;controller=null;for(const b of document.querySelectorAll("button[data-operation],#new-order,#new-case,#new-correction,#new-delivery,#new-receipt,#new-intake,#new-allocation"))b.disabled=false;}}
 }
 for(const node of document.querySelectorAll("button[data-operation]"))node.addEventListener("click",()=>operation(node.dataset.operation));

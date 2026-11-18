@@ -194,6 +194,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/062_privacy_key_lifecycle.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/063_reviewed_payroll_intake.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/064_payroll_intake_operator_api.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/065_payroll_allocation_builder.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql

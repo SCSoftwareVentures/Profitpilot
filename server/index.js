@@ -14,8 +14,9 @@ import {proxyTrust,corsOrigins,createBoundedServer} from "./network-boundary.js"
 import {importIntakeGate,promotionProof} from "./intake-security.js";
 import {createReadinessGuard} from "./readiness-guard.js";
 import {productionReleaseGate} from "./release-gate.js";
-import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof,privacyCaseProof,payrollCorrectionPreviewProof,payrollCorrectionStatusProof,payrollCorrectionStepProof,privacyDeliveryPreviewProof,privacyDeliveryStatusProof,privacyDeliveryStepProof,privacyReceiptPreviewProof,privacyReceiptStatusProof,privacyReceiptStepProof,privacyDispatchStatusProof,privacyDispatchStepProof,payrollIntakePreviewProof,payrollIntakeStatusProof,payrollIntakeStepProof} from "./sensitive-operation-proof.js";
+import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof,privacyCaseProof,payrollCorrectionPreviewProof,payrollCorrectionStatusProof,payrollCorrectionStepProof,privacyDeliveryPreviewProof,privacyDeliveryStatusProof,privacyDeliveryStepProof,privacyReceiptPreviewProof,privacyReceiptStatusProof,privacyReceiptStepProof,privacyDispatchStatusProof,privacyDispatchStepProof,payrollIntakePreviewProof,payrollIntakeStatusProof,payrollIntakeStepProof,payrollAllocationBuildProof,payrollAllocationStatusProof} from "./sensitive-operation-proof.js";
 import {canonicalPayrollRows} from "../src/payroll-source-intake.js";
+import {canonicalAllocationMapping} from "../src/payroll-allocation-mapping.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
 import {quarantineConfig,sealQuarantine,MAX_QUARANTINE_BYTES} from "./quarantine.js";
@@ -50,7 +51,7 @@ app.use("/v1/tenants/:tenantId/imports",importIntakeGate());
 app.use("/v1",express.json({limit:"100kb",inflate:false}));
 app.use("/v1",enforceJsonBudget);
 const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-for(const param of ["batchId","matchId","runId","proposalId","orderId","caseId","reviewId"])app.param(param,(req,res,next,value)=>uuidPattern.test(value)?next():res.status(400).json({error:"Invalid resource ID"}));
+for(const param of ["batchId","matchId","runId","proposalId","orderId","caseId","reviewId","poolId"])app.param(param,(req,res,next,value)=>uuidPattern.test(value)?next():res.status(400).json({error:"Invalid resource ID"}));
 const requestTenant=(req,tenantId,fn)=>withTenant(tenantId,req.identity.subject,fn,req.identity);
 
 async function membership(req,res,next){
@@ -515,6 +516,21 @@ app.post("/v1/tenants/:tenantId/payroll/intakes/:batchId/orders/:orderId",member
  }catch(e){return failSensitive(e,res,next);}
 });
 
+
+const allocationIds=req=>[req.membership.tenantId,req.params.poolId.toLowerCase(),req.params.runId.toLowerCase()];
+app.post("/v1/tenants/:tenantId/payroll/pools/:poolId/allocations/:runId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;
+  if(!emptyQuery(req)||!exactBody(b,["confirm","lines"])||b.confirm!==true||canonicalAllocationMapping(req.params.poolId.toLowerCase(),b.lines)===null)return res.status(400).json({error:"Exact candidate mapping required"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_payroll_allocation_build($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) AS result",payrollAllocationBuildProof(...allocationIds(req),b.lines,req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/payroll/pools/:poolId/allocations/:runId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_payroll_allocation_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",payrollAllocationStatusProof(...allocationIds(req),req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
 app.use((err,req,res,next)=>{if(res.destroyed||res.writableEnded)return;if(res.headersSent)return next(err);const id=randomUUID();const status=err.code==="P4501"?429:(err.code==="23505"||err.code==="P4502")?409:err.code==="54000"?413:err.code==="22P02"||err.code==="22P05"?400:err.status===503?503:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);if(status===503)res.set("Retry-After","5");if(err.code==="P4501")res.set("Retry-After","3600");process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:err.code==="P4501"?"Financial access limit reached; retry later":err.code==="P4502"?"Payroll evidence was corrected; recalculate before relying on this result":status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":status===503?"Request capacity temporarily unavailable":"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
 if(process.env.NODE_ENV==="production"){
