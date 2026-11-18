@@ -1,5 +1,77 @@
 # ProfitPilot — Security and Privacy Readiness Review
 
+## Current acceptance position — 18 November 2026
+
+**NOT APPROVED for live customer data or production.** The following current
+register supersedes the historical branch/CI statements below. Verified
+baseline is draft PR #38, branch `security/tenant-isolation-release-gate-20261118`,
+commit `6c08346c8375c2064ede08d874cdba6b40163096`, CI #1686
+(https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44216584713).
+All four jobs passed: Node/application, PostgreSQL/API/TLS/recovery,
+container supply chain, and release gate. The scanner found no HIGH or
+CRITICAL findings in the scanned images. Evidence is limited to that
+commit, test environment and advisory databases at scan time.
+
+| Control | Verified prototype scope | Remaining acceptance |
+|---|---|---|
+| SR-01 classification | Documented classification and minimised financial outputs | Field/processor inventory approval |
+| SR-02 prohibited data | Invoice payload allowlist, privacy screening, strict CSV tests | Real-world corpus; not exhaustive sensitive-data detection |
+| SR-03 RBAC | Reviewed 12-route inventory, signed membership/role, MFA gates, narrow grants | Every future route/UI/worker; separation of duties |
+| SR-04 authentication | Access token profile, signed context, session cutoff and targeted revocation | Integrate actual identity provider; lifecycle/end-to-end validation |
+| SR-05 tenant isolation | 20 protected relations, exact RLS policies, runtime/catalogue negative tests | Independent adversarial assessment and live drift monitoring |
+| SR-06 object isolation | Authenticated API cross-tenant rejection | Broader product endpoints and pagination acceptance |
+| SR-07 FK integrity | Tenant composite FK and signed actor tests | Review every future relation |
+| SR-08 private storage | Encrypted DB quarantine; no public retrieval | Approved storage architecture, production disabled |
+| SR-09 malware/parsing | Isolated adapter, strict parsing, manifest/digest checks | Real scanner engine/deployment and corpus; no live acceptance |
+| SR-10 deletion | Narrow rejected/failed staging disposal, hold and expiry controls | Full lifecycle incl backups, processors, physical disposal |
+| SR-11 recovery | Authenticated encrypted synthetic restore plus signed privacy receipt replay | Independent durable storage, latest digest authority, measured RPO/RTO |
+| SR-12 monitoring | Audit hash chain, external checkpoint tooling, bounded aggregate alerts | Live routing, on-call, offsite integrity, operational exercise |
+| SR-13 secrets | Key lifecycle, independent key validation, live startup proof, synthetic TLS | Managed custody, rotation and incident drills |
+| SR-14 ingress | Shared rate limiting, raw HTTP boundary, actor containment, budgets | Proxy translation/framing, workload thresholds, load testing |
+| SR-15 provisioning/MFA | Restricted identity operator, issuer-attested profile and recent MFA | Actual IdP and account recovery acceptance |
+| SR-16 Australian privacy | Requirements documented | Qualified Australian counsel / PIA |
+| SR-17 employee/TFN | Generic payroll row ingest blocked; privacy-safe invoice screening | Payroll workflow, legal verification, worker notice |
+| SR-18 cross-border | Documented requirements | Verified regions, processors, contracts and legal advice |
+| SR-19 incidents | Alert policy and handover | Named responders, NDB assessment and tabletop |
+| SR-20 automated decisions | Human review principles | Legal review of actual feature and notices |
+| SR-21 AI/OCR | No approved real-data integration | Provider/privacy impact assessment before enablement |
+| SR-22 export | MFA-gated calculation summary, purpose restriction, audit and budgets | Full product export/privacy request scope |
+| SR-23 holds | Operator-controlled holds, disposal blockers and signed replay | Approved processes, authority and exception review |
+| SR-24 independent assessment | Automated CI only | Independent penetration testing and remediation retest |
+| SR-25 iPhone/accessibility | Requirements documented | Tested real interface and access flows |
+| SR-26 operations | Startup/readiness checks, recovery and handover scripts | Live production environment, operating owners, acceptance |
+
+### New candidate work (not yet verified at time of this update)
+
+Migration 037 makes automated mapping insert-only at the database privilege
+boundary. Runtime cannot modify existing candidate or human-reviewed rows or
+insert final decisions, reviewer attribution, or arbitrary validation methods.
+The validation endpoint preserves existing proposals and reports new/preserved
+counts. The contract list uses an exclusive UUID cursor, defaults to 50 rows,
+caps pages at 100, validates query parameters and never returns a global count.
+This changes prior unbounded name ordering to stable ID ordering; clients must
+follow nextCursor. Pagination bounds individual responses but is not a guarantee
+against cumulative authorized extraction. New tests and full CI are required
+on the exact resulting head.
+
+### Outstanding release blockers
+
+- Raw parsed invoice intake is still a prototype path; require explicit
+  production intake acceptance and end-to-end scanner/lifecycle validation
+  before real data. No generic live payroll ingestion.
+- Reconcile identity, membership, key and legal-hold state from authoritative
+  independent records before restored service resumes. Privacy package is not
+  a complete recovery authorization mechanism.
+- Live identity provider, secret/backup custody, external alerting, production
+  ingress, workload validation, independent security assessment, Australian
+  legal/privacy and retention review, real user-interface acceptance.
+- Owner approval and G5 remain mandatory. No main merge, deployment, or live
+  data authorisation follows from this register.
+
+---
+
+## Historical review record (superseded by the current register)
+
 **Review date:** 16 November 2026  
 **Status:** documentary readiness assessment; not an independent security audit, legal opinion, penetration test or release approval.  
 **Repository:** `luxhustle01-ux/Profitpilot` (public). Synthetic fixtures only.  
