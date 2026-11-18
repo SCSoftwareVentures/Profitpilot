@@ -13,3 +13,10 @@ test("financial contribution avoids binary float drift",()=>{
 test("reject malformed, imprecise or unsafe financial aggregates",()=>{
  for(const value of ["NaN","Infinity","1.001","1e3","1",null,123.45,"90071992547409.92"])assert.throws(()=>exactAggregateCents(value));
 });
+
+test("margin rounds deterministically at half-basis-point boundaries",()=>{
+ assert.equal(financialTotals("200.00","199.99").marginPercent,0.01);
+ assert.equal(financialTotals("200.00","200.01").marginPercent,0);
+ assert.equal(financialTotals("0.00","0.00").marginPercent,null);
+ assert.equal(financialTotals("90071992547409.91","0.00").marginPercent,100);
+});
