@@ -3,7 +3,7 @@
 DO $audit$
 DECLARE role_name text; p record; t record; privilege text; allowed boolean; expected text[];
 BEGIN
- FOREACH role_name IN ARRAY ARRAY['profitpilot_app','profitpilot_scanner','profitpilot_identity_operator','profitpilot_audit_reader'] LOOP
+ FOREACH role_name IN ARRAY ARRAY['profitpilot_app','profitpilot_scanner','profitpilot_identity_operator','profitpilot_audit_reader','profitpilot_recovery_reader'] LOOP
   IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=role_name AND NOT (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication))
    OR EXISTS(SELECT 1 FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.member WHERE r.rolname=role_name)
    OR has_schema_privilege(role_name,'public','CREATE') OR has_schema_privilege(role_name,'private','CREATE')
@@ -25,6 +25,7 @@ BEGIN
     'private.claim_quarantine_promotion()','private.finish_quarantine_promotion(uuid,uuid,uuid,jsonb)'];
    WHEN 'profitpilot_identity_operator' THEN expected:=ARRAY[
     'private.provision_verified_identity(text,text,text)','private.administer_membership(uuid,uuid,text,text,text)'];
+   WHEN 'profitpilot_recovery_reader' THEN expected:=ARRAY['private.privacy_recovery_inventory()'];
    WHEN 'profitpilot_audit_reader' THEN expected:=ARRAY[
     'private.audit_checkpoint_heads()','private.audit_checkpoint_matches(uuid,bigint,text)'];
   END CASE;
