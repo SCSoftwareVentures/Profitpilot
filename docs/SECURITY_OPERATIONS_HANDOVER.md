@@ -130,13 +130,17 @@ bundled gosu binary. No suppressions or scanner exclusions were added.
 
 The reviewed remediation retains the digest-pinned upstream PostgreSQL base
 and replaces the obsolete runtime utility with Alpine's signed su-exec
-package, pinned to 0.3-r0. PostgreSQL's upstream initialization and entrypoint
-are unchanged. The local bootstrap, CI database integration and vulnerability
+package, pinned to 0.3-r0. PostgreSQL's upstream initialization remains intact; only the original
+privilege-drop invocation is replaced with su-exec. The local bootstrap, CI database integration and vulnerability
 scan all use this custom Dockerfile. CI verifies the privilege drop (effective
 UID/GID, no root supplementary group, actual PostgreSQL PID 1 ownership,
 including after TLS restart), migrations, recovery and TLS. Do not use the
 old unmodified database image. Do not report remediation as verified until
-the complete gate for the resulting commit passes. The replacement removes
-the binary from the final runtime filesystem; the inherited base layers remain.
+the complete gate for the resulting commit passes. CI #1622 showed that replacing the executable alone did not clear the scan.
+The final image now copies the merged hardened filesystem into a scratch
+stage, removing inherited image layers and the gosu path, and explicitly
+restores the upstream entrypoint, command, volume, stop signal and environment.
+CI requires exactly one filesystem layer and tests runtime startup and privileges.
+The final build and scan must pass before this remediation is accepted.
 Package installation uses the distribution's signed APK metadata; the final
 built image still requires an immutable release digest and independent review.
