@@ -7,6 +7,8 @@ import {randomUUID,createHash} from "node:crypto";
 import {withTenant,health} from "./db.js";
 import {authRequired,requireRole} from "./auth.js";
 import {parseCsv,validateInvoiceRows,isIsoDate} from "../src/engine.js";
+import {financialTotals} from "../src/financial-totals.js";
+import {reconcileFinancialReport} from "../src/financial-reconciliation.js";
 
 const app=express();
 app.disable("x-powered-by");
@@ -106,10 +108,17 @@ app.post("/v1/tenants/:tenantId/calculations",membership,requireRole("owner","ad
   const costs=await client.query("SELECT COALESCE(SUM(al.amount),0)::numeric(14,2) AS amount,COUNT(*)::int AS line_count FROM allocation_lines al JOIN allocation_runs ar ON ar.id=al.allocation_run_id AND ar.tenant_id=al.tenant_id JOIN payroll_pools pp ON pp.id=ar.payroll_pool_id AND pp.tenant_id=ar.tenant_id WHERE al.tenant_id=$1 AND al.site_id=$2 AND al.bucket_type IN ('direct','approved_allocated') AND ar.status='confirmed' AND pp.period_start >= $3::date AND pp.period_end <= $4::date",[req.membership.tenantId,siteId,periodStart,periodEnd]);
   if(!Number(revenue.rows[0].line_count)||!Number(costs.rows[0].line_count))return {error:"Insufficient evidence: confirmed invoice lines and confirmed site allocation lines are both required"};
   if(Number(revenue.rows[0].tax_basis_count)!==1||Number(revenue.rows[0].currency_count)!==1||revenue.rows[0].unknown_tax_basis||revenue.rows[0].invoice_currency!==base.rows[0].currency)return {error:"Mixed, unknown or mismatched invoice tax/currency basis. Resolve source basis before calculating."};
-  const rev=Number(revenue.rows[0].amount),cost=Number(costs.rows[0].amount);
-  const outputs={revenue:rev,deliveryCost:cost,contribution:Number((rev-cost).toFixed(2)),marginPercent:rev?Number(((rev-cost)/rev*100).toFixed(2)):null,currency:base.rows[0].currency,taxBasis:"consistent source invoice basis; no tax conversion applied",invoiceLineCount:Number(revenue.rows[0].line_count),allocationLineCount:Number(costs.rows[0].line_count),taxBasisCount:1,limitations:["Management contribution only; not statutory or audited profit.","Only confirmed invoice matches and confirmed direct/approved site allocation lines are included.","Other delivery costs, non-site costs and unallocated payroll are excluded unless separately included in source records."]};
+  // Stable source fingerprints bind the report to the exact confirmed source rows.
+  // Each digest includes identifiers and values, so an edit, replacement or omission changes it.
+  const invoiceEvidence=await client.query("SELECT COUNT(*)::int AS row_count,md5(COALESCE(string_agg(mr.id::text||':'||il.id::text||':'||il.amount::text||':'||i.id::text||':'||i.tax_basis||':'||i.currency,'|' ORDER BY mr.id,il.id),'')) AS fingerprint FROM match_reviews mr JOIN invoice_lines il ON il.id=mr.invoice_line_id AND il.tenant_id=mr.tenant_id JOIN invoices i ON i.id=il.invoice_id AND i.tenant_id=il.tenant_id WHERE mr.tenant_id=$1 AND mr.contract_id=$2 AND mr.site_id=$3 AND mr.decision='confirmed' AND i.direction='customer' AND i.invoice_date BETWEEN $4::date AND $5::date",[req.membership.tenantId,contractId,siteId,periodStart,periodEnd]);
+  const costEvidence=await client.query("SELECT COUNT(*)::int AS row_count,md5(COALESCE(string_agg(al.id::text||':'||al.amount::text||':'||ar.id::text||':'||pp.id::text,'|' ORDER BY al.id),'')) AS fingerprint FROM allocation_lines al JOIN allocation_runs ar ON ar.id=al.allocation_run_id AND ar.tenant_id=al.tenant_id JOIN payroll_pools pp ON pp.id=ar.payroll_pool_id AND pp.tenant_id=ar.tenant_id WHERE al.tenant_id=$1 AND al.site_id=$2 AND al.bucket_type IN ('direct','approved_allocated') AND ar.status='confirmed' AND pp.period_start >= $3::date AND pp.period_end <= $4::date",[req.membership.tenantId,siteId,periodStart,periodEnd]);
+  if(invoiceEvidence.rows[0].row_count!==revenue.rows[0].line_count||costEvidence.rows[0].row_count!==costs.rows[0].line_count)return {error:"Source evidence counts changed during calculation"};
+  const sourceEvidence={version:1,invoice:{count:invoiceEvidence.rows[0].row_count,fingerprint:invoiceEvidence.rows[0].fingerprint},allocation:{count:costEvidence.rows[0].row_count,fingerprint:costEvidence.rows[0].fingerprint},limitations:"Fingerprints detect changes on later recomputation; they do not independently establish source completeness or prevent privileged database alteration"};
+  const totals=financialTotals(revenue.rows[0].amount,costs.rows[0].amount);
+  const outputs={...totals,currency:base.rows[0].currency,taxBasis:"consistent source invoice basis; no tax conversion applied",invoiceLineCount:Number(revenue.rows[0].line_count),allocationLineCount:Number(costs.rows[0].line_count),taxBasisCount:1,limitations:["Management contribution only; not statutory or audited profit.","Only confirmed invoice matches and confirmed direct/approved site allocation lines are included.","Other delivery costs, non-site costs and unallocated payroll are excluded unless separately included in source records."]};
+  const reconciliation=reconcileFinancialReport(outputs,revenue.rows[0].amount,costs.rows[0].amount);
   const user=await client.query("SELECT id FROM users WHERE auth_subject=$1",[req.identity.subject]);if(!user.rowCount)throw Object.assign(new Error("User identity is not provisioned in this tenant database"),{status:403});
-  const saved=await client.query("INSERT INTO calculation_runs(tenant_id,contract_id,site_id,period_start,period_end,formula_version,inputs,outputs,completeness,created_by) VALUES($1,$2,$3,$4,$5,'0.1.0',$6,$7,'incomplete',$8) RETURNING id,created_at",[req.membership.tenantId,contractId,siteId,periodStart,periodEnd,JSON.stringify({contractVersion:base.rows[0].version_no,invoiceLineCount:outputs.invoiceLineCount,allocationLineCount:outputs.allocationLineCount}),JSON.stringify(outputs),user.rows[0].id]);
+  const saved=await client.query("INSERT INTO calculation_runs(tenant_id,contract_id,site_id,period_start,period_end,formula_version,inputs,outputs,completeness,created_by) VALUES($1,$2,$3,$4,$5,'0.1.0',$6,$7,'incomplete',$8) RETURNING id,created_at",[req.membership.tenantId,contractId,siteId,periodStart,periodEnd,JSON.stringify({contractVersion:base.rows[0].version_no,invoiceLineCount:outputs.invoiceLineCount,allocationLineCount:outputs.allocationLineCount,reconciliation,sourceEvidence}),JSON.stringify(outputs),user.rows[0].id]);
   await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'calculation_created','calculation_run',$3,'Versioned management contribution calculation',$4)",[req.membership.tenantId,user.rows[0].id,saved.rows[0].id,JSON.stringify({formulaVersion:"0.1.0",periodStart,periodEnd})]);
   return {id:saved.rows[0].id,createdAt:saved.rows[0].created_at,outputs};
  });
@@ -117,14 +126,33 @@ app.post("/v1/tenants/:tenantId/calculations",membership,requireRole("owner","ad
  res.status(201).json(result);
  }catch(e){next(e);}});
  
-app.get("/v1/tenants/:tenantId/calculations/:runId",membership,async(req,res,next)=>{try{
+app.get("/v1/tenants/:tenantId/calculations/:runId",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
  const result=await withTenant(req.membership.tenantId,req.identity.subject,client=>client.query("SELECT id,contract_id,site_id,period_start,period_end,formula_version,inputs,outputs,completeness,created_at FROM calculation_runs WHERE id=$1 AND tenant_id=$2",[req.params.runId,req.membership.tenantId]));
  if(!result.rowCount)return res.status(404).json({error:"Calculation run not found"});
  res.json(result.rows[0]);
  }catch(e){next(e);}});
  
 
-app.use((err,req,res,next)=>{const id=randomUUID();process.stderr.write(JSON.stringify({event:"request_error",id,message:err.message})+"\n");const status=err.code==="23505"?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);res.status(status).json({error:status===409?"Conflicting record; refresh and review the current state":status<500?err.message:"Internal server error",reference:id});});
+
+app.get("/v1/tenants/:tenantId/calculations/:runId/source-status",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
+  const saved=await client.query("SELECT contract_id,site_id,period_start,period_end,inputs FROM calculation_runs WHERE id=$1 AND tenant_id=$2",[req.params.runId,req.membership.tenantId]);
+  if(!saved.rowCount)return null;
+  const row=saved.rows[0],previous=row.inputs?.sourceEvidence;
+  if(!previous||previous.version!==1)return {status:"unverifiable",reason:"This report has no versioned source evidence"};
+  const contractId=row.contract_id,siteId=row.site_id,periodStart=row.period_start,periodEnd=row.period_end;
+    const invoiceEvidence=await client.query("SELECT COUNT(*)::int AS row_count,md5(COALESCE(string_agg(mr.id::text||':'||il.id::text||':'||il.amount::text||':'||i.id::text||':'||i.tax_basis||':'||i.currency,'|' ORDER BY mr.id,il.id),'')) AS fingerprint FROM match_reviews mr JOIN invoice_lines il ON il.id=mr.invoice_line_id AND il.tenant_id=mr.tenant_id JOIN invoices i ON i.id=il.invoice_id AND i.tenant_id=il.tenant_id WHERE mr.tenant_id=$1 AND mr.contract_id=$2 AND mr.site_id=$3 AND mr.decision='confirmed' AND i.direction='customer' AND i.invoice_date BETWEEN $4::date AND $5::date",[req.membership.tenantId,contractId,siteId,periodStart,periodEnd]);
+  const costEvidence=await client.query("SELECT COUNT(*)::int AS row_count,md5(COALESCE(string_agg(al.id::text||':'||al.amount::text||':'||ar.id::text||':'||pp.id::text,'|' ORDER BY al.id),'')) AS fingerprint FROM allocation_lines al JOIN allocation_runs ar ON ar.id=al.allocation_run_id AND ar.tenant_id=al.tenant_id JOIN payroll_pools pp ON pp.id=ar.payroll_pool_id AND pp.tenant_id=ar.tenant_id WHERE al.tenant_id=$1 AND al.site_id=$2 AND al.bucket_type IN ('direct','approved_allocated') AND ar.status='confirmed' AND pp.period_start >= $3::date AND pp.period_end <= $4::date",[req.membership.tenantId,siteId,periodStart,periodEnd]);
+
+  const current={invoice:{count:invoiceEvidence.rows[0].row_count,fingerprint:invoiceEvidence.rows[0].fingerprint},allocation:{count:costEvidence.rows[0].row_count,fingerprint:costEvidence.rows[0].fingerprint}};
+  const matches=Object.keys(current).every(k=>current[k].count===previous[k]?.count&&current[k].fingerprint===previous[k]?.fingerprint);
+  return {status:matches?"unchanged":"changed",sourceEvidenceVersion:1,invoiceCount:current.invoice.count,allocationCount:current.allocation.count,limitations:"Compares current confirmed source records with the saved report fingerprint; cannot prove that all relevant source records were originally captured"};
+ });
+ if(!result)return res.status(404).json({error:"Calculation run not found"});
+ res.json(result);
+ }catch(e){next(e);}});
+
+app.use((err,req,res,next)=>{const id=randomUUID();process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"&&/^[A-Z0-9_]{1,12}$/.test(err.code)?err.code:null})+"\n");const status=err.code==="23505"?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);res.status(status).json({error:status===409?"Conflicting record; refresh and review the current state":status<500?err.message:"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
 if(process.env.NODE_ENV!=="test")app.listen(port,()=>process.stdout.write("ProfitPilot API listening on "+port+"\n"));
 export default app;

@@ -38,13 +38,34 @@ export function validateInvoiceRows(rows){
     return {rowNumber:r.__rowNumber||i+2,record:r,errors,status:errors.length?"held":"pending_review"};
   });
 }
+function payrollCents(value) {
+  if (typeof value !== "string" && typeof value !== "number") return null;
+  const raw = String(value).trim();
+  if (!/^-?\d+(?:\.\d{1,2})?$/.test(raw)) return null;
+  const negative = raw.startsWith("-");
+  const [whole, fraction = ""] = (negative ? raw.slice(1) : raw).split(".");
+  const cents = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
+  return cents > BigInt(Number.MAX_SAFE_INTEGER) ? null : (negative ? -cents : cents);
+}
 export function allocatePayroll({pool,direct=[],approved=[],nonSite=0,excluded=0}){
-  const p=money(pool),d=money(direct.reduce((s,x)=>s+Number(x.amount||0),0)),a=money(approved.reduce((s,x)=>s+Number(x.amount||0),0)),n=money(nonSite),e=money(excluded);
-  const residual=money(p-d-a-n-e);
-  const siteTotals={};
-  for(const x of [...direct,...approved])siteTotals[x.site]=(siteTotals[x.site]||0)+Number(x.amount||0);
-  const valid=[p>=0,d>=0,a>=0,n>=0,e>=0,residual>=0,Object.values(siteTotals).every(v=>v>=0)];
-  return {pool:p,direct:d,approvedAllocated:a,nonSite:n,excluded:e,unallocated:residual,siteTotals:Object.fromEntries(Object.entries(siteTotals).map(([k,v])=>[k,money(v)])),reconciles:valid.every(Boolean)&&money(d+a+n+e+residual)===p,errors:valid.every(Boolean)?[]:["Negative pool, bucket or allocation exceeds eligible payroll pool"]};
+  const errors = [];
+  if (!Array.isArray(direct) || !Array.isArray(approved)) return {reconciles:false,errors:["Invalid allocation list"]};
+  const amounts = [pool,nonSite,excluded,...direct.map(x=>x?.amount),...approved.map(x=>x?.amount)];
+  const cents = amounts.map(payrollCents);
+  if (cents.some(v=>v===null || v<0n)) return {reconciles:false,errors:["Invalid, negative or sub-cent payroll amount"]};
+  const [p,n,e] = cents;
+  const d = cents.slice(3,3+direct.length).reduce((s,v)=>s+v,0n);
+  const a = cents.slice(3+direct.length).reduce((s,v)=>s+v,0n);
+  const residual = p-d-a-n-e;
+  const siteCents = new Map();
+  for (const [i,x] of [...direct,...approved].entries()) {
+    if (typeof x?.site !== "string" || !x.site.trim()) errors.push("Missing allocation site");
+    else siteCents.set(x.site,(siteCents.get(x.site)||0n)+cents[i+3]);
+  }
+  if (residual<0n) errors.push("Allocation exceeds eligible payroll pool");
+  if ([p,d,a,n,e,residual,...siteCents.values()].some(v=>v>BigInt(Number.MAX_SAFE_INTEGER))) errors.push("Payroll total exceeds safe cent precision");
+  const dollars = v => Number(v)/100;
+  return {pool:dollars(p),direct:dollars(d),approvedAllocated:dollars(a),nonSite:dollars(n),excluded:dollars(e),unallocated:dollars(residual),siteTotals:Object.fromEntries([...siteCents].map(([k,v])=>[k,dollars(v)])),reconciles:errors.length===0,errors};
 }
 export function matchInvoice(row,contract){
   const identity=!!row.site&&row.site===contract.site;
@@ -54,11 +75,26 @@ export function matchInvoice(row,contract){
   const confidence=identity&&period&&amount?"MEDIUM":identity&&amount?"LOW":"UNMATCHED";
   return {contractId:contract.id,confidence,evidence:{identity,period,amount},requiresHumanConfirmation:true};
 }
+function contractCents(value) {
+  const cents = payrollCents(value);
+  if (cents === null) throw new Error("Invalid contract amount or unsafe cent precision");
+  return cents;
+}
 export function summariseContracts(contracts){
-  return contracts.map(c=>({...c,revenue:money(c.revenue),cost:money(c.cost),contribution:money(c.revenue-c.cost),margin:c.revenue?money((c.revenue-c.cost)/c.revenue*100):null}));
+  return contracts.map(c=>{
+    const revenueCents=contractCents(c.revenue),costCents=contractCents(c.cost);
+    const contributionCents=revenueCents-costCents;
+    if (contributionCents>BigInt(Number.MAX_SAFE_INTEGER)||contributionCents< -BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Contract contribution exceeds safe cent precision");
+    const revenue=Number(revenueCents)/100,cost=Number(costCents)/100;
+    return {...c,revenue,cost,contribution:Number(contributionCents)/100,margin:revenueCents!==0n?money(Number(contributionCents)*100/Number(revenueCents)):null};
+  });
 }
 export function aggregateMetrics(contracts){
   const rows=summariseContracts(contracts);
-  const revenue=money(rows.reduce((s,r)=>s+r.revenue,0)),cost=money(rows.reduce((s,r)=>s+r.cost,0));
-  return {revenue,cost,contribution:money(revenue-cost),margin:revenue?money((revenue-cost)/revenue*100):null,contracts:rows};
+  const revenueCents=rows.reduce((s,r)=>s+contractCents(r.revenue),0n);
+  const costCents=rows.reduce((s,r)=>s+contractCents(r.cost),0n);
+  const contributionCents=revenueCents-costCents;
+  if ([revenueCents,costCents,contributionCents].some(v=>v>BigInt(Number.MAX_SAFE_INTEGER)||v< -BigInt(Number.MAX_SAFE_INTEGER))) throw new Error("Aggregate exceeds safe cent precision");
+  const revenue=Number(revenueCents)/100,cost=Number(costCents)/100;
+  return {revenue,cost,contribution:Number(contributionCents)/100,margin:revenueCents!==0n?money(Number(contributionCents)*100/Number(revenueCents)):null,contracts:rows};
 }

@@ -159,6 +159,24 @@ test("authenticated API enforces tenant membership, role permissions and import 
     });
     assert.equal(readerWrite.status,403,"read_only members must not create imports");
 
+    const financialSite="99999999-9999-4999-8999-999999999997";
+    await admin.query("INSERT INTO sites(id,tenant_id,business_id,name) VALUES ($1,$2,$3,'CI Financial Site') ON CONFLICT(id) DO NOTHING",[financialSite,tenantA,businessA]);
+    const persistedOutputs={revenue:125.5,deliveryCost:25.25,contribution:100.25,currency:"AUD",limitations:["Synthetic CI fixture"]};
+    await admin.query("INSERT INTO calculation_runs(id,tenant_id,contract_id,site_id,period_start,period_end,formula_version,inputs,outputs,completeness,created_by) VALUES ($1,$2,$3,$4,'2026-02-01','2026-02-28','ci-fixture',$5,$6,'incomplete',$7) ON CONFLICT(id) DO NOTHING",["99999999-9999-4999-8999-999999999998",tenantA,contractA,financialSite,JSON.stringify({synthetic:true}),JSON.stringify(persistedOutputs),userA]);
+    const financialRun="99999999-9999-4999-8999-999999999998";
+    const financialPath=`/v1/tenants/${tenantA}/calculations/${financialRun}`;
+    const financialReader=await request(financialPath,{subject:"ci-api-reader"});
+    assert.equal(financialReader.status,403,"read_only tenant members must not access financial calculation reports");
+    const financialAnalyst=await request(financialPath,{subject:"ci-api-analyst"});
+    assert.equal(financialAnalyst.status,200,"authorised analysts must retrieve a persisted financial report");
+    const financialBody=await financialAnalyst.json();
+    assert.equal(financialBody.id,financialRun);
+    assert.deepEqual(financialBody.outputs,persistedOutputs,"persisted report contents must be returned only to authorised tenant roles");
+    const financialOtherTenant=await request(financialPath,{subject:"ci-api-tenant-b-only"});
+    assert.equal(financialOtherTenant.status,403,"tenant B members must not read tenant A financial reports");
+    const financialUnauthenticated=await request(financialPath);
+    assert.equal(financialUnauthenticated.status,401,"financial report requests require authentication");
+
     await admin.query("UPDATE tenant_memberships SET status='revoked' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);
     const revoked=await request(`/v1/tenants/${tenantA}/contracts`,{subject:"ci-api-analyst"});
     assert.equal(revoked.status,403,"revoked memberships must lose access immediately");
