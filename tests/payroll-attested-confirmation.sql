@@ -47,6 +47,11 @@ BEGIN
   IF role_name='owner' THEN
    proposal:=private.submit_payroll_proposal(t,r);
    SELECT evidence_digest INTO d FROM private.payroll_proposal_reviews WHERE id=proposal;
+   session_hash:=encode(public.digest(a::text,'sha256'),'hex');
+   signed_payload:='profitpilot-payroll-confirm-v1'||E'\n'||t||E'\n'||proposal||E'\n'||d||E'\n'||who||E'\n'||now_s||E'\n'||now_s||E'\n'||session_hash||E'\n'||expiry||E'\n'||nonce||E'\n'||k;
+   attestation:=encode(public.hmac(convert_to(signed_payload,'UTF8'),secret_value,'sha256'),'hex');
+   BEGIN PERFORM private.confirm_payroll_proposal_attested(t,proposal,d,now_s,now_s,session_hash,expiry::bigint,nonce,k,attestation);
+    RAISE EXCEPTION 'Correctly signed self-review allowed'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
    BEGIN UPDATE public.allocation_runs SET status='confirmed',reviewer_id=v WHERE id=r;
     RAISE EXCEPTION 'Direct confirmation bypassed receipt'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
   ELSE
@@ -63,6 +68,32 @@ BEGIN
     INSERT INTO private.revoked_identity_sessions(user_id,session_digest) VALUES(v,session_hash);
     PERFORM private.confirm_payroll_proposal_attested(t,proposal,d,now_s,now_s,session_hash,expiry::bigint,nonce,k,attestation);
     RAISE EXCEPTION 'Revoked session allowed';
+   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+   -- A valid signature must not override stale authentication or a revoked role.
+   BEGIN
+    PERFORM private.confirm_payroll_proposal_attested(t,proposal,d,now_s-301,now_s,session_hash,expiry::bigint,nonce,k,
+     encode(public.hmac(convert_to('profitpilot-payroll-confirm-v1'||E'\n'||t||E'\n'||proposal||E'\n'||d||E'\n'||who||E'\n'||(now_s-301)||E'\n'||now_s||E'\n'||session_hash||E'\n'||expiry||E'\n'||nonce||E'\n'||k,'UTF8'),secret_value,'sha256'),'hex'));
+    RAISE EXCEPTION 'Correctly signed stale MFA allowed';
+   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+   BEGIN
+    PERFORM private.confirm_payroll_proposal_attested(t,proposal,d,now_s,now_s,session_hash,now_s-1,nonce,k,
+     encode(public.hmac(convert_to('profitpilot-payroll-confirm-v1'||E'\n'||t||E'\n'||proposal||E'\n'||d||E'\n'||who||E'\n'||now_s||E'\n'||now_s||E'\n'||session_hash||E'\n'||(now_s-1)||E'\n'||nonce||E'\n'||k,'UTF8'),secret_value,'sha256'),'hex'));
+    RAISE EXCEPTION 'Correctly signed expired attestation allowed';
+   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+   BEGIN
+    INSERT INTO private.identity_session_cutoffs(user_id,revoked_through) VALUES(v,now_s);
+    PERFORM private.confirm_payroll_proposal_attested(t,proposal,d,now_s,now_s,session_hash,expiry::bigint,nonce,k,attestation);
+    RAISE EXCEPTION 'Globally revoked session allowed';
+   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+   BEGIN
+    UPDATE public.tenant_memberships SET role='read_only' WHERE tenant_id=t AND user_id=v;
+    PERFORM private.confirm_payroll_proposal_attested(t,proposal,d,now_s,now_s,session_hash,expiry::bigint,nonce,k,attestation);
+    RAISE EXCEPTION 'Downgraded reviewer allowed';
+   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+   BEGIN
+    PERFORM private.confirm_payroll_proposal_attested(t,proposal,repeat('e',64),now_s,now_s,session_hash,expiry::bigint,nonce,k,
+     encode(public.hmac(convert_to('profitpilot-payroll-confirm-v1'||E'\n'||t||E'\n'||proposal||E'\n'||repeat('e',64)||E'\n'||who||E'\n'||now_s||E'\n'||now_s||E'\n'||session_hash||E'\n'||expiry||E'\n'||nonce||E'\n'||k,'UTF8'),secret_value,'sha256'),'hex'));
+    RAISE EXCEPTION 'Correctly signed incorrect evidence digest allowed';
    EXCEPTION WHEN insufficient_privilege THEN NULL; END;
    UPDATE public.payroll_pools SET source_ref='source-altered' WHERE id=p;
    BEGIN PERFORM private.confirm_payroll_proposal_attested(t,proposal,d,now_s,now_s,session_hash,expiry::bigint,nonce,k,attestation);
@@ -88,6 +119,6 @@ BEGIN
  BEGIN INSERT INTO public.allocation_lines(tenant_id,allocation_run_id,site_id,bucket_type,amount,source_ref,payroll_source_row_id)
  VALUES(t,r,site,'direct',0,'evidence-b',s); RAISE EXCEPTION 'Confirmed line appendable'; EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL; END;
  BEGIN DELETE FROM private.payroll_confirmation_receipts WHERE allocation_run_id=r; RAISE EXCEPTION 'Confirmation receipt deletable'; EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL; END;
- RAISE NOTICE 'Session-attested payroll confirmation, rollback, replay and evidence freeze checks passed';
+ RAISE NOTICE 'Session-attested payroll confirmation, rollback, replay, evidence freeze and valid-signature negative checks passed';
 END $test$;
 ROLLBACK;
