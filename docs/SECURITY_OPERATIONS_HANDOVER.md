@@ -188,3 +188,53 @@ against all distributed attacks. Trusted API/database administrators remain
 within the existing trust boundary. Already-admitted work is not cancelled.
 The alert is emitted locally; external routing, on-call response, independent
 testing and an approved operational escalation policy are still required.
+
+### Privacy recovery reconciliation
+
+Migration 036 protects disposal tombstones and events from ordinary UPDATE,
+DELETE and TRUNCATE, and restricts the new recovery inventory to the dedicated
+profitpilot_recovery_reader role. The inventory contains only batch/tenant
+identifiers, disposal checksums, opaque authority references, exact UTC
+receipt timestamps and active hold identifiers. No source rows or ciphertext
+are exported by this function. Treat packages as confidential metadata.
+
+Before reconnecting a restored database:
+
+1. Stop writes and scanner work on the authoritative source; use an isolated,
+   migration-compatible restore target. Use a separately controlled recovery
+   signing key (Ed25519), not the audit, encryption or tenant signing key.
+2. Provision the NOLOGIN recovery reader only for the approved offline export
+   runner using independent credentials and verified TLS. Set
+   RECOVERY_READER_DATABASE_URL, RECOVERY_DATABASE_CA,
+   RECOVERY_SIGNING_PRIVATE_KEY and RECOVERY_SOURCE_FROZEN=yes in its trusted
+   secret environment. Run `node scripts/privacy-recovery.js sign archive.enc privacy-recovery.json`.
+   The command checksums the actual encrypted backup archive and signs its
+   binding to the complete bounded privacy inventory.
+3. Retain the signed package and its reported manifestSha256 in independent
+   immutable storage. Obtain the latest approved digest from that store, not
+   from the file being verified or an untrusted restored database. Ensure the
+   approved archive is the exact archive used for restoration.
+4. On the isolated recovery runner, provide RECOVERY_TARGET_DATABASE_URL,
+   RECOVERY_DATABASE_CA, RECOVERY_SIGNING_PUBLIC_KEY,
+   RECOVERY_EXPECTED_MANIFEST_SHA256 and RECOVERY_TARGET_ISOLATED=yes.
+   Run `node scripts/privacy-recovery.js replay archive.enc privacy-recovery.json`.
+   Replay validates signature, exact digest and archive binding before
+   applying active holds, then disposal tombstones and ciphertext expiry.
+   A conflict rolls back the entire transaction; repeats are idempotent.
+   No automatic release of restored holds is permitted. Missing target batch,
+   conflicting receipts, additional restored holds or inconsistent deletion
+   state require operator reconciliation; keep the target isolated.
+5. Finish separate identity/role/key revocation, audit checkpoint, migration,
+   TLS and runtime checks before issuing recovery approval. Destroy temporary
+   packages according to the approved operational retention process.
+
+The signed package covers privacy receipts/holds, not all identity or
+membership changes. Completeness and freshness depend on the externally
+approved authoritative source, frozen writes and latest digest custody.
+The script cannot prove those operational attestations or that the target
+is the actual restored archive. It cannot physically erase prior backup
+copies. It is not a self-executing deployment or certification gate.
+The bounded inventory supports at most 100,000 records (32 MB package);
+larger installations must use a reviewed paginated or checkpointed protocol.
+Retention periods, destruction of old encrypted archives and legal hold
+releases require separate legal/operational approval.
