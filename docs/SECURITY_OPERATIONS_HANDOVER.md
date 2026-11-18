@@ -97,3 +97,26 @@ Verify the provider's actual claim mapping, audience and session revocation in
 an approved staging environment. Do not deploy merely because the synthetic
 CI smoke test passes. The diversity check on secrets rejects obvious weak
 values but does not prove randomness; generate secrets with a CSPRNG.
+
+### Supply-chain security gate
+
+The API and local/CI PostgreSQL images are now pinned to the digests observed
+in successful CI #1589. The Docker build context is allowlisted, with credential,
+backup and log files excluded. npm lock preflight binds package identities and
+versions to exact registry tarballs, checks root declarations and rejects
+install-script metadata. The container job checks non-root execution and
+installed dependencies, generates a CycloneDX npm SBOM and attempts independent
+Trivy scans of both images. HIGH and CRITICAL findings, scanner failures or
+unavailable vulnerability data block the security CI gate; there are no
+automatic CVE suppressions or unfixed-vulnerability exceptions.
+
+The scanner is versioned and its downloaded archive checked against the
+publisher's checksum manifest. This is integrity checking, not an independently
+verified release signature or a separately pinned scanner binary checksum.
+No real data, deployment credentials or production images are supplied to the
+scanner. The SBOM is generated in ephemeral CI (not yet retained as a release
+artifact). Image pinning prevents silent tag drift but does not keep images
+patched automatically. Review vulnerability reports, inventory and upstream
+security updates regularly; explicitly replace digests and rerun all gates.
+A production registry, signed release provenance, retention and independent
+penetration testing remain deployment acceptance work.
