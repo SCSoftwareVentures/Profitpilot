@@ -50,3 +50,31 @@ export function privacyCaseProof(tenant,caseId,action,kind,reason,evidence,ident
  const scope=opening||outcome?createHash("sha256").update(["privacy-rights-v1",action,kind??"",reason??"",evidence??""].join("\n")).digest("hex"):"0".repeat(64);
  return signedAction("profitpilot-sensitive-api-v1",[tenant,caseId,action,scope],identity,env,now);
 }
+
+const correctionReasons=["allocation_error","source_correction","duplicate_source","privacy_correction"];
+function correctionInput(tenant,oldRun,proposal,reason,evidence){
+ if(![tenant,oldRun,proposal].every(x=>typeof x==="string"&&uuid.test(x))||!correctionReasons.includes(reason)||typeof evidence!=="string"||!digest.test(evidence)||/^0+$/.test(evidence))denied();
+}
+export function payrollCorrectionPreviewProof(tenant,oldRun,proposal,reason,evidence,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ correctionInput(tenant,oldRun,proposal,reason,evidence);
+ const scope=createHash("sha256").update(["payroll-correction-preview-v1",oldRun,proposal,reason,evidence].join("\n")).digest("hex");
+ return [...signedAction("profitpilot-sensitive-api-v1",[tenant,oldRun,"payroll_correction_preview",scope],identity,env,now),proposal,reason,evidence];
+}
+export function payrollCorrectionStatusProof(tenant,order,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ if(![tenant,order].every(x=>typeof x==="string"&&uuid.test(x)))denied();
+ return signedAction("profitpilot-sensitive-api-v1",[tenant,order,"payroll_correction_status","0".repeat(64)],identity,env,now);
+}
+export function payrollCorrectionStepProof(tenant,order,oldRun,proposal,reason,evidence,scope,step,proposalDigest,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ correctionInput(tenant,oldRun,proposal,reason,evidence);
+ if(typeof order!=="string"||!uuid.test(order)||typeof scope!=="string"||!digest.test(scope)||/^0+$/.test(scope)||!["request","approve","reject","consume"].includes(step))denied();
+ if(step==="consume"?typeof proposalDigest!=="string"||!digest.test(proposalDigest)||/^0+$/.test(proposalDigest):proposalDigest!==null)denied();
+ const {args,sign}=signedFields(identity,env,now);
+ const proof=sign(["profitpilot-security-work-v1",tenant,order,"privileged_operation",scope,step,identity.subject,...args]);
+ let confirmNonce=null,confirmSignature=null;
+ if(step==="consume"){
+  confirmNonce=randomBytes(16).toString("hex");
+  const confirmationArgs=args.map((value,index)=>index===4?confirmNonce:value);
+  confirmSignature=sign(["profitpilot-payroll-confirm-v1",tenant,proposal,proposalDigest,identity.subject,...confirmationArgs]);
+ }
+ return [tenant,order,oldRun,proposal,reason,evidence,scope,step,...args,proof,confirmNonce,confirmSignature];
+}
