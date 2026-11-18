@@ -59,6 +59,23 @@ test("synthetic logical backup restores all source rows and preserves tenant bou
   const revoked=(await source.query("SELECT session_digest FROM private.revoked_identity_sessions WHERE user_id=$1 AND session_digest=$2",[uid,sessionHash])).rows[0];
   await restored.query("SELECT private.replay_identity_revocation($1,$2,NULL,$3,false,'CI_RECOVERY')",[uid,subject,revoked.session_digest]);
   assert.equal(await isSessionActive(),false);
+  // Snapshot predates ciphertext expiry. Reconcile authoritative receipts before service recovery.
+  const expiryBatch="de2537ce-957d-478d-98bf-57c6ea37cd3c";
+  assert.equal((await restored.query("SELECT scan_state FROM private.quarantined_files WHERE tenant_id=$1 AND batch_id=$2",[tenant,expiryBatch])).rows[0].scan_state,"pending");
+  await source.query("SELECT private.expire_quarantine_bytes()");
+  const receipt=(await source.query("SELECT file_sha256,disposed_at::text AS disposed_at FROM private.quarantine_expiry_receipts WHERE tenant_id=$1 AND batch_id=$2",[tenant,expiryBatch])).rows[0];
+  assert.ok(receipt,"authoritative source expiry receipt required");
+  await assert.rejects(()=>restored.query("SELECT private.replay_quarantine_expiry($1,$2,$3,$4)",[tenant,expiryBatch,"0".repeat(64),receipt.disposed_at]),/does not match/);
+  await restored.query("SELECT private.set_import_disposal_hold($1,$2,true,'CI_EXPIRY_HOLD')",[tenant,expiryBatch]);
+  await assert.rejects(()=>restored.query("SELECT private.replay_quarantine_expiry($1,$2,$3,$4)",[tenant,expiryBatch,receipt.file_sha256,receipt.disposed_at]),/Active legal hold/);
+  await restored.query("SELECT private.set_import_disposal_hold($1,$2,false,'CI_EXPIRY_RELEASE')",[tenant,expiryBatch]);
+  const replayArgs=[tenant,expiryBatch,receipt.file_sha256,receipt.disposed_at];
+  assert.equal((await restored.query("SELECT private.replay_quarantine_expiry($1,$2,$3,$4) AS changed",replayArgs)).rows[0].changed,true);
+  assert.equal((await restored.query("SELECT private.replay_quarantine_expiry($1,$2,$3,$4) AS changed",replayArgs)).rows[0].changed,false);
+  assert.deepEqual((await restored.query("SELECT scan_state,ciphertext FROM private.quarantined_files WHERE tenant_id=$1 AND batch_id=$2",[tenant,expiryBatch])).rows[0],{scan_state:"disposed",ciphertext:null});
+  await assert.rejects(()=>restored.query("UPDATE private.quarantined_files SET scan_state='pending',ciphertext=decode('aa','hex'),disposed_at=NULL WHERE tenant_id=$1 AND batch_id=$2",[tenant,expiryBatch]),/immutable|check constraint/);
+  await assert.rejects(()=>restored.query("DELETE FROM private.quarantine_expiry_receipts WHERE tenant_id=$1 AND batch_id=$2",[tenant,expiryBatch]),/append-only/i);
+  assert.equal((await restored.query("SELECT id FROM public.import_batches WHERE tenant_id=$1 AND id=$2",[tenant,expiryBatch])).rowCount,1);
   // Snapshot predates disposal: authoritative source ledger is consulted after restore.
   const batch="f831ab34-efb8-48b4-9979-434711943ea2";
   assert.equal((await restored.query("SELECT id FROM public.import_batches WHERE tenant_id=$1 AND id=$2",[tenant,batch])).rowCount,1);
