@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import {createHmac,randomBytes,generateKeyPairSync} from "node:crypto";
 import {readPrivacyInventory,signPrivacyRecovery,privacyRecoveryDigest,replayPrivacyRecovery} from "../scripts/privacy-recovery.js";
 import pg from "pg";
+import {readSecurityInventory,signSecurityRecovery,replaySecurityRecovery,securityRecoveryDigest} from "../scripts/security-recovery.js";
+import {randomUUID} from "node:crypto";
 
 const enabled=Boolean(process.env.TEST_RESTORE_ADMIN_DATABASE_URL);
 test("synthetic logical backup restores all source rows and preserves tenant boundaries",{skip:!enabled,timeout:40000},async()=>{
@@ -57,8 +59,22 @@ test("synthetic logical backup restores all source rows and preserves tenant bou
   const isSessionActive=async()=>(await runtime.query("SELECT private.session_authorized($1,$2,$3,$4,$5,$6,$7,$8) AS allowed",[...sessionArgs,sessionSig])).rows[0].allowed;
   assert.equal(await isSessionActive(),true);
   await source.query("SELECT private.revoke_identity_access($1,'revoke_session','CI_POST_SNAPSHOT',$2)",[uid,sessionHash]);
-  const revoked=(await source.query("SELECT session_digest FROM private.revoked_identity_sessions WHERE user_id=$1 AND session_digest=$2",[uid,sessionHash])).rows[0];
-  await restored.query("SELECT private.replay_identity_revocation($1,$2,NULL,$3,false,'CI_RECOVERY')",[uid,subject,revoked.session_digest]);
+  const incident=randomUUID(),otherTenant="44444444-4444-4444-8444-444444444444";
+  await source.query("SELECT private.activate_tenant_emergency($1,$2,'suspected_compromise','CI_POST_SNAPSHOT')",[otherTenant,incident]);
+  const securityReader=await source.connect();let secInventory;
+  try{await securityReader.query("SET ROLE profitpilot_recovery_reader");secInventory=await readSecurityInventory(securityReader);await assert.rejects(()=>securityReader.query("SELECT * FROM public.users"),/permission denied/i);}
+  finally{await securityReader.query("RESET ROLE");securityReader.release();}
+  await assert.rejects(()=>runtime.query("SELECT private.security_recovery_inventory()"),/permission denied/i);
+  const keys=generateKeyPairSync("ed25519"),archive=process.env.TEST_RESTORE_BACKUP_SHA256;
+  const securityDoc=signSecurityRecovery(secInventory,archive,keys.privateKey);
+  const securityBinding={backupSha256:archive,expectedManifestSha256:securityRecoveryDigest(securityDoc)};
+  await assert.rejects(()=>replaySecurityRecovery(restored,securityDoc,keys.publicKey,{...securityBinding,expectedManifestSha256:"0".repeat(64)}),/binding/);
+  assert.equal(await isSessionActive(),true);
+  const applied=await replaySecurityRecovery(restored,securityDoc,keys.publicKey,securityBinding);
+  assert.equal(applied.sessions,1);assert.equal(applied.incidents,1);
+  assert.ok(Object.values(await replaySecurityRecovery(restored,securityDoc,keys.publicKey,securityBinding)).every(n=>n===0));
+  assert.equal((await restored.query("SELECT count(*)::int AS n FROM private.tenant_emergency_incidents WHERE incident_id=$1 AND released_at IS NULL",[incident])).rows[0].n,1);
+  assert.equal((await restored.query("SELECT private.verify_audit_chain($1) AS ok",[otherTenant])).rows[0].ok,true);
   assert.equal(await isSessionActive(),false);
   // Snapshot predates ciphertext expiry. Reconcile authoritative receipts before service recovery.
   const expiryBatch="de2537ce-957d-478d-98bf-57c6ea37cd3c";
