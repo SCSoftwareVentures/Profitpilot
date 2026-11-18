@@ -121,4 +121,13 @@ BEGIN
  BEGIN DELETE FROM private.payroll_confirmation_receipts WHERE allocation_run_id=r; RAISE EXCEPTION 'Confirmation receipt deletable'; EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL; END;
  RAISE NOTICE 'Session-attested payroll confirmation, rollback, replay, evidence freeze and valid-signature negative checks passed';
 END $test$;
-ROLLBACK;
+-- Only the disposable CI recovery database fixture explicitly opts in.
+\if :{?persist_recovery_fixture}
+  \if :persist_recovery_fixture
+    COMMIT;
+  \else
+    ROLLBACK;
+  \endif
+\else
+  ROLLBACK;
+\endif
