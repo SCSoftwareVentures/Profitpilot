@@ -41,6 +41,9 @@ BEGIN
     WHERE n.nspname='private' OR (n.nspname='public' AND f.prosecdef)
   LOOP
    SELECT EXISTS(SELECT 1 FROM unnest(expected) a(sig) WHERE to_regprocedure(a.sig)=p.oid) INTO allowed;
+   IF has_function_privilege(role_name,p.oid,'EXECUTE WITH GRANT OPTION') THEN
+    RAISE EXCEPTION 'Function grant option forbidden: % / %.%',role_name,p.nspname,p.proname;
+   END IF;
    IF has_function_privilege(role_name,p.oid,'EXECUTE') IS DISTINCT FROM allowed THEN
     RAISE EXCEPTION 'Unexpected function permission: % / %.%',role_name,p.nspname,p.proname;
    END IF;
