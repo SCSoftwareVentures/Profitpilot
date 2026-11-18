@@ -72,3 +72,12 @@ test("zero pool has no artificial coverage; max supported amount stays exact",()
   const r=plan({pool:{...pool,total:max},sourceRows:[source("max",max)],allocations:[line("max",max)]});
   assert.equal(r.proposal.totals.direct,max);assert.equal(r.proposal.attributionCoverageBasisPoints,10000);
 });
+
+test("strict canonical inputs reject trailing newline and whitespace",()=>{
+  reject({...base,pool:{...pool,poolRef:"pool-1\n"}},"INVALID_POOL");
+  reject({...base,pool:{...pool,currency:"AUD\n"}},"INVALID_POOL");
+  reject({...base,pool:{...pool,total:"0.30\n"}},"INVALID_POOL");
+  reject({...base,allocations:[line("a","0.10\n")]},"INVALID_ALLOCATION_AMOUNT");
+  reject({...base,allocations:[line("a","0.10",{evidenceRef:"evidence-1\n"})]},"INVALID_ALLOCATION");
+  reject({...base,allocations:[line("a","0.10",{siteRef:"site-1\n"})]},"INVALID_ALLOCATION");
+});
