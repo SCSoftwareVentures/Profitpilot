@@ -116,10 +116,10 @@ been engaged or produced.
 
 ## 5. Malware scanner acceptance
 
-CI starts a genuine disposable ClamAV daemon using a synthetic hash database
-for clean and detection controls, and verifies the application refuses a
-daemon without current versioned definitions. This tests actual engine and
-socket handling but is not the live accepted production scanner. On the
+CI starts a genuine disposable ClamAV daemon using current official definitions,
+checks clean and harmless EICAR detection through the application adapter,
+and verifies freshness refusal with a simulated stale clock. This exercises
+actual engine and socket handling but is not the accepted production host. On the
 chosen isolated scanner host, install a maintained verified ClamAV package,
 refresh official signatures using freshclam, confirm UTC and current
 definitions (<=48h), configure the protected Unix socket and restrictive
@@ -173,7 +173,7 @@ sign-off or send any notices/filings automatically.
 | Alert receiver and person acknowledgment | Security operations | No approved live destination |
 | Signed recovery reconcile and offsite custody | Recovery owner | Synthetic only; real custody not established |
 | Independent penetration and remediation retest | Independent assessor | Not performed |
-| Actual production scanner with current official definitions | Operations / independent review | Synthetic engine only |
+| Actual production scanner with current official definitions | Operations / independent review | Ephemeral real engine only |
 | Actual production network, proxy and workload | Operations / independent review | Synthetic container only |
 | Live disaster recovery RPO/RTO and owner approval | Recovery owner | Synthetic restore only |
 | Legal/privacy review and agreements/rights | Qualified counsel | First-party review only |
