@@ -5,8 +5,8 @@
 **NOT APPROVED for live customer data or production.** The following current
 register supersedes the historical branch/CI statements below. Verified
 baseline is draft PR #38, branch `security/tenant-isolation-release-gate-20261118`,
-commit `6c08346c8375c2064ede08d874cdba6b40163096`, CI #1686
-(https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44216584713).
+commit `fb0fa6201b06c5ad18ee72fdbb1c095803c248fd`, CI #1767
+(https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44226462045).
 All four jobs passed: Node/application, PostgreSQL/API/TLS/recovery,
 container supply chain, and release gate. The scanner found no HIGH or
 CRITICAL findings in the scanned images. Evidence is limited to that
@@ -41,7 +41,7 @@ commit, test environment and advisory databases at scan time.
 | SR-25 iPhone/accessibility | Requirements documented | Tested real interface and access flows |
 | SR-26 operations | Startup/readiness checks, recovery and handover scripts | Live production environment, operating owners, acceptance |
 
-### New candidate work (not yet verified at time of this update)
+### Verified implementation milestones since #1686
 
 Migration 037 makes automated mapping insert-only at the database privilege
 boundary. Runtime cannot modify existing candidate or human-reviewed rows or
@@ -51,15 +51,15 @@ counts. The contract list uses an exclusive UUID cursor, defaults to 50 rows,
 caps pages at 100, validates query parameters and never returns a global count.
 This changes prior unbounded name ordering to stable ID ordering; clients must
 follow nextCursor. Pagination bounds individual responses but is not a guarantee
-against cumulative authorized extraction. New tests and full CI are required
-on the exact resulting head.
+against cumulative authorized extraction. These controls passed CI #1700. CI #1714 verified session-bound file approval and closure of production import intake. CI #1741 verified live schema drift and backup parity; CI #1756 verified tenant emergency lockdown and recovery; CI #1767 verified minimal read-only security command reporting. See the final acceptance matrix in [SECURITY_ENGINEERING_FINAL_ACCEPTANCE.md](SECURITY_ENGINEERING_FINAL_ACCEPTANCE.md) for the newer candidate scope and required signed provenance gate.
 
 ### Outstanding release blockers
 
-- Raw parsed invoice intake is still a prototype path; require explicit
-  production intake acceptance and end-to-end scanner/lifecycle validation
-  before real data. No generic live payroll ingestion.
-- Reconcile identity, membership, key and legal-hold state from authoritative
+- Production import intake is blocked before body parsing. Require explicit
+  intake acceptance and end-to-end scanner/lifecycle validation before real
+  data. Non-production parsed-row intake is synthetic only; no generic live
+  payroll ingestion.
+- Reconcile identity, membership, key, emergency incident and legal-hold state from authoritative
   independent records before restored service resumes. Privacy package is not
   a complete recovery authorization mechanism.
 - Live identity provider, secret/backup custody, external alerting, production
