@@ -5,9 +5,9 @@
 **NOT APPROVED for live customer data or production.** The following current
 register supersedes the historical branch/CI statements below. Verified
 baseline is draft PR #38, branch `security/tenant-isolation-release-gate-20261118`,
-commit `fb0fa6201b06c5ad18ee72fdbb1c095803c248fd`, CI #1767
-(https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44226462045).
-All four jobs passed: Node/application, PostgreSQL/API/TLS/recovery,
+commit `c2414fe03c04614f5761e76e1121bcefd32c1cd7`, CI #1784
+(https://github.com/luxhustle01-ux/Profitpilot/actions/runs/44228428606).
+All five jobs passed, including cryptographically verified candidate provenance; the previous suite passed: Node/application, PostgreSQL/API/TLS/recovery,
 container supply chain, and release gate. The scanner found no HIGH or
 CRITICAL findings in the scanned images. Evidence is limited to that
 commit, test environment and advisory databases at scan time.
@@ -52,6 +52,10 @@ caps pages at 100, validates query parameters and never returns a global count.
 This changes prior unbounded name ordering to stable ID ordering; clients must
 follow nextCursor. Pagination bounds individual responses but is not a guarantee
 against cumulative authorized extraction. These controls passed CI #1700. CI #1714 verified session-bound file approval and closure of production import intake. CI #1741 verified live schema drift and backup parity; CI #1756 verified tenant emergency lockdown and recovery; CI #1767 verified minimal read-only security command reporting. See the final acceptance matrix in [SECURITY_ENGINEERING_FINAL_ACCEPTANCE.md](SECURITY_ENGINEERING_FINAL_ACCEPTANCE.md) for the newer candidate scope and required signed provenance gate.
+
+### Operational acceptance candidate
+
+New workstream: browser dashboard, signed notification delivery, signed security-state recovery inventory and deny-only reconciliation, real isolated ClamAV engine acceptance (synthetic signature), production-mode loopback attack/load exercise, independent test engagement scope, disaster-recovery runbook, and current Australian privacy/PIA review. See [PRODUCTION_SECURITY_ACCEPTANCE.md](PRODUCTION_SECURITY_ACCEPTANCE.md) and [AUSTRALIAN_PRIVACY_LEGAL_REVIEW.md](AUSTRALIAN_PRIVACY_LEGAL_REVIEW.md). Validation against the exact new candidate is required. Real environments, independent reviewers and counsel are still necessary.
 
 ### Outstanding release blockers
 
