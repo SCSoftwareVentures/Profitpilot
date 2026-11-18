@@ -1,6 +1,8 @@
 import pg from "pg";
 import {createHmac,createHash,randomBytes} from "node:crypto";
 import {databaseSslConfig} from "./db-config.js";
+import {createWorkBudget} from "./request-budget.js";
+const boundedDbWork=createWorkBudget(16);
 const {Pool}=pg;
 const ssl=databaseSslConfig();
 export const pool=new Pool({connectionString:process.env.DATABASE_URL,ssl,max:10,idleTimeoutMillis:30000,connectionTimeoutMillis:5000,statement_timeout:3000});
@@ -10,6 +12,7 @@ export function sessionDigest(sessionId){
  return createHash("sha256").update(sessionId,"utf8").digest("hex");
 }
 export async function checkIdentitySession(identity,client=pool){
+ if(client===pool)return boundedDbWork(async()=>{const c=await pool.connect();try{return await checkIdentitySession(identity,c);}finally{c.release();}});
  if(!identity||typeof identity.subject!=="string"||!identity.subject||identity.subject.length>255||/[\p{C}]/u.test(identity.subject)||
  !Number.isSafeInteger(identity.authTime)||identity.authTime<=0||!Number.isSafeInteger(identity.issuedAt)||identity.authTime>identity.issuedAt+5)return false;
  let digest;try{digest=sessionDigest(identity.sessionId);}catch{return false;}
@@ -21,6 +24,9 @@ export async function checkIdentitySession(identity,client=pool){
  return (await client.query("SELECT private.session_authorized($1,$2,$3,$4,$5,$6,$7,$8) AS allowed",[...args,sig])).rows[0]?.allowed===true;
 }
 export async function withTenant(tenantId,subject,fn,identity){
+ return boundedDbWork(()=>tenantTransaction(tenantId,subject,fn,identity));
+}
+async function tenantTransaction(tenantId,subject,fn,identity){
  tenantId=tenantId.toLowerCase();
  if(identity&&identity.subject!==subject)throw Object.assign(new Error("Session identity mismatch"),{status:403});
  if(typeof subject!=="string"||!subject)throw new Error("Verified identity subject is required for tenant context");
