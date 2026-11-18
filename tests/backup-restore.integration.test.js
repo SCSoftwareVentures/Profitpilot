@@ -83,7 +83,14 @@ test("synthetic logical backup restores all source rows and preserves tenant bou
   await assert.rejects(()=>runtime.query("SELECT * FROM private.privacy_dispatch_burns"),/permission denied/i);
   await assert.rejects(()=>restored.query("DELETE FROM private.privacy_dispatch_burns WHERE tenant_id=$1 AND release_order_id=$2",[dispatchArgs[0],dispatchArgs[2]]),e=>e.code==="55000");
   await assert.rejects(()=>restored.query("DELETE FROM private.privacy_dispatch_revocations WHERE tenant_id=$1 AND release_order_id=$2",[dispatchArgs[0],dispatchArgs[2]]),e=>e.code==="55000");
-  console.log("Assisted privacy release authorization, receipt evidence, spent dispatch and revocation restored");
+  const keyHistory=(await restored.query("SELECT order_id,previous_order_id,recipient_key_digest FROM private.privacy_case_key_versions WHERE tenant_id=$1 AND case_id=$2 ORDER BY activated_at",[dispatchArgs[0],dispatchArgs[1]])).rows;
+  assert.equal(keyHistory.length,2);
+  assert.equal(keyHistory[0].previous_order_id,null);
+  assert.equal(keyHistory[1].previous_order_id,keyHistory[0].order_id);
+  assert.equal((await restored.query("SELECT count(*)::int AS n FROM private.privacy_compromised_keys WHERE tenant_id=$1 AND key_digest=$2",[dispatchArgs[0],keyHistory[1].recipient_key_digest])).rows[0].n,1);
+  await assert.rejects(()=>runtime.query("SELECT * FROM private.privacy_case_key_versions"),/permission denied/i);
+  await assert.rejects(()=>restored.query("DELETE FROM private.privacy_compromised_keys WHERE tenant_id=$1",[dispatchArgs[0]]),e=>e.code==="55000");
+  console.log("Assisted privacy release, receipt, revocation and key rotation history restored");
   const tenant="33333333-3333-4333-8333-333333333333",subject="isolation-tenant-c";
   const result=await restored.query("SELECT key_id,secret FROM private.tenant_context_keys WHERE active ORDER BY key_id LIMIT 1");
   assert.equal(result.rowCount,1,"restored database must have active tenant context key");

@@ -191,6 +191,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/059_privacy_receipt_operator_api.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/060_privacy_dispatch_fence.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/061_privacy_dispatch_operator_api.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/062_privacy_key_lifecycle.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql

@@ -5,7 +5,7 @@ DECLARE t uuid:=gen_random_uuid(); other_t uuid:=gen_random_uuid(); a uuid:=gen_
  case_id_value uuid:=gen_random_uuid(); blocked_case uuid:=gen_random_uuid(); pending_case uuid:=gen_random_uuid(); order_id_value uuid:=gen_random_uuid();
  who text; actor uuid; phase text; actual_step text; scope_hash text; recipient text:=repeat('a',64); sender text:=repeat('b',64);
  authority text:=repeat('c',64); redaction text:=repeat('d',64); response_hash text:=repeat('e',64); envelope text:=repeat('f',64);
- now_s bigint; expires bigint; nonce text; session_hash text; context_sig text; proof text; key_id_value text; key_bytes bytea; approver_session text; receipt_review uuid; saved_fingerprint text; dispatch_deadline bigint; dispatch_challenge text; dispatch_signer text; dispatch_reason text; dispatch_evidence text; dispatch_result jsonb;
+ now_s bigint; expires bigint; nonce text; session_hash text; context_sig text; proof text; key_id_value text; key_bytes bytea; approver_session text; receipt_review uuid; saved_fingerprint text; dispatch_deadline bigint; dispatch_challenge text; dispatch_signer text; dispatch_reason text; dispatch_evidence text; dispatch_result jsonb; key_previous uuid; key_order uuid; key_round integer; key_recipient text; key_sender text; key_signer text;
 BEGIN
  INSERT INTO public.tenants(id,legal_name) VALUES(t,'Synthetic assisted privacy delivery'),(other_t,'Synthetic other privacy delivery');
  INSERT INTO public.users(id,auth_subject,email) VALUES(a,'ci-delivery-'||a,'owner@example.invalid'),(b,'ci-delivery-'||b,'admin@example.invalid'),(r,'ci-delivery-'||r,'reader@example.invalid');
@@ -158,6 +158,61 @@ BEGIN
  IF has_function_privilege('profitpilot_app','private.record_privacy_receipt_evidence(uuid,uuid,uuid,uuid,text,text,text,text,text,text,bigint,bigint,text,bigint,text,text,text)','EXECUTE')
  OR has_any_column_privilege('profitpilot_app','private.privacy_receipt_evidence','SELECT,INSERT,UPDATE,REFERENCES') THEN RAISE EXCEPTION 'Receipt reconciliation internals exposed'; END IF;
  RAISE NOTICE 'Privacy receipt evidence, independent review, exact scope, replay, recovery and immutability checks passed';
+
+
+ -- Enrol and rotate a case-specific key generation with exact dual approval.
+ -- Only digests are used; no actual key or personal data is in this fixture.
+ key_previous:=NULL;key_recipient:=recipient;key_sender:=sender;key_signer:=repeat('3',64);
+ FOREACH key_round IN ARRAY ARRAY[1,2] LOOP
+  key_order:=gen_random_uuid();
+  IF key_round=2 THEN key_recipient:=repeat('8',64);key_signer:=repeat('9',64); END IF;
+  FOREACH phase IN ARRAY ARRAY['request','self','approve','consume'] LOOP
+   actor:=CASE phase WHEN 'approve' THEN b ELSE a END;
+   actual_step:=CASE WHEN phase='self' THEN 'approve' ELSE phase END;
+   who:='ci-delivery-'||actor;
+   now_s:=floor(extract(epoch FROM clock_timestamp()))::bigint;expires:=now_s+20;
+   nonce:=encode(public.gen_random_bytes(16),'hex');session_hash:=encode(public.digest(actor::text,'sha256'),'hex');
+   context_sig:=encode(public.hmac(convert_to(t::text||E'\n'||who||E'\n'||expires||E'\n'||nonce||E'\n'||key_id_value,'UTF8'),key_bytes,'sha256'),'hex');
+   PERFORM set_config('app.tenant_id',t::text,true),set_config('app.tenant_subject',who,true),set_config('app.tenant_expires',expires::text,true),set_config('app.tenant_nonce',nonce,true),set_config('app.tenant_key_id',key_id_value,true),set_config('app.tenant_signature',context_sig,true);
+   scope_hash:=private.privacy_case_key_scope(t,case_id_value,key_order,key_previous,key_recipient,key_sender,key_signer,authority);
+   proof:=encode(public.hmac(convert_to('profitpilot-security-work-v1'||E'\n'||t||E'\n'||key_order||E'\n'||'privileged_operation'||E'\n'||scope_hash||E'\n'||actual_step||E'\n'||who||E'\n'||now_s||E'\n'||now_s||E'\n'||session_hash||E'\n'||expires||E'\n'||nonce||E'\n'||key_id_value,'UTF8'),key_bytes,'sha256'),'hex');
+   BEGIN
+    PERFORM private.record_privacy_case_keys(t,case_id_value,key_order,key_previous,repeat('7',64),key_sender,key_signer,authority,scope_hash,actual_step,now_s,now_s,session_hash,expires,nonce,key_id_value,proof);
+    RAISE EXCEPTION 'Substituted key accepted'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+   IF phase='self' THEN
+    BEGIN
+     PERFORM private.record_privacy_case_keys(t,case_id_value,key_order,key_previous,key_recipient,key_sender,key_signer,authority,scope_hash,actual_step,now_s,now_s,session_hash,expires,nonce,key_id_value,proof);
+     RAISE EXCEPTION 'Key self approval accepted'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+   ELSE
+    PERFORM private.record_privacy_case_keys(t,case_id_value,key_order,key_previous,key_recipient,key_sender,key_signer,authority,scope_hash,actual_step,now_s,now_s,session_hash,expires,nonce,key_id_value,proof);
+    IF phase<>'consume' AND EXISTS(SELECT 1 FROM private.privacy_case_key_versions WHERE tenant_id=t AND order_id=key_order) THEN RAISE EXCEPTION 'Key generation prematurely activated'; END IF;
+   END IF;
+  END LOOP;
+  PERFORM private.assert_privacy_case_keys(t,case_id_value,key_recipient,key_sender,key_signer);
+  key_previous:=key_order;
+ END LOOP;
+ BEGIN PERFORM private.assert_privacy_case_keys(t,case_id_value,recipient,sender,repeat('3',64)); RAISE EXCEPTION 'Retired keys accepted'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ BEGIN PERFORM private.privacy_case_key_scope(t,case_id_value,gen_random_uuid(),key_previous,recipient,sender,repeat('3',64),authority); RAISE EXCEPTION 'Retired keys reintroduced'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ BEGIN PERFORM private.privacy_delivery_scope(t,case_id_value,gen_random_uuid(),'authorized_representative',recipient,sender,authority,redaction,response_hash,envelope); RAISE EXCEPTION 'Old release keys accepted'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ PERFORM private.privacy_delivery_scope(t,case_id_value,gen_random_uuid(),'authorized_representative',key_recipient,key_sender,authority,redaction,response_hash,envelope);
+ -- Immediate irreversible compromise denial. The current recipient key is
+ -- revoked after rotation; neither initial enrolment nor a future version may use it.
+ saved_fingerprint:=private.sensitive_recovery_fingerprint();
+ scope_hash:=encode(public.digest(convert_to('profitpilot-privacy-key-revoke-v1'||E'\n'||key_recipient||E'\n'||'suspected_compromise'||E'\n'||authority,'UTF8'),'sha256'),'hex');
+ proof:=encode(public.hmac(convert_to('profitpilot-sensitive-api-v1'||E'\n'||t||E'\n'||t||E'\n'||'privacy_key_revoke'||E'\n'||scope_hash||E'\n'||who||E'\n'||now_s||E'\n'||now_s||E'\n'||session_hash||E'\n'||expires||E'\n'||nonce||E'\n'||key_id_value,'UTF8'),key_bytes,'sha256'),'hex');
+ BEGIN PERFORM private.revoke_privacy_key(other_t,key_recipient,'suspected_compromise',authority,scope_hash,now_s,now_s,session_hash,expires,nonce,key_id_value,proof); RAISE EXCEPTION 'Cross-tenant key revocation accepted'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ PERFORM private.revoke_privacy_key(t,key_recipient,'suspected_compromise',authority,scope_hash,now_s,now_s,session_hash,expires,nonce,key_id_value,proof);
+ BEGIN PERFORM private.assert_privacy_case_keys(t,case_id_value,key_recipient,key_sender,key_signer); RAISE EXCEPTION 'Compromised key accepted'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ BEGIN PERFORM private.privacy_case_key_scope(t,case_id_value,gen_random_uuid(),key_previous,key_recipient,key_sender,repeat('6',64),authority); RAISE EXCEPTION 'Compromised key reused'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ BEGIN PERFORM private.revoke_privacy_key(t,key_recipient,'suspected_compromise',authority,scope_hash,now_s,now_s,session_hash,expires,nonce,key_id_value,proof); RAISE EXCEPTION 'Revocation replay accepted'; EXCEPTION WHEN unique_violation THEN NULL; END;
+ BEGIN DELETE FROM private.privacy_case_key_versions WHERE tenant_id=t; RAISE EXCEPTION 'Key history mutable'; EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL; END;
+ BEGIN DELETE FROM private.privacy_compromised_keys WHERE tenant_id=t; RAISE EXCEPTION 'Compromise history mutable'; EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL; END;
+ IF private.sensitive_recovery_fingerprint() IS NOT DISTINCT FROM saved_fingerprint OR private.verify_audit_chain(t) IS DISTINCT FROM true
+ OR has_any_column_privilege('profitpilot_app','private.privacy_case_key_versions','SELECT,INSERT,UPDATE,REFERENCES')
+ OR has_any_column_privilege('profitpilot_app','private.privacy_compromised_keys','SELECT,INSERT,UPDATE,REFERENCES')
+ OR has_function_privilege('profitpilot_app','private.revoke_privacy_key(uuid,text,text,text,text,bigint,bigint,text,bigint,text,text,text)','EXECUTE')
+ THEN RAISE EXCEPTION 'Key history, recovery or grants invalid'; END IF;
+ RAISE NOTICE 'Privacy key enrollment, independent rotation, retired-key denial, immediate compromise revocation and recovery fence verified';
 
 END $test$;
 \if :{?persist_recovery_fixture}
