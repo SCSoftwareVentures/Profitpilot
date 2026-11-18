@@ -44,8 +44,10 @@ test("every registered API endpoint has an explicit reviewed authorization class
 
 // Sensitive tenant responses must not be stored in browser or intermediary caches.
 test("authenticated API responses carry explicit no-store protection",()=>{
-  assert.match(source,/app\.use\("\/v1",\s*\(req,res,next\)\s*=>\s*\{res\.set\("Cache-Control","no-store"\)/);
+  assert.match(source,/app\.use\(\(req,res,next\)\s*=>\s*\{res\.set\("Cache-Control","no-store"\)/);
   assert.ok(source.indexOf('res.set("Cache-Control","no-store")')<source.indexOf('app.use(process.env.NODE_ENV==="production"?sharedLimiter'),"privacy headers precede throttling");
+  assert.ok(source.includes("app.use(createRequestAdmission(32))"),"all routes including health must share admission controls");
+  assert.ok(source.indexOf("app.use(helmet())")<source.indexOf("app.use(createRequestAdmission(32))"),"admission rejections must receive security headers");
   assert.ok(source.indexOf('res.set("Cache-Control","no-store")')<source.indexOf('app.use("/v1",authRequired())'),"cache controls must precede authentication and tenant endpoints");
 });
 
