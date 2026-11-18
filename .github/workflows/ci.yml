@@ -162,6 +162,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/037_automated_mapping_integrity.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/038_session_bound_promotion.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/039_live_security_catalog.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/040_emergency_tenant_containment.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
@@ -288,6 +289,7 @@ jobs:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/financial-access-budget.integration.test.js tests/actor-threat-containment.integration.test.js tests/live-catalog-drift.integration.test.js
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/emergency-containment.integration.test.js
 
       - name: Prepare quarantine expiry recovery fixture
         env:
