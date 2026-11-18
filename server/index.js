@@ -8,6 +8,7 @@ import {withTenant,health} from "./db.js";
 import {authRequired,requireRole} from "./auth.js";
 import {parseCsv,validateInvoiceRows,isIsoDate} from "../src/engine.js";
 import {financialTotals} from "../src/financial-totals.js";
+import {reconcileFinancialReport} from "../src/financial-reconciliation.js";
 
 const app=express();
 app.disable("x-powered-by");
@@ -83,6 +84,7 @@ app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requireRol
  const {decision,reason}=req.body||{};
  if(!["confirmed","rejected","held"].includes(decision)||typeof reason!=="string"||reason.trim().length<3||reason.length>2000)return res.status(400).json({error:"Decision and reason are required"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
+  const reconciliation=reconcileFinancialReport(outputs,revenue.rows[0].amount,costs.rows[0].amount);
   const user=await client.query("SELECT id FROM users WHERE auth_subject=$1",[req.identity.subject]);
   if(!user.rowCount)throw Object.assign(new Error("User identity is not provisioned in this tenant database"),{status:403});
   const updated=await client.query("UPDATE match_reviews SET decision=$1,reviewer_id=$2,reviewed_at=now() WHERE id=$3 AND tenant_id=$4 AND decision IN ('candidate','held') RETURNING id,decision,reviewed_at",[decision,user.rows[0].id,req.params.matchId,req.membership.tenantId]);
@@ -110,7 +112,7 @@ app.post("/v1/tenants/:tenantId/calculations",membership,requireRole("owner","ad
   const totals=financialTotals(revenue.rows[0].amount,costs.rows[0].amount);
   const outputs={...totals,currency:base.rows[0].currency,taxBasis:"consistent source invoice basis; no tax conversion applied",invoiceLineCount:Number(revenue.rows[0].line_count),allocationLineCount:Number(costs.rows[0].line_count),taxBasisCount:1,limitations:["Management contribution only; not statutory or audited profit.","Only confirmed invoice matches and confirmed direct/approved site allocation lines are included.","Other delivery costs, non-site costs and unallocated payroll are excluded unless separately included in source records."]};
   const user=await client.query("SELECT id FROM users WHERE auth_subject=$1",[req.identity.subject]);if(!user.rowCount)throw Object.assign(new Error("User identity is not provisioned in this tenant database"),{status:403});
-  const saved=await client.query("INSERT INTO calculation_runs(tenant_id,contract_id,site_id,period_start,period_end,formula_version,inputs,outputs,completeness,created_by) VALUES($1,$2,$3,$4,$5,'0.1.0',$6,$7,'incomplete',$8) RETURNING id,created_at",[req.membership.tenantId,contractId,siteId,periodStart,periodEnd,JSON.stringify({contractVersion:base.rows[0].version_no,invoiceLineCount:outputs.invoiceLineCount,allocationLineCount:outputs.allocationLineCount}),JSON.stringify(outputs),user.rows[0].id]);
+  const saved=await client.query("INSERT INTO calculation_runs(tenant_id,contract_id,site_id,period_start,period_end,formula_version,inputs,outputs,completeness,created_by) VALUES($1,$2,$3,$4,$5,'0.1.0',$6,$7,'incomplete',$8) RETURNING id,created_at",[req.membership.tenantId,contractId,siteId,periodStart,periodEnd,JSON.stringify({contractVersion:base.rows[0].version_no,invoiceLineCount:outputs.invoiceLineCount,allocationLineCount:outputs.allocationLineCount,reconciliation}),JSON.stringify(outputs),user.rows[0].id]);
   await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'calculation_created','calculation_run',$3,'Versioned management contribution calculation',$4)",[req.membership.tenantId,user.rows[0].id,saved.rows[0].id,JSON.stringify({formulaVersion:"0.1.0",periodStart,periodEnd})]);
   return {id:saved.rows[0].id,createdAt:saved.rows[0].created_at,outputs};
  });
