@@ -1,0 +1,12 @@
+# Same PostgreSQL base tested in CI #1613. Replace only the vulnerable
+# Go-based privilege-drop utility with Alpine's signed, versioned C utility.
+FROM postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e
+RUN apk add --no-cache su-exec=0.3-r0 \
+    && test -x /sbin/su-exec \
+    && rm -f /usr/local/bin/gosu \
+    && ln -s /sbin/su-exec /usr/local/bin/gosu \
+    && test "$(gosu postgres id -u)" = "$(id -u postgres)" \
+    && test "$(gosu postgres id -g)" = "$(id -g postgres)" \
+    && test "$(gosu postgres id -u)" != 0
+# Inherit the upstream ENTRYPOINT/CMD: initialization still starts as root
+# solely to set ownership, then execs PostgreSQL as the postgres user.
