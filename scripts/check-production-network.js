@@ -18,6 +18,8 @@ async function main(){
  const started=performance.now();
  const probe=await fetch(base+"/health",{signal:AbortSignal.timeout(5000)});
  assert.equal(probe.status,200);assert.equal((await probe.json()).database,"connected");
+ const closed=await fetch(base+"/v1/me",{signal:AbortSignal.timeout(5000)});
+ assert.equal(closed.status,503);assert.equal((await closed.json()).code,"RELEASE_CLOSED");
  let rejected=0;
  for(const request of [
   "GET /v1/me HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer synthetic\r\nAuthorization: Bearer duplicate\r\nConnection: close\r\n\r\n",
