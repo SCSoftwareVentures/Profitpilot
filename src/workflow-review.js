@@ -35,6 +35,14 @@ export function syntheticPeriodReport({rows, decisions, contract}) {
   const reviewed = prepareInvoiceReview(rows, contract);
   const seen = new Set();
   const rowIds = reviewed.map(item => String(item.rowNumber));
+  const invoiceIds = new Set();
+  for (const item of reviewed) {
+    const invoiceId = item.record?.invoice_id;
+    if (typeof invoiceId !== "string" || !invoiceId.trim()) continue;
+    const normalized = invoiceId.trim().toUpperCase();
+    if (invoiceIds.has(normalized)) throw new Error("Duplicate source invoice ID");
+    invoiceIds.add(normalized);
+  }
   if (new Set(rowIds).size !== rowIds.length) throw new Error("Duplicate source row numbers");
   if (decisions.some(d => !rowIds.includes(String(d.rowNumber)))) throw new Error("Decision references unknown row");
   let confirmedInvoiceCents = 0n;
