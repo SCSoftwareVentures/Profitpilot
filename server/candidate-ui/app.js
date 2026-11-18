@@ -7,6 +7,7 @@ const checked=id=>{if(!el(id).checked)throw Error("Explicit confirmation is requ
 function clear(){epoch++;controller?.abort();controller=null;for(const node of document.querySelectorAll("input")){if(node.type==="checkbox")node.checked=false;else node.value="";}el("result").textContent="";el("status").textContent="Session cleared.";}
 el("clear").addEventListener("click",clear);
 el("new-order").addEventListener("click",()=>{if(!busy)el("order").value=crypto.randomUUID();});
+el("new-case").addEventListener("click",()=>{if(!busy)el("case").value=crypto.randomUUID();});
 window.addEventListener("pagehide",clear);
 async function operation(action){
  if(busy)return;
@@ -25,10 +26,20 @@ async function operation(action){
    case "correct":checked("email-confirm");path="/privacy/account/correct-email";body={confirm:true};el("email-confirm").checked=false;break;
    case "preview":path="/privacy/invoices/"+clean("batch")+"/disposal-preview";body={};break;
    case "disposal":checked("dispose-confirm");path="/privacy/invoices/"+clean("batch")+"/disposals/"+clean("order");body={step:el("step").value,scopeDigest:digest("scope"),confirm:true};el("dispose-confirm").checked=false;break;
+   case "case-status":path="/privacy/cases/"+clean("case");break;
+   case "case-action":{
+    checked("case-confirm");path="/privacy/cases/"+clean("case");
+    const action=el("case-action").value;
+    body={action,confirm:true};
+    if(["request","intake"].includes(action))body.kind=el("case-kind").value;
+    if(["resolve","refuse"].includes(action))body.reasonCode=el("case-reason").value;
+    if(["intake","resolve","refuse"].includes(action))body.evidenceDigest=digest("case-evidence");
+    el("case-confirm").checked=false;break;
+   }
    default:throw Error("Unknown operation.");
   }
   busy=true;active=true;controller=new AbortController();
-  for(const b of document.querySelectorAll("button[data-operation],#new-order"))b.disabled=true;
+  for(const b of document.querySelectorAll("button[data-operation],#new-order,#new-case"))b.disabled=true;
   el("status").textContent="Request in progress.";
   const res=await fetch("/v1/tenants/"+t+path,{method:body===undefined?"GET":"POST",headers:{Authorization:"Bearer "+token,...(body===undefined?{}:{"Content-Type":"application/json"})},credentials:"omit",cache:"no-store",redirect:"error",signal:controller.signal,body:body===undefined?undefined:JSON.stringify(body)});
   const data=await res.json();
@@ -40,6 +51,6 @@ async function operation(action){
   }
   if(res.ok&&action==="preview"&&sha.test(data.scopeDigest||""))el("scope").value=data.scopeDigest;
  }catch(e){if(current===epoch)el("status").textContent=e.name==="AbortError"?"Request cancelled.":(active?"Request unavailable.":e.message);}
- finally{if(active){busy=false;controller=null;for(const b of document.querySelectorAll("button[data-operation],#new-order"))b.disabled=false;}}
+ finally{if(active){busy=false;controller=null;for(const b of document.querySelectorAll("button[data-operation],#new-order,#new-case"))b.disabled=false;}}
 }
 for(const node of document.querySelectorAll("button[data-operation]"))node.addEventListener("click",()=>operation(node.dataset.operation));
