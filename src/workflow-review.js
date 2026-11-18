@@ -55,7 +55,10 @@ export function syntheticPeriodReport({rows, decisions, contract}) {
       if (item.status !== "pending_review" || !item.candidate.evidence.identity || !item.candidate.evidence.period || !item.candidate.evidence.amount) {
         throw new Error("Cannot confirm an unsupported invoice candidate");
       }
-      if (!decision.reviewer || !decision.evidenceRef) throw new Error("Confirmation requires reviewer and evidence");
+      if (typeof decision.reviewer !== "string" || typeof decision.evidenceRef !== "string" || !decision.reviewer.trim() || !decision.evidenceRef.trim()) throw new Error("Confirmation requires reviewer and evidence");
+      // Synthetic reports use opaque identifiers only, never personal emails or external links.
+      const safeReference = /^(?!.*@)[A-Za-z0-9][A-Za-z0-9:_-]{0,127}$/;
+      if (!safeReference.test(decision.reviewer) || !safeReference.test(decision.evidenceRef)) throw new Error("Review audit identifiers must be opaque and privacy-safe");
       const invoiceId = item.record.invoice_id;
       if (seen.has(invoiceId)) throw new Error("Duplicate confirmed invoice ID");
       seen.add(invoiceId);
