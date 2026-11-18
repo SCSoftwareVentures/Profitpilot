@@ -14,6 +14,10 @@ test("alert schema excludes identifiers and signs exact bytes with timestamp and
  assert.ok(!wire.body.includes("confidential"));
  assert.throws(()=>verifyAlert(wire.body.replace("active","cleared"),wire.headers,key,1000));
  assert.throws(()=>verifyAlert(wire.body,wire.headers,key,1301));
+ assert.throws(()=>verifyAlert(wire.body,wire.headers,key,NaN));
+ assert.throws(()=>verifyAlert(wire.body,wire.headers,key,Infinity));
+ assert.throws(()=>verifyAlert(wire.body,wire.headers,key,1000.5));
+ assert.throws(()=>verifyAlert(wire.body,wire.headers,"0".repeat(64),1000));
  assert.throws(()=>verifyAlert(wire.body,{...wire.headers,"Idempotency-Key":"wrong"},key,1000));
  for(const url of ["http://example.invalid/hook","https://user:pass@example.invalid/hook","https://example.invalid/hook?q=1","https://example.invalid/"]){assert.throws(()=>alertDestination({SECURITY_ALERT_ENABLED:"yes",SECURITY_ALERT_SIGNING_KEY:key,SECURITY_ALERT_WEBHOOK_URL:url}));}
  assert.throws(()=>alertDestination({SECURITY_ALERT_SIGNING_KEY:key,SECURITY_ALERT_WEBHOOK_URL:"https://example.invalid/hook"}));
