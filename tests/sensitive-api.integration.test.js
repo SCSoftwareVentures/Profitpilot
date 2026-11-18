@@ -70,6 +70,32 @@ test("actual authenticated sensitive API: payroll review, own verified account c
   assert.equal((await expect("reader",correction,200,{body:{confirm:true}})).email,"verified-reader@example.invalid");
   await expect("reader",correction,403,{body:{confirm:true},claims:{email:"stale@example.invalid"}});
   assert.equal((await admin.query("SELECT email FROM public.users WHERE id=$1",[reader])).rows[0].email,"verified-reader@example.invalid");
+
+  // Privacy requests are status-only; evidence is kept in an approved
+  // assisted process. No arbitrary target or third-party data is disclosed.
+  const caseId=randomUUID(),casePath="/privacy/cases/"+caseId;
+  const requestCase={action:"request",kind:"access",confirm:true};
+  const opened=await expect("reader",casePath,200,{body:requestCase});
+  assert.equal(opened.status,"received");assert.equal(opened.kind,"access");
+  assert.ok(opened.internalReviewTarget);assert.equal(opened.escalationDue,false);
+  await expect("reader",casePath,409,{body:requestCase});
+  await expect("analyst",casePath,403);
+  await expect("reviewer",casePath,403,{tenant:other});
+  await expect("reader",casePath,403,{body:{action:"acknowledge",confirm:true}});
+  await expect("owner",casePath,403,{body:{action:"resolve",reasonCode:"fulfilled",evidenceDigest:hash("synthetic-response"),confirm:true}});
+  assert.equal((await expect("owner",casePath,200,{body:{action:"acknowledge",confirm:true}})).status,"acknowledged");
+  assert.equal((await expect("owner",casePath,200,{body:{action:"resolve",reasonCode:"fulfilled",evidenceDigest:hash("synthetic-response"),confirm:true}})).status,"resolved");
+  const resultCase=await expect("reader",casePath,200);
+  assert.equal(resultCase.status,"resolved");assert.equal(resultCase.reasonCode,"fulfilled");
+  assert.ok(!Object.hasOwn(resultCase,"evidenceDigest")&&!Object.hasOwn(resultCase,"openedBy"));
+  await expect("owner",casePath,409,{body:{action:"resolve",reasonCode:"fulfilled",evidenceDigest:hash("other"),confirm:true}});
+  const staffPath="/privacy/cases/"+randomUUID();
+  assert.equal((await expect("owner",staffPath,200,{body:{action:"intake",kind:"correction",evidenceDigest:hash("verified-assisted-intake"),confirm:true}})).status,"received");
+  await expect("reader",staffPath,403);
+  await expect("owner",staffPath,200,{body:{action:"acknowledge",confirm:true}});
+  await expect("owner",staffPath,403,{body:{action:"refuse",reasonCode:"identity_not_verified",evidenceDigest:hash("synthetic-refusal"),confirm:true}});
+  assert.equal((await expect("reviewer",staffPath,200,{body:{action:"refuse",reasonCode:"identity_not_verified",evidenceDigest:hash("synthetic-refusal"),confirm:true}})).status,"refused");
+  await assert.rejects(()=>runtime.query("SELECT * FROM private.privacy_rights_cases"),e=>e.code==="42501");
   // A short-lived, two-person grant executes one exact admitted operation.
   await admin.query("INSERT INTO public.import_batches(id,tenant_id,source_type,source_period_start,source_period_end,permission_ref,status,file_sha256,file_name,created_by) VALUES($1,$2,'customer_invoice','2026-11-01','2026-11-14','Synthetic authority','rejected',$3,'synthetic.csv',$4)",[disposal,t,hash(disposal),owner]);
   await admin.query("INSERT INTO public.raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,$3)",[t,disposal,{invoice_id:"INV-1"}]);
