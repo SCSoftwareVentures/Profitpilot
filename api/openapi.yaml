@@ -227,6 +227,7 @@ paths:
         schema: { type: string, format: uuid }
     get:
       summary: Retrieve an allowlisted immutable calculation summary, excluding stored inputs and arbitrary notes
+      description: Access is audited and subject to shared per-identity and per-tenant financial read budgets.
       responses:
         "200":
           description: Minimized financial summary with explicit completeness limitations; raw payroll records and inputs are excluded
@@ -236,6 +237,7 @@ paths:
         "401": { description: Unauthenticated }
         "403": { description: Tenant membership not authorised }
         "404": { description: Run not found in this tenant }
+        "429": { description: Financial read quota exceeded }
   /tenants/{tenantId}/calculations/{runId}/export:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -245,7 +247,7 @@ paths:
         schema: { type: string, format: uuid }
     post:
       summary: Export a single minimized management calculation
-      description: Requires an active owner or admin and issuer-attested MFA within five minutes. Returns only allowlisted financial summary fields, records an audit event, and creates no persistent download file or public link. Incomplete results remain explicitly incomplete; authoritative contribution and margin are withheld.
+      description: Requires an active owner or admin and issuer-attested MFA within five minutes. Returns only allowlisted financial summary fields, enforces shared per-identity and tenant export budgets, records an audit event, and creates no persistent download file or public link. Incomplete results remain explicitly incomplete; authoritative contribution and margin are withheld.
       requestBody:
         required: true
         content:
