@@ -158,6 +158,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/033_startup_key_attestation.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/034_public_runtime_grants.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/035_actor_threat_containment.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/036_privacy_recovery_inventory.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
@@ -319,7 +320,7 @@ jobs:
           psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$RESTORE_APP_URL" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.runtime.sql
-          TEST_RESTORE_ADMIN_DATABASE_URL="$RESTORE_ADMIN_URL" TEST_RESTORE_APP_DATABASE_URL="$RESTORE_APP_URL" node --test tests/backup-restore.integration.test.js
+          TEST_RESTORE_BACKUP_SHA256="$(sha256sum "$ARCHIVE" | cut -d ' ' -f 1)" TEST_RESTORE_ADMIN_DATABASE_URL="$RESTORE_ADMIN_URL" TEST_RESTORE_APP_DATABASE_URL="$RESTORE_APP_URL" node --test tests/backup-restore.integration.test.js
           psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DROP DATABASE profitpilot_restore_ci'
 
       - name: Build production API image
