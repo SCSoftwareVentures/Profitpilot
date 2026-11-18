@@ -330,3 +330,31 @@ No live incident or deployment is executed by repository tests. Independent
 routing/on-call monitoring, immutable external incident records, backup
 incident reconciliation, operator identity controls and incident tabletop
 exercises remain operational acceptance requirements.
+
+### Read-only security command centre
+
+Migration 041 creates a separate NOLOGIN security_reader capability
+(`profitpilot_security_reader`), not an API route or a business admin role.
+It can execute only `private.security_command_snapshot(integer,uuid)`.
+It cannot access customer tables, tokens, session digests, financial
+records, raw scan contents, or activate/release incidents. Provision a
+separate approved reader credential with verified TLS; no deployment
+credentials are supplied by the repository.
+
+On an approved security operator runner, configure
+`SECURITY_READER_DATABASE_URL` and `SECURITY_READER_DATABASE_CA`, then run
+`node scripts/security-command-centre.js` (default 50 incidents), or pass
+a page size 1–100 and the previous non-null nextCursor. The JSON report
+provides aggregate containment, identity security event counts (24 hours),
+scan and promotion queue counters, active emergency incident UUID/tenant
+UUID/category/time, observedAt and catalogue verification. Reports are
+confidential operational metadata; do not publish or log them broadly.
+A drifted catalogue suppresses all data other than the drift status and
+timestamp and exits 2. Connection/validation errors exit 1. No active
+containment is not equivalent to a healthy or attack-free system.
+Pagination is a live observation, not a frozen cross-page snapshot.
+
+The command centre is an on-demand backend operational report, not a
+deployed continuous dashboard, notification system or mobile UI. External
+alert routing, privileged operator authentication, independent incident
+custody and approved access to a deployed UI remain acceptance requirements.
