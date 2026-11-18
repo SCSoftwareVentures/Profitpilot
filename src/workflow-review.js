@@ -62,8 +62,11 @@ export function syntheticPeriodReport({rows, decisions, contract}) {
       confirmedInvoiceCents += amountInCents(item.record.amount);
       if (confirmedInvoiceCents > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error("Confirmed invoice total exceeds safe precision");
     }
+    const outcome = item.status === "held" ? "held" : (decision?.status ?? "pending");
+    const reasonCodes = item.status === "held" ? ["VALIDATION_HOLD"] : outcome === "pending" ? ["AWAITING_HUMAN_REVIEW"] : outcome === "rejected" ? ["REVIEWER_REJECTED"] : ["EVIDENCE_BACKED_CONFIRMATION"];
     return {rowNumber:item.rowNumber, invoiceId:item.record.invoice_id ?? null,
-      status:item.status === "held" ? "held" : (decision?.status ?? "pending"),
+      status:outcome, reasonCodes, reviewEvidenceRef:outcome === "confirmed" ? decision.evidenceRef : null,
+      reviewer:outcome === "confirmed" ? decision.reviewer : null,
       errors:item.errors, evidence:item.candidate?.evidence ?? null};
   });
   // An invoice-only prototype is not an audited contribution or complete revenue measure.
@@ -71,5 +74,6 @@ export function syntheticPeriodReport({rows, decisions, contract}) {
     confirmedInvoiceAmount:Number(confirmedInvoiceCents) / 100, currency:"AUD",
     eligibleRevenue:null, deliveryCosts:null, contribution:null,
     completeness:"incomplete", exclusions:["Other revenue sources not verified","Payroll and other delivery costs not reconciled"],
+    reconciliation:{confirmedCount:entries.filter(e=>e.status==="confirmed").length,heldCount:entries.filter(e=>e.status==="held").length,pendingCount:entries.filter(e=>e.status==="pending").length,rejectedCount:entries.filter(e=>e.status==="rejected").length,financialStatus:"NOT_RECONCILED",reasonCodes:["OTHER_REVENUE_UNVERIFIED","DELIVERY_COSTS_UNRECONCILED"]},
     entries};
 }
