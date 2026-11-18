@@ -50,6 +50,7 @@ services:
       - ./database/migrations/032_financial_access_budgets.sql:/docker-entrypoint-initdb.d/034-financial-access-budgets.sql:ro
       - ./database/migrations/033_startup_key_attestation.sql:/docker-entrypoint-initdb.d/035-startup-key-attestation.sql:ro
       - ./database/migrations/034_public_runtime_grants.sql:/docker-entrypoint-initdb.d/036-public-runtime-grants.sql:ro
+      - ./database/migrations/035_actor_threat_containment.sql:/docker-entrypoint-initdb.d/037-actor-threat-containment.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
