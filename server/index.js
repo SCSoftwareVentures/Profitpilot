@@ -243,6 +243,10 @@ app.post("/v1/tenants/:tenantId/calculations/:runId/export",membership,requireRo
 
 app.use((err,req,res,next)=>{const id=randomUUID();const status=err.code==="P4501"?429:err.code==="23505"?409:err.code==="54000"?413:err.code==="22P02"||err.code==="22P05"?400:err.status===503?503:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);if(status===503)res.set("Retry-After","5");if(err.code==="P4501")res.set("Retry-After","3600");process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:err.code==="P4501"?"Financial access limit reached; retry later":status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":status===503?"Request capacity temporarily unavailable":"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
-if(process.env.NODE_ENV==="production"){startRateLimitRetention();securityMonitor.start();}
+if(process.env.NODE_ENV==="production"){
+ try{await health();}
+ catch{process.stderr.write("Production database readiness checks failed; refusing to start.\n");await import("./db.js").then(m=>m.pool.end());process.exit(1);}
+ startRateLimitRetention();securityMonitor.start();
+}
 if(process.env.NODE_ENV!=="test")createBoundedServer(app).listen(port,()=>process.stdout.write("ProfitPilot API listening on "+port+"\n"));
 export default app;
