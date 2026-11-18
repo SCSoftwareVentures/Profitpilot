@@ -82,3 +82,21 @@ test("distinct invoice IDs are accepted as separate review candidates",()=>{
  assert.equal(report.entries.length,2);
  assert.equal(report.confirmedInvoiceAmount,0);
 });
+
+test("reconciliation reports explicit incomplete status and audit evidence",()=>{
+ const report=syntheticPeriodReport({rows,decisions:[{rowNumber:2,status:"confirmed",reviewer:"synthetic-reviewer",evidenceRef:"synthetic:proof"}],contract});
+ assert.equal(report.reconciliation.financialStatus,"NOT_RECONCILED");
+ assert.deepEqual([report.reconciliation.confirmedCount,report.reconciliation.heldCount,report.reconciliation.pendingCount,report.reconciliation.rejectedCount],[1,0,0,0]);
+ assert.deepEqual(report.entries[0].reasonCodes,["EVIDENCE_BACKED_CONFIRMATION"]);
+ assert.equal(report.entries[0].reviewEvidenceRef,"synthetic:proof");
+ assert.equal(report.entries[0].reviewer,"synthetic-reviewer");
+ assert.equal(report.completeness,"incomplete");
+});
+test("pending and held candidates have explicit reason codes and no reviewer evidence",()=>{
+ const pending=syntheticPeriodReport({rows,decisions:[],contract});
+ assert.deepEqual(pending.entries[0].reasonCodes,["AWAITING_HUMAN_REVIEW"]);
+ assert.equal(pending.entries[0].reviewEvidenceRef,null);
+ const held=syntheticPeriodReport({rows:[{...rows[0],amount:"invalid"}],decisions:[],contract});
+ assert.deepEqual(held.entries[0].reasonCodes,["VALIDATION_HOLD"]);
+ assert.equal(held.reconciliation.heldCount,1);
+});
