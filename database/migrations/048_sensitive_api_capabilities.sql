@@ -62,6 +62,8 @@ BEGIN
  SELECT * INTO pr FROM private.payroll_proposal_reviews WHERE tenant_id=p_tenant AND id=p_proposal FOR SHARE;
  IF NOT FOUND THEN RAISE EXCEPTION 'Proposal unavailable' USING ERRCODE='42501'; END IF;
  SELECT decision INTO outcome FROM private.payroll_proposal_decisions WHERE tenant_id=p_tenant AND proposal_id=p_proposal;
+ IF outcome='reviewed' AND NOT EXISTS(SELECT 1 FROM private.payroll_confirmation_receipts WHERE tenant_id=p_tenant AND proposal_id=p_proposal AND evidence_digest=pr.evidence_digest) THEN
+  RETURN jsonb_build_object('proposalId',pr.id,'evidenceDigest',pr.evidence_digest,'status','reviewed_not_confirmed'); END IF;
  IF outcome='rejected' THEN RETURN jsonb_build_object('proposalId',pr.id,'evidenceDigest',pr.evidence_digest,'status','rejected'); END IF;
  IF outcome IS NULL AND private.payroll_review_digest(p_tenant,pr.allocation_run_id) IS DISTINCT FROM pr.evidence_digest THEN
   RAISE EXCEPTION 'Proposal evidence changed' USING ERRCODE='23514'; END IF;
@@ -122,7 +124,9 @@ BEGIN
   OR encode(public.digest(convert_to(p_email,'UTF8'),'sha256'),'hex') IS DISTINCT FROM p_scope
   THEN RAISE EXCEPTION 'Sensitive operation denied' USING ERRCODE='42501'; END IF;
   -- Record-bound and single-use within its signed session/nonce.
-  INSERT INTO private.account_correction_nonces(user_id,nonce) VALUES(actor,p_nonce);
+  IF EXISTS(SELECT 1 FROM private.account_correction_nonces WHERE user_id=actor AND (auth_time>=p_auth OR issued_at>p_iat)) THEN
+   RAISE EXCEPTION 'New issuer authentication required' USING ERRCODE='42501'; END IF;
+  INSERT INTO private.account_correction_nonces(user_id,nonce,auth_time,issued_at) VALUES(actor,p_nonce,p_auth,p_iat);
   UPDATE public.users SET email=p_email WHERE id=actor AND email IS DISTINCT FROM p_email;
  ELSE
   IF p_email IS NOT NULL THEN RAISE EXCEPTION 'Sensitive operation denied' USING ERRCODE='42501'; END IF;
@@ -141,9 +145,12 @@ END $fn$;
 CREATE TABLE private.account_correction_nonces(
  user_id uuid NOT NULL REFERENCES public.users(id),
  nonce text NOT NULL CHECK(nonce ~ '^[a-f0-9]{32}$'),
+ auth_time bigint NOT NULL CHECK(auth_time>0),
+ issued_at bigint NOT NULL CHECK(issued_at>=auth_time-5),
  recorded_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  PRIMARY KEY(user_id,nonce)
 );
+CREATE INDEX account_correction_auth_idx ON private.account_correction_nonces(user_id,auth_time DESC,issued_at DESC);
 REVOKE ALL ON private.account_correction_nonces FROM PUBLIC,profitpilot_app;
 -- Replay prevention is only needed for the maximum 30-second proof lifetime.
 -- A trusted maintenance administrator may periodically erase old nonces.
