@@ -73,7 +73,7 @@ jobs:
     timeout-minutes: 10
     services:
       postgres:
-        image: postgres:16-alpine
+        image: postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e
         env:
           POSTGRES_DB: profitpilot
           POSTGRES_USER: profitpilot_admin
@@ -278,7 +278,7 @@ jobs:
           ARCHIVE="$WORK/backup.enc"
           export BACKUP_ENCRYPTION_KEY="$(openssl rand -hex 32)"
           echo "::add-mask::$BACKUP_ENCRYPTION_KEY"
-          PG_CONTAINER="$(docker ps --filter "ancestor=postgres:16-alpine" --format '{{.ID}}' | head -n 1)"
+          PG_CONTAINER="$(docker ps --filter "ancestor=postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e" --format '{{.ID}}' | head -n 1)"
           test -n "$PG_CONTAINER"
           docker exec -e PGPASSWORD "$PG_CONTAINER" pg_dump -h 127.0.0.1 -U profitpilot_admin -Fc profitpilot | node scripts/secure-backup.js encrypt-stdin "$ARCHIVE"
           test -s "$ARCHIVE"
@@ -305,7 +305,7 @@ jobs:
           CERT="$RUNNER_TEMP/profitpilot-postgres.crt"
           KEY="$RUNNER_TEMP/profitpilot-postgres.key"
           openssl req -new -x509 -newkey rsa:2048 -nodes -days 1 -keyout "$KEY" -out "$CERT" -subj "/CN=localhost" -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" -addext "basicConstraints=critical,CA:TRUE"
-          PG_CONTAINER="$(docker ps --filter "ancestor=postgres:16-alpine" --format '{{.ID}}' | head -n 1)"
+          PG_CONTAINER="$(docker ps --filter "ancestor=postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e" --format '{{.ID}}' | head -n 1)"
           test -n "$PG_CONTAINER"
           docker cp "$CERT" "$PG_CONTAINER:/var/lib/postgresql/data/server.crt"
           docker cp "$KEY" "$PG_CONTAINER:/var/lib/postgresql/data/server.key"
@@ -355,10 +355,58 @@ jobs:
           exit 1
 
 
+  supply-chain:
+    name: Container and software supply-chain audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout reviewed commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+
+      - name: Build pinned synthetic API image
+        run: docker build --pull -t profitpilot-api:scan .
+
+      - name: Verify runtime user and installed dependency inventory
+        run: |
+          set -eu
+          test "$(docker run --rm --network none --entrypoint id profitpilot-api:scan -u)" != 0
+          docker run --rm --network none --read-only --entrypoint npm profitpilot-api:scan ls --omit=dev --all --json >/tmp/profitpilot-dependencies.json
+          docker run --rm --network none --read-only --entrypoint npm profitpilot-api:scan sbom --sbom-format cyclonedx --omit=dev --package-lock-only >/tmp/profitpilot-sbom.json
+
+      - name: Install versioned scanner with publisher checksum verification
+        run: |
+          set -eu
+          umask 077
+          WORK="$(mktemp -d)"
+          trap 'rm -rf "$WORK"' EXIT
+          cd "$WORK"
+          BASE=https://github.com/aquasecurity/trivy/releases/download/v0.65.0
+          ARCHIVE=trivy_0.65.0_Linux-64bit.tar.gz
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 2 --max-time 120 "$BASE/$ARCHIVE" -o "$ARCHIVE"
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 2 --max-time 120 "$BASE/trivy_0.65.0_checksums.txt" -o checksums.txt
+          awk -v name="$ARCHIVE" '$2==name || $2=="*"name {print}' checksums.txt > selected.txt
+          test "$(wc -l < selected.txt)" -eq 1
+          sha256sum --check --strict selected.txt
+          tar -xzf "$ARCHIVE" trivy
+          install -m 0755 trivy "$RUNNER_TEMP/profitpilot-trivy"
+          "$RUNNER_TEMP/profitpilot-trivy" --version
+
+      - name: Scan API image and pinned database image for high and critical vulnerabilities
+        run: |
+          set -eu
+          SCANNER="$RUNNER_TEMP/profitpilot-trivy"
+          docker pull 'postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e'
+          "$SCANNER" image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed=false --exit-code 1 --no-progress --timeout 5m --ignorefile /dev/null profitpilot-api:scan
+          "$SCANNER" image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed=false --exit-code 1 --no-progress --timeout 5m --ignorefile /dev/null 'postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e'
+
   security-gate:
     name: Security CI release gate
     runs-on: ubuntu-latest
-    needs: [verify, database]
+    needs: [verify, database, supply-chain]
     if: ${{ always() }}
     permissions:
       contents: read
@@ -367,6 +415,7 @@ jobs:
         env:
           VERIFY_RESULT: ${{ needs.verify.result }}
           DATABASE_RESULT: ${{ needs.database.result }}
+          SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
           TESTED_SHA: ${{ github.sha }}
         run: |
           set -eu
@@ -375,10 +424,12 @@ jobs:
           echo "PostgreSQL/API/RLS/TLS verification: $DATABASE_RESULT"
           test "$VERIFY_RESULT" = success
           test "$DATABASE_RESULT" = success
+          test "$SUPPLY_CHAIN_RESULT" = success
           {
             echo "## ProfitPilot security CI gate"
             echo "- Commit: \`$TESTED_SHA\`"
             echo "- Node.js application checks: $VERIFY_RESULT"
             echo "- PostgreSQL, tenant RLS, identity/session revocation, audit chains/checkpoints, authenticated API, distributed limits, key lifecycle, invoice privacy boundary, retention/holds/disposal, MFA-gated export, encrypted file quarantine, scanner protocol, strict CSV preflight, approved manifest promotion and expiry, encrypted synthetic recovery and revocation/tombstone replay, TLS and container checks: $DATABASE_RESULT"
+            echo "- Container and software supply-chain audit: $SUPPLY_CHAIN_RESULT"
             echo "- Scope: automated repository CI only; not penetration testing or production certification"
           } >> "$GITHUB_STEP_SUMMARY"
