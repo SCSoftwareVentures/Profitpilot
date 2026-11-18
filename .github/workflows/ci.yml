@@ -74,25 +74,31 @@ jobs:
     name: PostgreSQL migrations and tenant RLS
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    services:
-      postgres:
-        image: postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e
-        env:
-          POSTGRES_DB: profitpilot
-          POSTGRES_USER: profitpilot_admin
-          POSTGRES_PASSWORD: ci-admin-password
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U profitpilot_admin -d profitpilot"
-          --health-interval 5s
-          --health-timeout 3s
-          --health-retries 10
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+
+      - name: Build and start the remediated PostgreSQL image
+        run: |
+          set -eu
+          docker build --pull -f database/Dockerfile.postgres -t profitpilot-postgres:ci database
+          docker run -d --name profitpilot-postgres-ci -p 127.0.0.1:5432:5432 -e POSTGRES_DB=profitpilot -e POSTGRES_USER=profitpilot_admin -e POSTGRES_PASSWORD=ci-admin-password profitpilot-postgres:ci
+          export PGPASSWORD=ci-admin-password
+          for attempt in $(seq 1 45); do
+            if psql -h 127.0.0.1 -U profitpilot_admin -d profitpilot -v ON_ERROR_STOP=1 -c 'SELECT 1' >/dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          psql -h 127.0.0.1 -U profitpilot_admin -d profitpilot -v ON_ERROR_STOP=1 -c 'SELECT 1'
+          docker exec profitpilot-postgres-ci sh -ec '
+            test "$(readlink /usr/local/bin/gosu)" = /sbin/su-exec
+            test "$(gosu postgres id -u)" = "$(id -u postgres)"
+            test "$(gosu postgres id -g)" = "$(id -g postgres)"
+            test "$(id -u postgres)" != 0
+            test "$(awk "/^Uid:/ {print \$2}" /proc/1/status)" = "$(id -u postgres)"
+            test "$(awk "/^Gid:/ {print \$2}" /proc/1/status)" = "$(id -g postgres)"
+          '
 
       - name: Generate ephemeral tenant context signing key
         run: |
@@ -281,7 +287,7 @@ jobs:
           ARCHIVE="$WORK/backup.enc"
           export BACKUP_ENCRYPTION_KEY="$(openssl rand -hex 32)"
           echo "::add-mask::$BACKUP_ENCRYPTION_KEY"
-          PG_CONTAINER="$(docker ps --filter "ancestor=postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e" --format '{{.ID}}' | head -n 1)"
+          PG_CONTAINER=profitpilot-postgres-ci
           test -n "$PG_CONTAINER"
           docker exec -e PGPASSWORD "$PG_CONTAINER" pg_dump -h 127.0.0.1 -U profitpilot_admin -Fc profitpilot | node scripts/secure-backup.js encrypt-stdin "$ARCHIVE"
           test -s "$ARCHIVE"
@@ -308,7 +314,7 @@ jobs:
           CERT="$RUNNER_TEMP/profitpilot-postgres.crt"
           KEY="$RUNNER_TEMP/profitpilot-postgres.key"
           openssl req -new -x509 -newkey rsa:2048 -nodes -days 1 -keyout "$KEY" -out "$CERT" -subj "/CN=localhost" -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" -addext "basicConstraints=critical,CA:TRUE"
-          PG_CONTAINER="$(docker ps --filter "ancestor=postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e" --format '{{.ID}}' | head -n 1)"
+          PG_CONTAINER=profitpilot-postgres-ci
           test -n "$PG_CONTAINER"
           docker cp "$CERT" "$PG_CONTAINER:/var/lib/postgresql/data/server.crt"
           docker cp "$KEY" "$PG_CONTAINER:/var/lib/postgresql/data/server.key"
@@ -416,10 +422,10 @@ jobs:
         run: |
           set -eu
           SCANNER="$RUNNER_TEMP/profitpilot-trivy"
-          docker pull 'postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e'
+          docker build --pull -f database/Dockerfile.postgres -t profitpilot-postgres:scan database
           result=0
           "$SCANNER" image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed=false --exit-code 1 --no-progress --timeout 5m --ignorefile /dev/null profitpilot-api:scan || result=1
-          "$SCANNER" image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed=false --exit-code 1 --no-progress --timeout 5m --ignorefile /dev/null 'postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e' || result=1
+          "$SCANNER" image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed=false --exit-code 1 --no-progress --timeout 5m --ignorefile /dev/null profitpilot-postgres:scan || result=1
           exit "$result"
 
   security-gate:
