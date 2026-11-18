@@ -39,6 +39,9 @@ jobs:
       - name: Check source credentials and locked dependency integrity
         run: node scripts/source-security-preflight.js
 
+      - name: Verify reviewed migration and bootstrap inventory
+        run: node scripts/verify-migration-inventory.js
+
       - name: Install locked dependencies
         run: npm ci --ignore-scripts --no-audit --no-fund
 
