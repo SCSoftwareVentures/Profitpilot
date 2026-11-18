@@ -35,6 +35,12 @@ function inspectChallenge(challenge,expected,sender,now){
  if(!verify(null,challengeBytes(c),key(sender,expected.senderKeySha256),sig(challenge.signature)))deny();
  return {digest:hash(bytes([F,...C.map(k=>c[k]),challenge.signature])),issued,expires};
 }
+// Validate a signed challenge before admission to a synthetic transport.
+export function verifyPrivacyReceiptChallenge({challenge,expected,senderPublicKey,now=Date.now()}){
+ const c=inspectChallenge(challenge,expected,senderPublicKey,now);
+ if(now>=c.expires)deny();
+ return Object.freeze({challengeDigest:c.digest,expiresAt:c.expires});
+}
 export function issuePrivacyReceiptChallenge(expected,senderPrivateKey,now=Date.now()){
  binding(expected);
  if(!validNow(now)||senderPrivateKey?.type!=="private"||senderPrivateKey.asymmetricKeyType!=="ed25519")deny();

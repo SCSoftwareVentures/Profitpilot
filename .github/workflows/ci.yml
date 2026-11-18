@@ -471,7 +471,7 @@ jobs:
       - name: Test isolated genuine ClamAV clean and detection controls and strict freshness denial
         run: bash scripts/check-real-clamav-ci.sh
       - name: Verify signed webhook delivery and dashboard request controls
-        run: node --test tests/security-alert-delivery.test.js tests/security-alert-tls.test.js tests/security-dashboard.test.js tests/security-recovery.test.js
+        run: node --test tests/security-alert-delivery.test.js tests/security-alert-tls.test.js tests/security-dashboard.test.js tests/security-recovery.test.js tests/privacy-courier.test.js
 
   supply-chain:
     name: Container and software supply-chain audit

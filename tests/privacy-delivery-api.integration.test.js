@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createServer} from "node:http";
-import {randomUUID,createHash} from "node:crypto";
+import {randomUUID,createHash,generateKeyPairSync} from "node:crypto";
+import {privacyKeyFingerprint,privacyEnvelopeDigest,sealPrivacyResponse} from "../scripts/privacy-response-envelope.js";
+import {issuePrivacyReceiptChallenge,openAndAcknowledgePrivacyResponse} from "../scripts/privacy-delivery-receipt.js";
+import {startSyntheticCourier,syntheticCourierRequest} from "./support/synthetic-privacy-courier.js";
+import {syntheticTlsFixture} from "./support/synthetic-tls-fixture.js";
 import {generateKeyPair,exportJWK,SignJWT} from "jose";
 import pg from "pg";
 
@@ -66,7 +70,11 @@ test("actual authenticated privacy case and release API",{skip:!process.env.TEST
   // Exact authenticated privacy response authorization. No plaintext, recipient
   // address, key bytes or external transport are admitted through the API.
   const deliveryOrder=randomUUID(),deliveryPath=casePath+"/deliveries/"+deliveryOrder;
-  const deliveryInput={recipientType:"self",recipientKeyDigest:hash("synthetic recipient"),senderKeyDigest:hash("synthetic sender"),authorityDigest:hash("synthetic authority"),redactionDigest:hash("synthetic redaction"),responseDigest:hash("synthetic response"),envelopeDigest:hash("synthetic envelope")};
+  const recipient=generateKeyPairSync("x25519"),sender=generateKeyPairSync("ed25519"),receiptSigner=generateKeyPairSync("ed25519");
+  const response=Buffer.from("Synthetic API end-to-end response");
+  const responseContext={tenantId:t,caseId,orderId:deliveryOrder,recipientKeySha256:privacyKeyFingerprint(recipient.publicKey),senderKeySha256:privacyKeyFingerprint(sender.publicKey),responseSha256:hash(response)};
+  const envelope=sealPrivacyResponse(response,responseContext,recipient.publicKey,sender.privateKey);
+  const deliveryInput={recipientType:"self",recipientKeyDigest:responseContext.recipientKeySha256,senderKeyDigest:responseContext.senderKeySha256,authorityDigest:hash("synthetic authority"),redactionDigest:hash("synthetic redaction"),responseDigest:responseContext.responseSha256,envelopeDigest:privacyEnvelopeDigest(envelope)};
   await expect("reader",deliveryPath+"/preview",403,{body:deliveryInput});
   await expect("reviewer",deliveryPath+"/preview",403,{tenant:other,body:deliveryInput});
   await expect("owner",deliveryPath+"/preview",403,{body:deliveryInput,claims:{amr:["pwd"]}});
@@ -97,7 +105,23 @@ test("actual authenticated privacy case and release API",{skip:!process.env.TEST
   // Evidence-only reconciliation: no submitted key material, signatures, or
   // assertion of delivery. The release and review orders must be distinct.
   const reviewId=randomUUID(),receiptPath=deliveryPath+"/receipts/"+reviewId;
-  const input={challengeDigest:hash("synthetic challenge"),receiptDigest:hash("synthetic acknowledgement"),receiptKeyDigest:hash("independently checked signing key"),verificationEvidenceDigest:hash("independent offline verification")};
+  // Drive the actual approved envelope through a loopback-only mTLS
+  // connection, authenticate and decrypt it, then reconcile the signed result.
+  const expected={...responseContext,scopeSha256:deliveryPreview.scopeDigest,envelopeSha256:deliveryInput.envelopeDigest,recipientSigningKeySha256:privacyKeyFingerprint(receiptSigner.publicKey),authorizedAt:new Date(released.releaseAuthorizedAt).toISOString()};
+  const challenge=issuePrivacyReceiptChallenge(expected,sender.privateKey);
+  const tls=syntheticTlsFixture();
+  const courier=await startSyntheticCourier({synthetic:true,expected,challenge,envelope,senderPublicKey:sender.publicKey,recipientSigningPublicKey:receiptSigner.publicKey,serverKey:tls.serverKey,serverCert:tls.serverCert,clientCert:tls.clientCert});
+  let input;
+  try{
+   const config={port:courier.port,token:courier.token,serverCert:tls.serverCert,serverPin:courier.serverPin,clientKey:tls.clientKey,clientCert:tls.clientCert};
+   const claimed=await syntheticCourierRequest({...config,path:"/claim"});assert.equal(claimed.status,200);
+   const acknowledgement=openAndAcknowledgePrivacyResponse({...claimed.data,expected,recipientPrivateKey:recipient.privateKey,recipientSigningPrivateKey:receiptSigner.privateKey,senderPublicKey:sender.publicKey});
+   const result=await syntheticCourierRequest({...config,path:"/receipt",receipt:acknowledgement});
+   assert.equal(result.status,200);assert.equal(result.data.deliveryVerified,false);
+   assert.equal(courier.status().state,"acknowledged");
+   const {challengeDigest,receiptDigest,receiptKeyDigest}=result.data;
+   input={challengeDigest,receiptDigest,receiptKeyDigest,verificationEvidenceDigest:hash(JSON.stringify(["synthetic verified evidence",challengeDigest,receiptDigest,receiptKeyDigest]))};
+  }finally{await courier.close();response.fill(0);}
   assert.equal((await expect("owner",deliveryPath,200)).receiptEvidenceRecorded,false);
   await expect("reader",receiptPath+"/preview",403,{body:input});
   await expect("reviewer",receiptPath+"/preview",403,{tenant:other,body:input});
@@ -120,6 +144,9 @@ test("actual authenticated privacy case and release API",{skip:!process.env.TEST
   await expect("reviewer",receiptPath,403,{body:op("consume")});
   const recorded=await expect("owner",receiptPath,200,{body:op("consume")});
   assert.equal(recorded.status,"evidence-recorded");assert.equal(recorded.receiptEvidenceRecorded,true);assert.equal(recorded.deliveryVerified,false);
+  const stored=(await admin.query("SELECT challenge_digest,receipt_digest,receipt_key_digest,verification_evidence_digest FROM private.privacy_receipt_evidence WHERE tenant_id=$1 AND release_order_id=$2",[t,deliveryOrder])).rows[0];
+  assert.deepEqual(stored,{challenge_digest:input.challengeDigest,receipt_digest:input.receiptDigest,receipt_key_digest:input.receiptKeyDigest,verification_evidence_digest:input.verificationEvidenceDigest});
+  console.log("Synthetic end-to-end approved encrypted response, pinned mTLS, recipient signature and database reconciliation passed");
   assert.ok(!Object.hasOwn(recorded,"receiptDigest")&&!Object.hasOwn(recorded,"verificationEvidenceDigest"));
   await expect("owner",receiptPath,409,{body:op("consume")});
   const receiptStatus=await expect("reviewer",receiptPath,200);
