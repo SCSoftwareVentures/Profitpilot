@@ -38,7 +38,21 @@ test("single calculation export requires fresh issuer MFA, owner/admin role, ten
  try{
   await admin.query("INSERT INTO users(id,auth_subject,email,status) VALUES($1,$2,'export@example.invalid','active')",[owner,subject]);
   await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'owner','active')",[tenant,owner]);
-  await admin.query("INSERT INTO calculation_runs(id,tenant_id,contract_id,site_id,period_start,period_end,formula_version,inputs,outputs,completeness,created_by) VALUES($1,$2,'cccccccc-cccc-4ccc-8ccc-cccccccccccc','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','2026-01-01','2026-01-31','ci-export','{}',$3,'incomplete',$4)",[run,tenant,JSON.stringify({currency:"AUD",revenue:"100.00",deliveryCost:"50.00",indicativeContribution:"50.00",contribution:"50.00",marginPercent:"50.00",privateNote:sensitive}),owner]);
+  await admin.query("INSERT INTO calculation_runs(id,tenant_id,contract_id,site_id,period_start,period_end,formula_version,inputs,outputs,completeness,created_by) VALUES($1,$2,'cccccccc-cccc-4ccc-8ccc-cccccccccccc','aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa','2026-01-01','2026-01-31','ci-export',jsonb_build_object('privateNote',$5::text),$3,'incomplete',$4)",[run,tenant,JSON.stringify({currency:"AUD",revenue:"100.00",deliveryCost:"50.00",indicativeContribution:"50.00",contribution:"50.00",marginPercent:"50.00",privateNote:sensitive}),owner,sensitive]);
+  const minimized=(await withTenant(tenant,"isolation-tenant-c",c=>c.query("SELECT private.read_calculation_summary($1,$2) AS summary",[tenant,run]))).rows[0].summary;
+  assert.equal(minimized.id,run);
+  assert.equal(minimized.outputs.revenue,"100.00");
+  assert.equal(minimized.outputs.contribution,null);
+  assert.equal(minimized.outputs.marginPercent,null);
+  assert.ok(!Object.hasOwn(minimized,"inputs"));
+  assert.ok(!JSON.stringify(minimized).includes(sensitive));
+  await assert.rejects(()=>withTenant(tenant,subject,c=>c.query("SELECT inputs,outputs FROM calculation_runs WHERE id=$1",[run])),/permission denied/i);
+  await assert.rejects(()=>withTenant(tenant,subject,c=>c.query("SELECT private.read_calculation_summary($1,$2)",["44444444-4444-4444-8444-444444444444",foreignRun])),/authority denied/i);
+  assert.equal((await withTenant(tenant,subject,c=>c.query("SELECT private.read_calculation_summary($1,$2) AS summary",[tenant,foreignRun]))).rows[0].summary,null);
+  const readToken=await new SignJWT({auth_time:Math.floor(Date.now()/1000)-10,sid:"ci-export-read-session"}).setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(issuer).setAudience(audience).setSubject(subject).setIssuedAt().setExpirationTime("5m").sign(privateKey);
+  const readResponse=await fetch(base+"/v1/tenants/"+tenant+"/calculations/"+run,{headers:{authorization:"Bearer "+readToken}});
+  assert.equal(readResponse.status,200);
+  assert.deepEqual(await readResponse.json(),minimized);
   assert.equal((await request(run,{authenticated:false})).status,401);
   assert.equal((await request(run,{extra:{}})).status,403);
   assert.equal((await request(run,{extra:{...claims(),auth_time:Math.floor(Date.now()/1000)-600}})).status,403);
