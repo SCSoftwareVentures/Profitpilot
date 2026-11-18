@@ -449,6 +449,76 @@ paths:
         "409": { description: Conflicting or stale evidence }
         "422": { description: Ineligible operation }
         "503": { description: Live processing closed or unavailable }
+
+  /tenants/{tenantId}/privacy/cases/{caseId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: caseId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read minimised privacy case status
+      description: Self-service case owner or authorised staff, fresh MFA. No response documents or personal-data export.
+      responses:
+        "200": { description: Case status and internal escalation target }
+        "403": { description: Authority denied }
+        "503": { description: Live processing closed or unavailable }
+    post:
+      summary: Record an explicit privacy rights case action
+      description: Self request or staff-assisted verified intake, acknowledgement, independent evidenced outcome. No automatic disclosure, correction or erasure of other records.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [action, confirm, kind]
+                  properties:
+                    action: { const: request }
+                    confirm: { const: true }
+                    kind: { enum: [access, correction, disposal, complaint] }
+                - type: object
+                  additionalProperties: false
+                  required: [action, confirm, kind, evidenceDigest]
+                  properties:
+                    action: { const: intake }
+                    confirm: { const: true }
+                    kind: { enum: [access, correction, disposal, complaint] }
+                    evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                - type: object
+                  additionalProperties: false
+                  required: [action, confirm]
+                  properties:
+                    action: { const: acknowledge }
+                    confirm: { const: true }
+                - type: object
+                  additionalProperties: false
+                  required: [action, confirm, reasonCode, evidenceDigest]
+                  properties:
+                    action: { const: resolve }
+                    confirm: { const: true }
+                    reasonCode: { enum: [fulfilled, partially_fulfilled] }
+                    evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                - type: object
+                  additionalProperties: false
+                  required: [action, confirm, reasonCode, evidenceDigest]
+                  properties:
+                    action: { const: refuse }
+                    confirm: { const: true }
+                    reasonCode: { enum: [lawful_refusal, retention_required, identity_not_verified] }
+                    evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        "200": { description: Minimised case status }
+        "400": { description: Invalid request }
+        "401": { description: Authentication required }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting state }
+        "429": { description: Capacity reached, use assisted channel }
+        "503": { description: Live processing closed or unavailable }
+
 components:
   schemas:
     ErrorResponse:
