@@ -61,7 +61,7 @@ paths:
       - $ref: '#/components/parameters/TenantId'
     post:
       summary: Register import metadata for an authorised source (no binary file is uploaded or stored)
-      description: Records caller-supplied metadata and checksum only. It does not receive, verify or store file bytes; status is registered until a secure upload pipeline exists.
+      description: Synthetic non-production only. Production import intake is blocked. Records caller-supplied metadata and checksum only. It does not receive, verify or store file bytes; status is registered until a secure upload pipeline exists.
       requestBody:
         required: true
         content:
@@ -91,6 +91,7 @@ paths:
         "401": { description: Unauthenticated }
         "403": { description: Permission or role not sufficient }
         "409": { description: Conflicting duplicate metadata; existing source record is preserved }
+        "503": { description: Production intake not approved }
   /tenants/{tenantId}/imports/{batchId}/file:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -121,7 +122,7 @@ paths:
       - $ref: '#/components/parameters/BatchId'
     post:
       summary: Approve scanned and validated quarantine manifest for processing
-      description: Synthetic non-production only. Active owner/admin and recent MFA required. Approval does not expose file bytes or accept financial records. The isolated worker decrypts, rescans and checks the canonical manifest digest before atomic persistence. Holds and revoked approval authority block processing.
+      description: Synthetic non-production only. Active owner/admin and recent MFA required. Approval does not expose file bytes or accept financial records. The isolated worker decrypts, rescans and checks the canonical manifest digest before atomic persistence. Holds, revoked account authority and targeted revocation of the approving session block processing.
       responses:
         "202": { description: Approved for isolated processing }
         "400": { description: Invalid approval request }
@@ -137,7 +138,7 @@ paths:
       - $ref: '#/components/parameters/BatchId'
     post:
       summary: Persist parsed invoice row objects for a source batch
-      description: Accepts 1–200 privacy-screened invoice row objects per request. Unknown fields, nested values and suspicious identifiers reject the entire chunk before persistence. Invalid or missing financial fields that pass screening can be held for review. startRowNumber preserves original source row numbering across chunks. Identical retries are idempotent; conflicting content at an existing row number is rejected. This endpoint does not upload or store the original binary file.
+      description: Synthetic non-production only. Production import intake is blocked. Accepts 1–200 privacy-screened invoice row objects per request. Unknown fields, nested values and suspicious identifiers reject the entire chunk before persistence. Invalid or missing financial fields that pass screening can be held for review. startRowNumber preserves original source row numbering across chunks. Identical retries are idempotent; conflicting content at an existing row number is rejected. This endpoint does not upload or store the original binary file.
       requestBody:
         required: true
         content:
@@ -166,13 +167,15 @@ paths:
         "409": { description: Conflicting source row content at an existing row number }
         "413": { description: Request body exceeds the configured JSON payload limit }
         "422": { description: Unsafe invoice payload or disabled payroll ingestion; no rows are accepted }
+        "503": { description: Production intake not approved }
+
   /tenants/{tenantId}/imports/{batchId}/validate:
     parameters:
       - $ref: '#/components/parameters/TenantId'
       - $ref: '#/components/parameters/BatchId'
     post:
       summary: Validate source rows and produce held/review candidates
-      description: Structural validation creates only new unreviewed proposals. Existing proposals and reviewed decisions remain unchanged. Structural counts describe validator results, not current review states.
+      description: Synthetic non-production only. Production import intake is blocked. Structural validation creates only new unreviewed proposals. Existing proposals and reviewed decisions remain unchanged. Structural counts describe validator results, not current review states.
       responses:
         "200":
           description: Invoice rows structurally validated into candidate/held states; no row is automatically accepted
@@ -183,6 +186,7 @@ paths:
         "403": { description: Not authorised }
         "404": { description: Batch not found in this tenant }
         "422": { description: Payroll validation is not yet supported or no source rows exist }
+        "503": { description: Production intake not approved }
   /tenants/{tenantId}/matches/{matchId}/decision:
     parameters:
       - $ref: '#/components/parameters/TenantId'
