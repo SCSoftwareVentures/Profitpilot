@@ -85,6 +85,29 @@ BEGIN
  BEGIN DELETE FROM private.payroll_supersessions WHERE tenant_id=t; RAISE EXCEPTION 'Correction ledger mutable'; EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL; END;
  IF has_function_privilege('profitpilot_app','private.execute_payroll_correction(uuid,uuid,text,bigint,bigint,text,bigint,text,text,text,text,text)','EXECUTE')
  OR has_any_column_privilege('profitpilot_app','private.payroll_supersessions','SELECT,INSERT,UPDATE,REFERENCES') THEN RAISE EXCEPTION 'Correction internals exposed'; END IF;
+ -- Candidate retention checks: no policy is not permission; past deadlines
+ -- still require external verification. Holds cannot be removed and restoration
+ -- must detect both policy and hold changes.
+ IF private.financial_retention_status(t,runs[1])->>'status' IS DISTINCT FROM 'review-missing-or-stale' THEN RAISE EXCEPTION 'Missing policy accepted'; END IF;
+ IF private.financial_retention_status(gen_random_uuid(),runs[1])->>'status' IS DISTINCT FROM 'unavailable' THEN RAISE EXCEPTION 'Cross-tenant retention lookup allowed'; END IF;
+ current_digest:=private.sensitive_recovery_fingerprint();
+ INSERT INTO private.financial_retention_reviews(tenant_id,allocation_run_id,review_id,evidence_digest,retain_through,reviewed_on,expires_on)
+ VALUES(t,runs[1],gen_random_uuid(),repeat('a',64),CURRENT_DATE-1,CURRENT_DATE-1,CURRENT_DATE+1);
+ IF private.sensitive_recovery_fingerprint() IS NOT DISTINCT FROM current_digest THEN RAISE EXCEPTION 'Retention review missing from recovery fingerprint'; END IF;
+ IF private.financial_retention_status(t,runs[1])->>'status' IS DISTINCT FROM 'external-verification-required'
+ OR private.financial_retention_status(t,runs[1])->>'authorizesDisposal' IS DISTINCT FROM 'false' THEN RAISE EXCEPTION 'Past retention granted authority'; END IF;
+ INSERT INTO private.financial_retention_reviews(tenant_id,allocation_run_id,review_id,evidence_digest,retain_through,reviewed_on,expires_on)
+ VALUES(t,runs[1],gen_random_uuid(),repeat('b',64),CURRENT_DATE,CURRENT_DATE-1,CURRENT_DATE+1);
+ IF private.financial_retention_status(t,runs[1])->>'status' IS DISTINCT FROM 'retention-period-active' THEN RAISE EXCEPTION 'Inclusive deadline ignored'; END IF;
+ current_digest:=private.sensitive_recovery_fingerprint();
+ INSERT INTO private.financial_retention_holds(tenant_id,allocation_run_id,hold_id,evidence_digest)
+ VALUES(t,runs[1],gen_random_uuid(),repeat('c',64));
+ IF private.sensitive_recovery_fingerprint() IS NOT DISTINCT FROM current_digest THEN RAISE EXCEPTION 'Legal hold missing from recovery fingerprint'; END IF;
+ IF private.financial_retention_status(t,runs[1])->>'status' IS DISTINCT FROM 'hold-recorded' THEN RAISE EXCEPTION 'Hold not enforced'; END IF;
+ BEGIN DELETE FROM private.financial_retention_holds WHERE tenant_id=t; RAISE EXCEPTION 'Hold mutable'; EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL; END;
+ BEGIN UPDATE private.financial_retention_reviews SET retain_through=CURRENT_DATE-100 WHERE tenant_id=t; RAISE EXCEPTION 'Review mutable'; EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL; END;
+ IF has_function_privilege('profitpilot_app','private.financial_retention_status(uuid,uuid)','EXECUTE') OR has_table_privilege('profitpilot_app','private.financial_retention_reviews','INSERT,UPDATE,DELETE') OR has_table_privilege('profitpilot_app','private.financial_retention_holds','INSERT,UPDATE,DELETE') THEN RAISE EXCEPTION 'Retention internal permissions exposed'; END IF;
+ RAISE NOTICE 'Retention register, hold immutability and recovery fingerprint checks passed';
  RAISE NOTICE 'Atomic payroll supersession, bypass denial, rollback, replay, stale-report fence, audit and original evidence immutability checks passed';
 END $test$;
 -- Check deferred link to the new confirmation receipt before rolling back.

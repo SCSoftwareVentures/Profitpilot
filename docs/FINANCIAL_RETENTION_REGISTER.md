@@ -1,0 +1,5 @@
+# Candidate database retention register
+
+Migration 053 introduces administrator-only append-only confirmed payroll retention reviews and hold records, bound to the tenant and confirmation receipt. All recorded holds block eligibility; there is no hold release capability. All recorded retention deadlines apply conservatively; any stale review blocks the diagnostic. It never authorizes disposal. The signed recovery fingerprint now includes the register and rejects changes; re-establish genuine signed inventories after the schema change. No runtime grants, customer API, automatic purge or changes to existing financial immutability. CI exercises the diagnostic and recovery checks using synthetic fixtures.
+
+Remaining: externally verified policy completeness and legal review, authenticated dual-authorized review and hold lifecycle, actual dependency and backup disposition checks, proof of disposal and safe execution across all financial classes; production remains locked. Direct administrator entries are unverified assertions, not legal authority. No real records or approvals should be entered in the candidate.
