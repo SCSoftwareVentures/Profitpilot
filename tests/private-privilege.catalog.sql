@@ -17,6 +17,7 @@ BEGIN
     'private.quarantine_status(uuid,uuid)','private.session_authorized(text,bigint,bigint,text,bigint,text,text,text)',
     'private.approve_quarantine_promotion(uuid,uuid)',
     'private.site_payroll_summary(uuid,uuid,date,date)','private.read_calculation_summary(uuid,uuid)',
+    'private.verify_startup_signing_key(text,bigint,text,text)',
     'public.consume_api_rate_limit(text)','public.purge_api_rate_limits()'];
    WHEN 'profitpilot_scanner' THEN expected:=ARRAY[
     'private.claim_quarantine_scan()','private.expire_quarantine_bytes()',
