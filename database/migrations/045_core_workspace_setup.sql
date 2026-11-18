@@ -4,13 +4,13 @@ BEGIN;
 DO $check$ BEGIN
  IF NOT private.verify_security_catalog() THEN RAISE EXCEPTION 'Prior security catalog does not verify'; END IF;
 END $check$;
-CREATE UNIQUE INDEX core_workspace_receipt_key ON public.audit_events(tenant_id,object_id)
+CREATE UNIQUE INDEX core_workspace_receipt_key ON public.audit_events(tenant_id,(metadata->>'setupId'))
  WHERE action='core_workspace_created' AND object_type='contract';
 
 CREATE FUNCTION private.create_core_workspace(p_tenant uuid,p_setup uuid,p_data jsonb)
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $fn$
 DECLARE actor uuid; receipt public.audit_events%ROWTYPE; request_hash text;
- business_id uuid; site_id uuid; version_id uuid; effective_date date; label text;
+ business_id uuid; site_id uuid; new_contract_id uuid; version_id uuid; effective_date date; label text;
 BEGIN
  IF p_tenant IS NULL OR private.current_tenant_id() IS DISTINCT FROM p_tenant
  OR NOT private.lock_tenant_available(p_tenant) THEN
@@ -43,25 +43,25 @@ BEGIN
  END IF;
  request_hash:=encode(public.digest(convert_to('profitpilot-workspace-v1:'||p_data::text,'UTF8'),'sha256'),'hex');
  PERFORM pg_advisory_xact_lock(hashtextextended('profitpilot-workspace-v1:'||p_tenant::text||':'||p_setup::text,0));
- SELECT * INTO receipt FROM public.audit_events WHERE tenant_id=p_tenant AND object_id=p_setup
+ SELECT * INTO receipt FROM public.audit_events WHERE tenant_id=p_tenant AND metadata->>'setupId'=p_setup::text
   AND action='core_workspace_created' AND object_type='contract';
  IF FOUND THEN
   IF receipt.actor_user_id IS DISTINCT FROM actor OR receipt.metadata->>'requestHash' IS DISTINCT FROM request_hash THEN
    RAISE EXCEPTION 'Conflicting workspace request' USING ERRCODE='23505';
   END IF;
   RETURN jsonb_build_object('businessId',receipt.metadata->>'businessId','siteId',receipt.metadata->>'siteId',
-   'contractId',p_setup,'versionId',receipt.metadata->>'versionId','idempotent',true);
+   'setupId',p_setup,'contractId',receipt.object_id,'versionId',receipt.metadata->>'versionId','idempotent',true);
  END IF;
- business_id:=gen_random_uuid();site_id:=gen_random_uuid();version_id:=gen_random_uuid();
+ business_id:=gen_random_uuid();site_id:=gen_random_uuid();new_contract_id:=gen_random_uuid();version_id:=gen_random_uuid();
  INSERT INTO public.businesses(id,tenant_id,name) VALUES(business_id,p_tenant,p_data->>'businessName');
  INSERT INTO public.sites(id,tenant_id,business_id,name) VALUES(site_id,p_tenant,business_id,p_data->>'siteName');
- INSERT INTO public.contracts(id,tenant_id,business_id,customer_name) VALUES(p_setup,p_tenant,business_id,p_data->>'customerName');
+ INSERT INTO public.contracts(id,tenant_id,business_id,customer_name) VALUES(new_contract_id,p_tenant,business_id,p_data->>'customerName');
  INSERT INTO public.contract_versions(id,tenant_id,contract_id,version_no,effective_from,price,currency,tax_basis,billing_basis)
- VALUES(version_id,p_tenant,p_setup,1,effective_date,(p_data->>'price')::numeric(14,2),'AUD',p_data->>'taxBasis','monthly');
+ VALUES(version_id,p_tenant,new_contract_id,1,effective_date,(p_data->>'price')::numeric(14,2),'AUD',p_data->>'taxBasis','monthly');
  INSERT INTO public.audit_events(tenant_id,actor_user_id,action,object_type,object_id,metadata)
- VALUES(p_tenant,actor,'core_workspace_created','contract',p_setup,
-  jsonb_build_object('businessId',business_id,'siteId',site_id,'versionId',version_id,'requestHash',request_hash));
- RETURN jsonb_build_object('businessId',business_id,'siteId',site_id,'contractId',p_setup,'versionId',version_id,'idempotent',false);
+ VALUES(p_tenant,actor,'core_workspace_created','contract',new_contract_id,
+  jsonb_build_object('setupId',p_setup,'businessId',business_id,'siteId',site_id,'versionId',version_id,'requestHash',request_hash));
+ RETURN jsonb_build_object('businessId',business_id,'siteId',site_id,'setupId',p_setup,'contractId',new_contract_id,'versionId',version_id,'idempotent',false);
 END $fn$;
 REVOKE ALL ON FUNCTION private.create_core_workspace(uuid,uuid,jsonb) FROM PUBLIC,profitpilot_app;
 GRANT EXECUTE ON FUNCTION private.create_core_workspace(uuid,uuid,jsonb) TO profitpilot_app;
