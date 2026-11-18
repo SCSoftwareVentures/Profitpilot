@@ -73,3 +73,17 @@ test("financial calculation persists bounded source-row fingerprints, not source
  assert.match(route,/sourceEvidence\}\)/);
  assert.match(route,/Source evidence counts changed during calculation/);
 });
+
+test("source-status endpoint requires tenant membership and compares stored fingerprints",async()=>{
+ const {readFile}=await import("node:fs/promises");
+ const source=await readFile(new URL("../server/index.js",import.meta.url),"utf8");
+ const start=source.indexOf('app.get("/v1/tenants/:tenantId/calculations/:runId/source-status"');
+ assert.ok(start>=0);
+ const route=source.slice(start,source.indexOf('app.use((err,req,res,next)=>',start));
+ assert.match(route,/requireRole\("owner","admin","analyst","reviewer"\)/);
+ assert.match(route,/row\.inputs\?\.sourceEvidence/);
+ assert.match(route,/previous\.version!==1/);
+ assert.match(route,/mr\.decision='confirmed'/);
+ assert.match(route,/ar\.status='confirmed'/);
+ assert.match(route,/matches\?"unchanged":"changed"/);
+});
