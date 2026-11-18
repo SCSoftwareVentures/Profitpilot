@@ -22,9 +22,9 @@ app.set("trust proxy",proxyTrust());
 const securityMonitor=createSecurityMonitor();
 app.use(securityMonitor.middleware);
 // Set privacy headers even for rejected or throttled requests.
-app.use("/v1",(req,res,next)=>{res.set("Cache-Control","no-store");res.set("Pragma","no-cache");next();});
-app.use("/v1",createRequestAdmission(32));
+app.use((req,res,next)=>{res.set("Cache-Control","no-store");res.set("Pragma","no-cache");next();});
 app.use(helmet());
+app.use(createRequestAdmission(32));
 app.use(cors({origin:corsOrigins(),credentials:false,methods:["GET","POST"]}));
 app.use(process.env.NODE_ENV==="production"?sharedLimiter({windowMs:60_000,limit:100,scope:"global"}):rateLimit({windowMs:60_000,limit:100,standardHeaders:true,legacyHeaders:false}));
 // Production shares write counters across replicas; development uses local counters.
@@ -241,7 +241,7 @@ app.post("/v1/tenants/:tenantId/calculations/:runId/export",membership,requireRo
  }catch(e){if(e.code==="42501")return res.status(403).json({error:"Export authority denied"});next(e);}
 });
 
-app.use((err,req,res,next)=>{const id=randomUUID();const status=err.code==="P4501"?429:err.code==="23505"?409:err.code==="54000"?413:err.code==="22P02"||err.code==="22P05"?400:err.status===503?503:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);if(status===503)res.set("Retry-After","5");if(err.code==="P4501")res.set("Retry-After","3600");process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:err.code==="P4501"?"Financial access limit reached; retry later":status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":status===503?"Request capacity temporarily unavailable":"Internal server error",reference:id});});
+app.use((err,req,res,next)=>{if(res.destroyed||res.writableEnded)return;if(res.headersSent)return next(err);const id=randomUUID();const status=err.code==="P4501"?429:err.code==="23505"?409:err.code==="54000"?413:err.code==="22P02"||err.code==="22P05"?400:err.status===503?503:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);if(status===503)res.set("Retry-After","5");if(err.code==="P4501")res.set("Retry-After","3600");process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:err.code==="P4501"?"Financial access limit reached; retry later":status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":status===503?"Request capacity temporarily unavailable":"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
 if(process.env.NODE_ENV==="production"){
  try{await health();}
