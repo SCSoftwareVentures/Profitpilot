@@ -128,9 +128,9 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requireRol
    if(decision==="held")held++;else valid++;
    return {raw_row_id:raw.rows[i].id,decision,reason:item.errors.join("; ")||"Structural validation passed; requires mapping and human review"};
   });
-  await client.query("INSERT INTO mapping_decisions(tenant_id,raw_row_id,target_type,target_id,decision,confidence,method_version,reason) SELECT $1,v.raw_row_id,'invoice_row',NULL,v.decision,'LOW','invoice-validator-0.1.0',v.reason FROM jsonb_to_recordset($2::jsonb) AS v(raw_row_id uuid,decision text,reason text) ON CONFLICT(tenant_id,raw_row_id,method_version) DO NOTHING",[req.membership.tenantId,JSON.stringify(decisions)]);
+  const proposals=await client.query("INSERT INTO mapping_decisions(tenant_id,raw_row_id,target_type,target_id,decision,confidence,method_version,reason) SELECT $1,v.raw_row_id,'invoice_row',NULL,v.decision,'LOW','invoice-validator-0.1.0',v.reason FROM jsonb_to_recordset($2::jsonb) AS v(raw_row_id uuid,decision text,reason text) ON CONFLICT(tenant_id,raw_row_id,method_version) DO NOTHING",[req.membership.tenantId,JSON.stringify(decisions)]);
   await client.query("UPDATE import_batches SET status='review' WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
-  return {status:200,batchId:req.params.batchId,total:raw.rowCount,validCandidateRows:valid,heldRows:held,automaticallyAccepted:0};
+  return {status:200,batchId:req.params.batchId,total:raw.rowCount,validCandidateRows:valid,heldRows:held,newProposals:proposals.rowCount,preservedProposals:raw.rowCount-proposals.rowCount,automaticallyAccepted:0};
  });
  if(result.error)return res.status(result.status).json({error:result.error});
  const {status,...body}=result;res.status(status).json(body);
