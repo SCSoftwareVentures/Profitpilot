@@ -144,3 +144,25 @@ CI requires exactly one filesystem layer and tests runtime startup and privilege
 The final build and scan must pass before this remediation is accepted.
 Package installation uses the distribution's signed APK metadata; the final
 built image still requires an immutable release digest and independent review.
+
+### HTTP ingress acceptance
+
+The Node HTTP boundary rejects duplicate authentication, host, framing, content,
+origin and proxy headers before Express routing; rejects unsupported methods,
+absolute-form targets, protocol upgrades, CONNECT, expectation handshakes,
+ambiguous framing, and oversized header counts, header bytes and declared bodies.
+The raw header count is explicitly checked rather than silently truncated.
+Rejected connections cannot route subsequent pipelined requests. All HTTP routes,
+including health, share the per-process admission limit and no-store response
+policy. Parser-rejected requests may be closed before the application sees them.
+
+Real TCP regression tests exercise both accepted requests and malformed inputs.
+Conservative limits (64 headers, 16 KiB headers, 4096-character target, 100 KiB
+declared body, 32 admitted HTTP requests) are engineering defaults, not measured
+production capacity. The existing JSON/CSV parsers enforce route-specific body
+limits, including chunked bodies. Expect/100-continue, WebSockets, CONNECT,
+duplicate forwarding headers and request trailers are unsupported deliberately.
+Validate proxy normalization, HTTP/2-to-HTTP/1 translation, forwarded-header
+sanitization, TLS termination and consistent message framing against the actual
+production ingress. This is defense in depth, not a proof against all request
+smuggling or distributed denial of service.
