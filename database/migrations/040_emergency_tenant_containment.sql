@@ -21,7 +21,7 @@ CREATE TABLE private.tenant_emergency_incidents(
  activated_by text NOT NULL DEFAULT session_user,
  activated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
  released_at timestamptz,
- release_ref text CHECK(private.disposal_reference_valid(release_ref)),
+ release_ref text CHECK(release_ref IS NULL OR private.disposal_reference_valid(release_ref)),
  released_by text,
  CHECK((released_at IS NULL AND release_ref IS NULL AND released_by IS NULL) OR
  (released_at IS NOT NULL AND release_ref IS NOT NULL AND released_by IS NOT NULL AND released_at>=activated_at))
