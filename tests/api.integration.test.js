@@ -402,7 +402,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal((await admin.query("SELECT count(*)::int AS count FROM import_batches WHERE tenant_id=$1 AND file_sha256=$2",[tenantA,"9".repeat(64)])).rows[0].count,0);
     await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES ($1,$2,3,$3)",[tenantA,invoiceBatch,JSON.stringify({invoice_id:"INV-3",bank_account:privateFixture})])),/privacy boundary/i);
     await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES ($1,$2,3,'{}'::jsonb)",[tenantA,createdBody.batch.id])),/not enabled/i);
-    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("UPDATE import_batches SET file_name='changed.csv' WHERE id=$1",[invoiceBatch])),/immutable/i);
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("UPDATE import_batches SET file_name='changed.csv' WHERE id=$1",[invoiceBatch])),e=>e.code==='42501'&&/permission denied/i.test(e.message));
     const readerWrite=await request(`/v1/tenants/${tenantA}/imports`,{
       subject:"ci-api-reader",method:"POST",
       body:{...importBody,sha256:"c".repeat(64)}
