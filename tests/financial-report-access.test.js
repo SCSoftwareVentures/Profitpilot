@@ -34,6 +34,7 @@ test("server error logger does not serialize raw exception messages",()=>{
 });
 
 test("unauthenticated HTTP financial report request is rejected before database access",async()=>{
+ process.env.NODE_ENV="test";
  const {default:app}=await import("../server/index.js");
  const server=await new Promise(resolve=>{const s=app.listen(0,"127.0.0.1",()=>resolve(s));});
  try{
