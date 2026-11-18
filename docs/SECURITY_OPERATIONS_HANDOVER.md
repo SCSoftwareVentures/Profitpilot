@@ -166,3 +166,25 @@ Validate proxy normalization, HTTP/2-to-HTTP/1 translation, forwarded-header
 sanitization, TLS termination and consistent message framing against the actual
 production ingress. This is defense in depth, not a proof against all request
 smuggling or distributed denial of service.
+
+### Automated actor burst containment
+
+After authentication and active tenant membership, the API commits a shared
+database admission check before dispatching the tenant handler. The first
+120 requests in a 60-second actor/tenant window are admitted; the next
+activates a 300-second restriction. Subsequent denials return 429 with
+the remaining Retry-After and never extend the restriction. Expiry resets
+the budget. Other members and other tenants remain unaffected. The check
+serializes on one row per membership; it does not store IP addresses, tokens,
+request paths or request bodies. The API cannot read or alter those rows
+directly. Containment transitions are recorded in the tenant audit chain.
+Monitoring records aggregate containment counts and raises a sustained
+containment-spike alert after two consecutive qualifying intervals.
+
+Thresholds are provisional and must be validated under realistic workloads.
+This is deterministic burst containment, not a malware detector, automated
+account revocation mechanism, general anomaly detection model or protection
+against all distributed attacks. Trusted API/database administrators remain
+within the existing trust boundary. Already-admitted work is not cancelled.
+The alert is emitted locally; external routing, on-call response, independent
+testing and an approved operational escalation policy are still required.
