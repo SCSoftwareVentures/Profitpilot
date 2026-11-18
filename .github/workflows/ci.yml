@@ -385,6 +385,13 @@ jobs:
           DATABASE_SSL_TEST_URL: postgresql://profitpilot_app:${{ env.POSTGRES_APP_PASSWORD }}@127.0.0.1:5432/profitpilot
         run: node --test tests/db-tls.integration.test.js tests/production-readiness.integration.test.js
 
+      - name: Verify actual read-only dashboard through TLS database and HTTPS boundary
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@127.0.0.1:5432/profitpilot
+          TEST_DASHBOARD_TLS_KEY: ${{ runner.temp }}/profitpilot-postgres.key
+          TEST_DASHBOARD_TLS_CERT: ${{ runner.temp }}/profitpilot-postgres.crt
+        run: node --test tests/security-dashboard.integration.test.js
+
       - name: Start production-mode container and verify database TLS health endpoint
         env:
           CORS_ORIGIN: https://ci.invalid
@@ -433,7 +440,7 @@ jobs:
       - name: Test isolated genuine ClamAV clean and detection controls and strict freshness denial
         run: bash scripts/check-real-clamav-ci.sh
       - name: Verify signed webhook delivery and dashboard request controls
-        run: node --test tests/security-alert-delivery.test.js tests/security-dashboard.test.js tests/security-recovery.test.js
+        run: node --test tests/security-alert-delivery.test.js tests/security-alert-tls.test.js tests/security-dashboard.test.js tests/security-recovery.test.js
 
   supply-chain:
     name: Container and software supply-chain audit
