@@ -124,6 +124,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/028_quarantine_expiry_recovery.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/029_private_privilege_boundary.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/030_invoice_batch_budget.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/031_minimized_financial_reads.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
 
