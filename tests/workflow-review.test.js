@@ -65,3 +65,9 @@ test("rejects impossible or malformed contract dates",()=>{
  }
  assert.throws(()=>prepareInvoiceReview(rows,{...contract,periodEnd:"2026-11-31"}),/Invalid contract period/);
 });
+
+test("malformed review decisions fail closed",()=>{
+ for(const bad of [null,{},[],{rowNumber:""},{rowNumber:"Infinity"},{rowNumber:"1.5"}]){
+  assert.throws(()=>syntheticPeriodReport({rows,decisions:[bad],contract}));
+ }
+});
