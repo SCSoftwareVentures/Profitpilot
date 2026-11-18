@@ -80,7 +80,7 @@ test("actual authenticated sensitive API: payroll review, own verified account c
   await expect("reviewer",path,200,{body:step("approve")});
   await expect("reviewer",path,403,{body:step("consume")});
   const removed=await expect("owner",path,200,{body:step("consume")});assert.equal(removed.removedRows,1);
-  await expect("owner",path,422,{body:step("consume")});
+  await expect("owner",path,403,{body:step("consume")});
   assert.equal((await admin.query("SELECT count(*)::int AS n FROM private.import_disposal_tombstones WHERE tenant_id=$1 AND batch_id=$2",[t,disposal])).rows[0].n,1);
   assert.equal((await admin.query("SELECT private.verify_audit_chain($1) AS ok",[t])).rows[0].ok,true);
   await assert.rejects(()=>runtime.query("SELECT * FROM private.account_correction_nonces"),e=>e.code==="42501");
