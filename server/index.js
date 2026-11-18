@@ -13,6 +13,7 @@ import {proxyTrust,corsOrigins,createBoundedServer} from "./network-boundary.js"
 import {importIntakeGate,promotionProof} from "./intake-security.js";
 import {createReadinessGuard} from "./readiness-guard.js";
 import {productionReleaseGate} from "./release-gate.js";
+import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof} from "./sensitive-operation-proof.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
 import {quarantineConfig,sealQuarantine,MAX_QUARANTINE_BYTES} from "./quarantine.js";
@@ -44,7 +45,7 @@ app.use("/v1/tenants/:tenantId/imports",importIntakeGate());
 app.use("/v1",express.json({limit:"100kb",inflate:false}));
 app.use("/v1",enforceJsonBudget);
 const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-for(const param of ["batchId","matchId","runId"])app.param(param,(req,res,next,value)=>uuidPattern.test(value)?next():res.status(400).json({error:"Invalid resource ID"}));
+for(const param of ["batchId","matchId","runId","proposalId","orderId"])app.param(param,(req,res,next,value)=>uuidPattern.test(value)?next():res.status(400).json({error:"Invalid resource ID"}));
 const requestTenant=(req,tenantId,fn)=>withTenant(tenantId,req.identity.subject,fn,req.identity);
 
 async function membership(req,res,next){
@@ -262,6 +263,77 @@ app.post("/v1/tenants/:tenantId/calculations/:runId/export",membership,requireRo
   res.set("X-Content-Type-Options","nosniff");
   res.json(result);
  }catch(e){if(e.code==="42501")return res.status(403).json({error:"Export authority denied"});next(e);}
+});
+
+
+// Candidate-only workflows. ProductionReleaseGate precedes all of these.
+// Exact parameter allowlists and MFA protect the action-specific capabilities.
+const emptyScope="0".repeat(64);
+const exactBody=(body,keys)=>body!==null&&typeof body==="object"&&!Array.isArray(body)&&Object.keys(body).length===keys.length&&keys.every(k=>Object.hasOwn(body,k));
+const emptyQuery=req=>Object.keys(req.query).length===0;
+const failSensitive=(e,res,next)=>{
+ if(e.code==="42501"||e.status===403)return res.status(403).json({error:"Sensitive operation denied"});
+ if(e.code==="23514"||e.code==="23505")return res.status(409).json({error:"Evidence or approval state changed; review again"});
+ if(e.code==="22023"||e.code==="P0001")return res.status(422).json({error:"Operation is not eligible"});
+ return next(e);
+};
+const sensitiveQuery=(req,sql,args)=>requestTenant(req,req.membership.tenantId,async c=>(await c.query(sql,args)).rows[0]?.result);
+app.post("/v1/tenants/:tenantId/payroll/runs/:runId/submit",membership,requireRole("owner","admin","analyst"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!exactBody(req.body,["submit"])||req.body.submit!==true)return res.status(400).json({error:"Explicit submission required"});
+  const tenant=req.membership.tenantId,run=req.params.runId.toLowerCase();
+  const result=await sensitiveQuery(req,"SELECT private.api_payroll_review($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) AS result",sensitiveApiProof(tenant,run,"payroll_submit",emptyScope,req.identity));
+  return res.status(200).json(result);
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/payroll/proposals/:proposalId",membership,requireRole("owner","admin","reviewer"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  const tenant=req.membership.tenantId,proposal=req.params.proposalId.toLowerCase();
+  const result=await sensitiveQuery(req,"SELECT private.api_payroll_review($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) AS result",sensitiveApiProof(tenant,proposal,"payroll_read",emptyScope,req.identity));
+  return res.json(result);
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/payroll/proposals/:proposalId/confirm",membership,requireRole("owner","admin","reviewer"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!exactBody(req.body,["confirm","evidenceDigest"])||req.body.confirm!==true||typeof req.body.evidenceDigest!=="string"||!/^[a-f0-9]{64}$/.test(req.body.evidenceDigest))return res.status(400).json({error:"Explicit confirmation and reviewed evidence digest required"});
+  const tenant=req.membership.tenantId,proposal=req.params.proposalId.toLowerCase();
+  const result=await sensitiveQuery(req,"SELECT private.api_confirm_payroll($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) AS result",payrollConfirmationProof(tenant,proposal,req.body.evidenceDigest,req.identity));
+  return res.json(result);
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/privacy/account",membership,requireRole("owner","admin","analyst","reviewer","read_only"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  const tenant=req.membership.tenantId;
+  return res.json(await sensitiveQuery(req,"SELECT private.api_account_privacy($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",[...sensitiveApiProof(tenant,tenant,"account_read",emptyScope,req.identity),null]));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/privacy/account/correct-email",membership,requireRole("owner","admin","analyst","reviewer","read_only"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!exactBody(req.body,["confirm"])||req.body.confirm!==true)return res.status(400).json({error:"Explicit correction required"});
+  const email=req.identity.email;
+  if(req.identity.emailVerified!==true||typeof email!=="string"||email.length<3||email.length>254||!/^[^\s@\p{C}]+@[^\s@\p{C}]+$/u.test(email))return res.status(403).json({error:"Current issuer-verified email required"});
+  const tenant=req.membership.tenantId,scope=createHash("sha256").update(email,"utf8").digest("hex");
+  return res.json(await sensitiveQuery(req,"SELECT private.api_account_privacy($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",[...sensitiveApiProof(tenant,tenant,"account_correct_email",scope,req.identity),email]));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/privacy/invoices/:batchId/disposal-preview",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!exactBody(req.body,[]))return res.status(400).json({error:"Invalid preview request"});
+  const tenant=req.membership.tenantId,batch=req.params.batchId.toLowerCase();
+  const scopeDigest=await sensitiveQuery(req,"SELECT private.api_invoice_disposal_preview($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) AS result",sensitiveApiProof(tenant,batch,"invoice_disposal_preview",emptyScope,req.identity));
+  return res.json({batchId:batch,scopeDigest});
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/privacy/invoices/:batchId/disposals/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!exactBody(req.body,["step","scopeDigest","confirm"])||req.body.confirm!==true||!["request","approve","reject","consume"].includes(req.body.step)||typeof req.body.scopeDigest!=="string"||!/^[a-f0-9]{64}$/.test(req.body.scopeDigest))return res.status(400).json({error:"Explicit scoped operation required"});
+  const tenant=req.membership.tenantId,batch=req.params.batchId.toLowerCase(),order=req.params.orderId.toLowerCase();
+  const proof=securityWorkProof(tenant,order,"privacy_disposal",req.body.scopeDigest,req.body.step,req.identity);
+  const [t,o,_kind,scope,step,...authority]=proof;
+  return res.json(await sensitiveQuery(req,"SELECT private.api_invoice_disposal_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",[t,o,batch,scope,step,...authority]));
+ }catch(e){return failSensitive(e,res,next);}
 });
 
 app.use((err,req,res,next)=>{if(res.destroyed||res.writableEnded)return;if(res.headersSent)return next(err);const id=randomUUID();const status=err.code==="P4501"?429:err.code==="23505"?409:err.code==="54000"?413:err.code==="22P02"||err.code==="22P05"?400:err.status===503?503:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);if(status===503)res.set("Retry-After","5");if(err.code==="P4501")res.set("Retry-After","3600");process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:err.code==="P4501"?"Financial access limit reached; retry later":status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":status===503?"Request capacity temporarily unavailable":"Internal server error",reference:id});});
