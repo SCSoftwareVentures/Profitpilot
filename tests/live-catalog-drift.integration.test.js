@@ -22,6 +22,8 @@ test("live catalog verification detects policy, permissions, trigger and functio
    "ALTER FUNCTION private.verify_startup_signing_key(text,bigint,text,text) SET search_path=public",
    "CREATE VIEW public.unreviewed_catalog_view AS SELECT * FROM public.invoices",
    "ALTER TABLE public.invoices ADD COLUMN unreviewed text",
+   "GRANT EXECUTE ON FUNCTION private.release_tenant_emergency(uuid,uuid,text) TO profitpilot_incident_operator",
+   "ALTER TABLE private.tenant_emergency_incidents DISABLE TRIGGER incident_history_guard",
    "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO profitpilot_app"
   ]){
    await c.query("BEGIN");
