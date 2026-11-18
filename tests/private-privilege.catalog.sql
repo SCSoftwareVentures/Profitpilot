@@ -28,7 +28,7 @@ BEGIN
    WHEN 'profitpilot_security_reader' THEN expected:=ARRAY['private.security_command_snapshot(integer,uuid)'];
    WHEN 'profitpilot_incident_operator' THEN expected:=ARRAY['private.activate_tenant_emergency(uuid,uuid,text,text)'];
    WHEN 'profitpilot_incident_recovery' THEN expected:=ARRAY['private.release_tenant_emergency(uuid,uuid,text)'];
-   WHEN 'profitpilot_recovery_reader' THEN expected:=ARRAY['private.privacy_recovery_inventory()'];
+   WHEN 'profitpilot_recovery_reader' THEN expected:=ARRAY['private.privacy_recovery_inventory()','private.security_recovery_inventory()'];
    WHEN 'profitpilot_audit_reader' THEN expected:=ARRAY[
     'private.audit_checkpoint_heads()','private.audit_checkpoint_matches(uuid,bigint,text)'];
   END CASE;
