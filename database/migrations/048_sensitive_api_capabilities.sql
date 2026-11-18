@@ -172,6 +172,8 @@ DECLARE result text;
 BEGIN
  IF p_action IS DISTINCT FROM 'invoice_disposal_preview' THEN RAISE EXCEPTION 'Sensitive operation denied' USING ERRCODE='42501'; END IF;
  PERFORM private.sensitive_api_actor(p_tenant,p_batch,p_action,p_scope,p_auth,p_iat,p_session,p_expires,p_nonce,p_key,p_signature);
+ IF NOT EXISTS(SELECT 1 FROM public.import_batches WHERE tenant_id=p_tenant AND id=p_batch) THEN
+  RAISE EXCEPTION 'Sensitive operation denied' USING ERRCODE='42501'; END IF;
  result:=private.invoice_disposal_work_scope(p_tenant,p_batch);
  PERFORM private.sensitive_api_fresh(p_auth,p_expires);
  RETURN result;
@@ -185,6 +187,8 @@ DECLARE removed integer;
 BEGIN
  IF p_step IS NULL OR p_step NOT IN ('request','approve','reject','consume') THEN RAISE EXCEPTION 'Sensitive operation denied' USING ERRCODE='42501'; END IF;
  PERFORM private.security_work_actor(p_tenant,p_order,'privacy_disposal',p_scope,p_step,p_auth,p_iat,p_session,p_expires,p_nonce,p_key,p_signature);
+ IF NOT EXISTS(SELECT 1 FROM public.import_batches WHERE tenant_id=p_tenant AND id=p_batch) THEN
+  RAISE EXCEPTION 'Sensitive operation denied' USING ERRCODE='42501'; END IF;
  IF private.invoice_disposal_work_scope(p_tenant,p_batch) IS DISTINCT FROM p_scope THEN
   RAISE EXCEPTION 'Disposal scope changed' USING ERRCODE='42501'; END IF;
  IF p_step='consume' THEN
