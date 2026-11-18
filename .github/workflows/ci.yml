@@ -141,6 +141,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/029_private_privilege_boundary.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/030_invoice_batch_budget.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/031_minimized_financial_reads.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/032_financial_access_budgets.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
 
@@ -250,6 +251,12 @@ jobs:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/calculation-export.integration.test.js
+
+      - name: Verify actor and tenant financial access budgets and audit chain
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
+        run: |
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/financial-access-budget.integration.test.js
 
       - name: Prepare quarantine expiry recovery fixture
         env:
