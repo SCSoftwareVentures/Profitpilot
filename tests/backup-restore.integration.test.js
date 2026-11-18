@@ -91,6 +91,13 @@ test("synthetic logical backup restores all source rows and preserves tenant bou
   await assert.rejects(()=>runtime.query("SELECT * FROM private.privacy_case_key_versions"),/permission denied/i);
   await assert.rejects(()=>restored.query("DELETE FROM private.privacy_compromised_keys WHERE tenant_id=$1",[dispatchArgs[0]]),e=>e.code==="55000");
   console.log("Assisted privacy release, receipt, revocation and key rotation history restored");
+  const intake=(await restored.query("SELECT i.tenant_id,i.batch_id,i.pool_id,i.row_count,i.total_amount::text FROM private.payroll_intake_receipts i JOIN public.tenants t ON t.id=i.tenant_id WHERE t.legal_name='Synthetic minimized payroll intake'")).rows;
+  assert.equal(intake.length,1);assert.equal(intake[0].row_count,2);assert.equal(intake[0].total_amount,"0.30");
+  const restoredSources=(await restored.query("SELECT count(*)::int AS n,sum(amount)::text AS total FROM public.payroll_source_rows WHERE tenant_id=$1 AND payroll_pool_id=$2",[intake[0].tenant_id,intake[0].pool_id])).rows[0];
+  assert.deepEqual(restoredSources,{n:2,total:"0.30"});
+  await assert.rejects(()=>runtime.query("SELECT * FROM private.payroll_intake_receipts"),/permission denied/i);
+  await assert.rejects(()=>restored.query("UPDATE public.payroll_pools SET total_amount=1 WHERE tenant_id=$1 AND id=$2",[intake[0].tenant_id,intake[0].pool_id]),e=>e.code==="55000");
+  console.log("Reviewed payroll intake receipt and reconciled source rows restored");
   const tenant="33333333-3333-4333-8333-333333333333",subject="isolation-tenant-c";
   const result=await restored.query("SELECT key_id,secret FROM private.tenant_context_keys WHERE active ORDER BY key_id LIMIT 1");
   assert.equal(result.rowCount,1,"restored database must have active tenant context key");

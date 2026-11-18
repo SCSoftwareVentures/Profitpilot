@@ -78,6 +78,7 @@ services:
       - ./database/migrations/060_privacy_dispatch_fence.sql:/docker-entrypoint-initdb.d/062-privacy-dispatch-fence.sql:ro
       - ./database/migrations/061_privacy_dispatch_operator_api.sql:/docker-entrypoint-initdb.d/063-privacy-dispatch-operator-api.sql:ro
       - ./database/migrations/062_privacy_key_lifecycle.sql:/docker-entrypoint-initdb.d/064-privacy-key-lifecycle.sql:ro
+      - ./database/migrations/063_reviewed_payroll_intake.sql:/docker-entrypoint-initdb.d/065-reviewed-payroll-intake.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
