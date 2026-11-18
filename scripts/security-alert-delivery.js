@@ -1,6 +1,6 @@
 import {createHmac,randomUUID,timingSafeEqual} from "node:crypto";
 import {request} from "node:https";
-import {lstatSync,readFileSync,writeFileSync,renameSync,mkdirSync,rmdirSync,unlinkSync,existsSync} from "node:fs";
+import {lstatSync,readFileSync,writeFileSync,renameSync,mkdirSync,rmdirSync,unlinkSync,existsSync,openSync,fsyncSync,closeSync} from "node:fs";
 import {join} from "node:path";
 import {pathToFileURL} from "node:url";
 import pg from "pg";
@@ -53,7 +53,7 @@ export function signedAlert(event,key,now=Math.floor(Date.now()/1000)){
 }
 export function verifyAlert(body,headers,key,now=Math.floor(Date.now()/1000)){
  const ts=headers["X-ProfitPilot-Timestamp"]??headers["x-profitpilot-timestamp"],sig=headers["X-ProfitPilot-Signature"]??headers["x-profitpilot-signature"];
- if(typeof body!=="string"||Buffer.byteLength(body)>1024||!SECRET.test(key)||typeof ts!=="string"||!/^[1-9]\d{0,11}$/.test(ts)||Math.abs(now-Number(ts))>300||typeof sig!=="string"||!SECRET.test(sig)||!timingSafeEqual(Buffer.from(sig,"hex"),Buffer.from(mac(body,ts,key),"hex")))throw Error("Invalid alert signature or freshness");
+ if(!Number.isSafeInteger(now)||now<=0||typeof body!=="string"||Buffer.byteLength(body)>1024||(typeof key!=="string"||!SECRET.test(key)||new Set(key).size<12)||typeof ts!=="string"||!/^[1-9]\d{0,11}$/.test(ts)||Math.abs(now-Number(ts))>300||typeof sig!=="string"||!SECRET.test(sig)||!timingSafeEqual(Buffer.from(sig,"hex"),Buffer.from(mac(body,ts,key),"hex")))throw Error("Invalid alert signature or freshness");
  const parsed=JSON.parse(body);if(!exact(parsed,["format","id","category","state","observedAt"])||parsed.format!=="profitpilot-alert-v1")throw Error("Invalid alert payload");
  const {format,...event}=parsed;
  validateEvent(event);if((headers["Idempotency-Key"]??headers["idempotency-key"])!==event.id)throw Error("Invalid idempotency key");
@@ -85,7 +85,7 @@ function privateState(path){
 }
 function persist(dir,state){
  validateState(state);const temp=join(dir,"state-"+randomUUID()+".tmp");
- try{writeFileSync(temp,JSON.stringify(state)+"\n",{mode:0o600,flag:"wx",flush:true});renameSync(temp,join(dir,"state.json"));}
+ try{writeFileSync(temp,JSON.stringify(state)+"\n",{mode:0o600,flag:"wx",flush:true});renameSync(temp,join(dir,"state.json"));const fd=openSync(dir,"r");try{fsyncSync(fd);}finally{closeSync(fd);}}
  finally{if(existsSync(temp))unlinkSync(temp);}
 }
 export async function runAlertCycle({dir,read,deliver}){
