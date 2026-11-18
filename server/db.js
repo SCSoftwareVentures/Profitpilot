@@ -48,6 +48,7 @@ async function tenantTransaction(tenantId,subject,fn,identity){
   await client.query("SET LOCAL idle_in_transaction_session_timeout = '5s'");
   await client.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.tenant_subject',$2,true),set_config('app.tenant_expires',$3,true),set_config('app.tenant_nonce',$4,true),set_config('app.tenant_key_id',$5,true),set_config('app.tenant_signature',$6,true)",[tenantId,subject,expires,nonce,keyId,signature]);
   if(identity&&!(await checkIdentitySession(identity,client)))throw Object.assign(new Error("Session revoked or unavailable"),{status:403});
+  if(identity&&(await client.query("SELECT private.lock_tenant_available($1) AS available",[tenantId])).rows[0]?.available!==true)throw Object.assign(new Error("Tenant access unavailable"),{status:403});
   const result=await fn(client);
   await client.query("COMMIT");
   return result;
