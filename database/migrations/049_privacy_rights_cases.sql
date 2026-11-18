@@ -84,7 +84,7 @@ CREATE TRIGGER privacy_rights_outcome_immutable BEFORE UPDATE OR DELETE OR TRUNC
 -- subject identifiers, request documents or response content are stored.
 CREATE FUNCTION private.privacy_rights_scope(p_action text,p_kind text,p_reason text,p_evidence text)
 RETURNS text LANGUAGE sql IMMUTABLE SET search_path=pg_catalog AS $fn$
- SELECT encode(public.digest(convert_to(jsonb_build_array('privacy-rights-v1',p_action,p_kind,p_reason,p_evidence)::text,'UTF8'),'sha256'),'hex')
+ SELECT encode(public.digest(convert_to('privacy-rights-v1'||E'\n'||p_action||E'\n'||coalesce(p_kind,'')||E'\n'||coalesce(p_reason,'')||E'\n'||coalesce(p_evidence,''),'UTF8'),'sha256'),'hex')
 $fn$;
 
 CREATE FUNCTION private.api_privacy_rights_case(
