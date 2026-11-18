@@ -117,14 +117,14 @@ app.post("/v1/tenants/:tenantId/calculations",membership,requireRole("owner","ad
  res.status(201).json(result);
  }catch(e){next(e);}});
  
-app.get("/v1/tenants/:tenantId/calculations/:runId",membership,async(req,res,next)=>{try{
+app.get("/v1/tenants/:tenantId/calculations/:runId",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
  const result=await withTenant(req.membership.tenantId,req.identity.subject,client=>client.query("SELECT id,contract_id,site_id,period_start,period_end,formula_version,inputs,outputs,completeness,created_at FROM calculation_runs WHERE id=$1 AND tenant_id=$2",[req.params.runId,req.membership.tenantId]));
  if(!result.rowCount)return res.status(404).json({error:"Calculation run not found"});
  res.json(result.rows[0]);
  }catch(e){next(e);}});
  
 
-app.use((err,req,res,next)=>{const id=randomUUID();process.stderr.write(JSON.stringify({event:"request_error",id,message:err.message})+"\n");const status=err.code==="23505"?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);res.status(status).json({error:status===409?"Conflicting record; refresh and review the current state":status<500?err.message:"Internal server error",reference:id});});
+app.use((err,req,res,next)=>{const id=randomUUID();process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"&&/^[A-Z0-9_]{1,12}$/.test(err.code)?err.code:null})+"\n");const status=err.code==="23505"?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);res.status(status).json({error:status===409?"Conflicting record; refresh and review the current state":status<500?err.message:"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
 if(process.env.NODE_ENV!=="test")app.listen(port,()=>process.stdout.write("ProfitPilot API listening on "+port+"\n"));
 export default app;
