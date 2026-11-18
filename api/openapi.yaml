@@ -519,6 +519,87 @@ paths:
         "429": { description: Capacity reached, use assisted channel }
         "503": { description: Live processing closed or unavailable }
 
+
+  /tenants/{tenantId}/payroll/runs/{runId}/correction-preview:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: runId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Preview scoped payroll supersession
+      description: Synthetic only. Owner/admin with recent MFA; independent source population verification is required outside the system.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [proposalId, reason, authorityEvidenceDigest]
+              properties:
+                proposalId: { type: string, format: uuid }
+                reason: { enum: [allocation_error, source_correction, duplicate_source, privacy_correction] }
+                authorityEvidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        "200": { description: Exact scope and proposal digest with original and proposed aggregate amounts }
+        "400": { description: Invalid request }
+        "403": { description: Authority denied }
+        "409": { description: Evidence conflict }
+        "429": { description: Access budget exceeded }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/payroll/corrections/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read scoped correction order status
+      description: Owner/admin with fresh MFA. Status does not guarantee that authority is still valid; execution revalidates all evidence and approvals.
+      responses:
+        "200": { description: Minimised correction status and scope }
+        "403": { description: Authority denied }
+        "503": { description: Live processing closed or unavailable }
+    post:
+      summary: Request, decide or execute an exact payroll correction
+      description: Separate proposal submitter, requesting operator and independent approver. Execution requires the reviewed replacement digest, fresh MFA and an approved unexpired one-use order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [oldRunId, proposalId, reason, authorityEvidenceDigest, scopeDigest, step, confirm]
+              properties:
+                oldRunId: { type: string, format: uuid }
+                proposalId: { type: string, format: uuid }
+                reason: { enum: [allocation_error, source_correction, duplicate_source, privacy_correction] }
+                authorityEvidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                scopeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                step: { enum: [request, approve, reject, consume] }
+                confirm: { const: true }
+                proposalDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+              allOf:
+                - if:
+                    properties:
+                      step: { const: consume }
+                  then:
+                    required: [proposalDigest]
+                  else:
+                    not:
+                      required: [proposalDigest]
+      responses:
+        "200": { description: Correction status }
+        "400": { description: Invalid request }
+        "401": { description: Authentication required }
+        "403": { description: Authority denied or invalid scope }
+        "409": { description: Conflicting state }
+        "503": { description: Live processing closed or unavailable }
+
 components:
   schemas:
     ErrorResponse:
