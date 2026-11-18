@@ -108,6 +108,47 @@ BEGIN
  BEGIN UPDATE private.financial_retention_reviews SET retain_through=CURRENT_DATE-100 WHERE tenant_id=t; RAISE EXCEPTION 'Review mutable'; EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL; END;
  IF has_function_privilege('profitpilot_app','private.financial_retention_status(uuid,uuid)','EXECUTE') OR has_table_privilege('profitpilot_app','private.financial_retention_reviews','INSERT,UPDATE,DELETE') OR has_table_privilege('profitpilot_app','private.financial_retention_holds','INSERT,UPDATE,DELETE') THEN RAISE EXCEPTION 'Retention internal permissions exposed'; END IF;
  RAISE NOTICE 'Retention register, hold immutability and recovery fingerprint checks passed';
+
+ -- Retention review authority: the requester cannot approve their own order.
+ -- A signature for another record or evidence is not transferable.
+ work_id:=gen_random_uuid();
+ FOR ix IN 1..4 LOOP
+  phase:=CASE ix WHEN 1 THEN 'request' WHEN 2 THEN 'approve' WHEN 3 THEN 'approve' ELSE 'consume' END;
+  actor:=CASE ix WHEN 3 THEN admin_id ELSE owner_id END;
+  who:='ci-correction-'||actor;
+  now_s:=floor(extract(epoch FROM clock_timestamp()))::bigint;expiry:=now_s+20;
+  nonce:=encode(public.gen_random_bytes(16),'hex');session_hash:=encode(public.digest(actor::text,'sha256'),'hex');
+  context_sig:=encode(public.hmac(convert_to(t::text||E'\n'||who||E'\n'||expiry||E'\n'||nonce||E'\n'||key_id_value,'UTF8'),key_bytes,'sha256'),'hex');
+  PERFORM set_config('app.tenant_id',t::text,true),set_config('app.tenant_subject',who,true),set_config('app.tenant_expires',expiry::text,true),set_config('app.tenant_nonce',nonce,true),set_config('app.tenant_key_id',key_id_value,true),set_config('app.tenant_signature',context_sig,true);
+  scope_hash:=private.retention_work_scope(t,runs[2],'review',repeat('d',64),CURRENT_DATE-1,CURRENT_DATE-1,CURRENT_DATE+2);
+  proof:=encode(public.hmac(convert_to('profitpilot-security-work-v1'||E'\n'||t||E'\n'||work_id||E'\n'||'privileged_operation'||E'\n'||scope_hash||E'\n'||phase||E'\n'||who||E'\n'||now_s||E'\n'||now_s||E'\n'||session_hash||E'\n'||expiry||E'\n'||nonce||E'\n'||key_id_value,'UTF8'),key_bytes,'sha256'),'hex');
+  IF ix=2 THEN
+   BEGIN
+    PERFORM private.record_retention_work(t,work_id,runs[2],'review',repeat('d',64),CURRENT_DATE-1,CURRENT_DATE-1,CURRENT_DATE+2,scope_hash,phase,now_s,now_s,session_hash,expiry,nonce,key_id_value,proof);
+    RAISE EXCEPTION 'Self-approval accepted';
+   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  ELSE
+   BEGIN
+    PERFORM private.record_retention_work(t,work_id,runs[2],'review',repeat('e',64),CURRENT_DATE-1,CURRENT_DATE-1,CURRENT_DATE+2,scope_hash,phase,now_s,now_s,session_hash,expiry,nonce,key_id_value,proof);
+    RAISE EXCEPTION 'Altered retention evidence accepted';
+   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+   PERFORM private.record_retention_work(t,work_id,runs[2],'review',repeat('d',64),CURRENT_DATE-1,CURRENT_DATE-1,CURRENT_DATE+2,scope_hash,phase,now_s,now_s,session_hash,expiry,nonce,key_id_value,proof);
+   IF ix<4 AND EXISTS(SELECT 1 FROM private.financial_retention_reviews WHERE tenant_id=t AND review_id=work_id) THEN RAISE EXCEPTION 'Review committed before consumption'; END IF;
+  END IF;
+ END LOOP;
+ IF NOT EXISTS(SELECT 1 FROM private.financial_retention_reviews WHERE tenant_id=t AND review_id=work_id AND allocation_run_id=runs[2]) THEN RAISE EXCEPTION 'Approved retention review missing'; END IF;
+ BEGIN
+  PERFORM private.record_retention_work(t,work_id,runs[2],'review',repeat('d',64),CURRENT_DATE-1,CURRENT_DATE-1,CURRENT_DATE+2,scope_hash,'consume',now_s,now_s,session_hash,expiry,nonce,key_id_value,proof);
+  RAISE EXCEPTION 'Retention replay accepted';
+ EXCEPTION WHEN unique_violation THEN NULL; END;
+ -- A hold takes effect without waiting for another reviewer.
+ work_id:=gen_random_uuid(); phase:='request';
+ scope_hash:=private.retention_work_scope(t,runs[2],'hold',repeat('f',64),NULL,NULL,NULL);
+ proof:=encode(public.hmac(convert_to('profitpilot-security-work-v1'||E'\n'||t||E'\n'||work_id||E'\n'||'privileged_operation'||E'\n'||scope_hash||E'\n'||phase||E'\n'||who||E'\n'||now_s||E'\n'||now_s||E'\n'||session_hash||E'\n'||expiry||E'\n'||nonce||E'\n'||key_id_value,'UTF8'),key_bytes,'sha256'),'hex');
+ PERFORM private.record_retention_work(t,work_id,runs[2],'hold',repeat('f',64),NULL,NULL,NULL,scope_hash,phase,now_s,now_s,session_hash,expiry,nonce,key_id_value,proof);
+ IF private.financial_retention_status(t,runs[2])->>'status' IS DISTINCT FROM 'hold-recorded' OR private.verify_audit_chain(t) IS DISTINCT FROM true THEN RAISE EXCEPTION 'Authenticated hold or audit missing'; END IF;
+ RAISE NOTICE 'Scoped retention review authority, self-approval denial, replay denial and immediate hold passed';
+
  RAISE NOTICE 'Atomic payroll supersession, bypass denial, rollback, replay, stale-report fence, audit and original evidence immutability checks passed';
 END $test$;
 -- Check deferred link to the new confirmation receipt before rolling back.

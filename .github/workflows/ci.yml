@@ -183,6 +183,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/051_sensitive_recovery_fence.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/052_payroll_correction_operator_api.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/053_financial_retention_register.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/054_retention_work_authority.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
