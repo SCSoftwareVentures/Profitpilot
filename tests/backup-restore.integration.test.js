@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {createHmac,randomBytes} from "node:crypto";
+import {createHmac,randomBytes,generateKeyPairSync} from "node:crypto";
+import {readPrivacyInventory,signPrivacyRecovery,privacyRecoveryDigest,replayPrivacyRecovery} from "../scripts/privacy-recovery.js";
 import pg from "pg";
 
 const enabled=Boolean(process.env.TEST_RESTORE_ADMIN_DATABASE_URL);
@@ -69,13 +70,6 @@ test("synthetic logical backup restores all source rows and preserves tenant bou
   await restored.query("SELECT private.set_import_disposal_hold($1,$2,true,'CI_EXPIRY_HOLD')",[tenant,expiryBatch]);
   await assert.rejects(()=>restored.query("SELECT private.replay_quarantine_expiry($1,$2,$3,$4)",[tenant,expiryBatch,receipt.file_sha256,receipt.disposed_at]),/Active legal hold/);
   await restored.query("SELECT private.set_import_disposal_hold($1,$2,false,'CI_EXPIRY_RELEASE')",[tenant,expiryBatch]);
-  const replayArgs=[tenant,expiryBatch,receipt.file_sha256,receipt.disposed_at];
-  assert.equal((await restored.query("SELECT private.replay_quarantine_expiry($1,$2,$3,$4) AS changed",replayArgs)).rows[0].changed,true);
-  assert.equal((await restored.query("SELECT private.replay_quarantine_expiry($1,$2,$3,$4) AS changed",replayArgs)).rows[0].changed,false);
-  assert.deepEqual((await restored.query("SELECT scan_state,ciphertext FROM private.quarantined_files WHERE tenant_id=$1 AND batch_id=$2",[tenant,expiryBatch])).rows[0],{scan_state:"disposed",ciphertext:null});
-  await assert.rejects(()=>restored.query("UPDATE private.quarantined_files SET scan_state='pending',ciphertext=decode('aa','hex'),disposed_at=NULL WHERE tenant_id=$1 AND batch_id=$2",[tenant,expiryBatch]),/immutable|check constraint/);
-  await assert.rejects(()=>restored.query("DELETE FROM private.quarantine_expiry_receipts WHERE tenant_id=$1 AND batch_id=$2",[tenant,expiryBatch]),/append-only/i);
-  assert.equal((await restored.query("SELECT id FROM public.import_batches WHERE tenant_id=$1 AND id=$2",[tenant,expiryBatch])).rowCount,1);
   // Snapshot predates disposal: authoritative source ledger is consulted after restore.
   const batch="f831ab34-efb8-48b4-9979-434711943ea2";
   assert.equal((await restored.query("SELECT id FROM public.import_batches WHERE tenant_id=$1 AND id=$2",[tenant,batch])).rowCount,1);
@@ -83,7 +77,39 @@ test("synthetic logical backup restores all source rows and preserves tenant bou
   const tombstone=(await source.query("SELECT file_sha256,authority_ref,disposed_at::text AS disposed_at FROM private.import_disposal_tombstones WHERE tenant_id=$1 AND batch_id=$2",[tenant,batch])).rows[0];
   const args=[tenant,batch,tombstone.file_sha256,tombstone.authority_ref,tombstone.disposed_at];
   await assert.rejects(()=>restored.query("SELECT private.replay_import_disposal($1,$2,$3,$4,$5)",[tenant,batch,"0".repeat(64),tombstone.authority_ref,tombstone.disposed_at]),/does not match/);
-  assert.equal((await restored.query("SELECT private.replay_import_disposal($1,$2,$3,$4,$5) AS removed",args)).rows[0].removed,1);
+  // Authoritative hold issued after the snapshot, alongside two deletion receipts.
+  const held=(await source.query("SELECT b.id FROM public.import_batches b WHERE b.tenant_id=$1 AND b.id NOT IN ($2,$3) AND NOT EXISTS(SELECT 1 FROM private.import_disposal_controls h WHERE h.tenant_id=b.tenant_id AND h.batch_id=b.id AND h.hold_active) ORDER BY b.id LIMIT 1",[tenant,batch,expiryBatch])).rows[0].id;
+  await source.query("SELECT private.set_import_disposal_hold($1,$2,true,'CI_NEW_HOLD')",[tenant,held]);
+  const reader=await source.connect();
+  let inventory;
+  try{
+   await reader.query("SET ROLE profitpilot_recovery_reader");
+   inventory=await readPrivacyInventory(reader);
+   await assert.rejects(()=>reader.query("SELECT * FROM private.import_disposal_tombstones"),/permission denied/i);
+   await assert.rejects(()=>reader.query("SELECT * FROM public.raw_import_rows"),/permission denied/i);
+   await assert.rejects(()=>reader.query("SELECT private.set_import_disposal_hold($1,$2,false,'CI_BAD')",[tenant,held]),/permission denied/i);
+  }finally{await reader.query("RESET ROLE");reader.release();}
+  await assert.rejects(()=>runtime.query("SELECT private.privacy_recovery_inventory()"),/permission denied/i);
+  const {privateKey,publicKey}=generateKeyPairSync("ed25519");
+  const backupSha256=process.env.TEST_RESTORE_BACKUP_SHA256;
+  const bind=doc=>({backupSha256,expectedManifestSha256:privacyRecoveryDigest(doc)});
+  const packageDoc=signPrivacyRecovery(inventory,backupSha256,privateKey);
+  const incorrect=signPrivacyRecovery({...inventory,disposals:inventory.disposals.map(d=>d.batch_id===batch?{...d,file_sha256:"0".repeat(64)}:d)},backupSha256,privateKey);
+  await assert.rejects(()=>replayPrivacyRecovery(restored,incorrect,publicKey,bind(incorrect)),/does not match/);
+  assert.equal((await restored.query("SELECT count(*)::int AS n FROM private.import_disposal_controls WHERE tenant_id=$1 AND batch_id=$2 AND hold_active",[tenant,held])).rows[0].n,0,"a failed package rolls back new holds");
+  assert.equal((await restored.query("SELECT scan_state FROM private.quarantined_files WHERE batch_id=$1",[expiryBatch])).rows[0].scan_state,"pending");
+  assert.deepEqual(await replayPrivacyRecovery(restored,packageDoc,publicKey,bind(packageDoc)),{holds:1,disposals:1,expiries:1});
+  assert.deepEqual(await replayPrivacyRecovery(restored,packageDoc,publicKey,bind(packageDoc)),{holds:0,disposals:0,expiries:0});
+  assert.deepEqual(await readPrivacyInventory(restored),inventory);
+  assert.equal((await restored.query("SELECT hold_active FROM private.import_disposal_controls WHERE tenant_id=$1 AND batch_id=$2",[tenant,held])).rows[0].hold_active,true);
+  await assert.rejects(()=>restored.query("DELETE FROM private.import_disposal_tombstones WHERE batch_id=$1",[batch]),/append-only/i);
+  await assert.rejects(()=>restored.query("UPDATE private.import_disposal_events SET authority_ref='CI_TAMPER' WHERE batch_id=$1",[batch]),/append-only/i);
+  const replayArgs=[tenant,expiryBatch,receipt.file_sha256,receipt.disposed_at];
+  assert.equal((await restored.query("SELECT private.replay_quarantine_expiry($1,$2,$3,$4) AS changed",replayArgs)).rows[0].changed,false);
+  assert.deepEqual((await restored.query("SELECT scan_state,ciphertext FROM private.quarantined_files WHERE tenant_id=$1 AND batch_id=$2",[tenant,expiryBatch])).rows[0],{scan_state:"disposed",ciphertext:null});
+  await assert.rejects(()=>restored.query("UPDATE private.quarantined_files SET scan_state='pending',ciphertext=decode('aa','hex'),disposed_at=NULL WHERE tenant_id=$1 AND batch_id=$2",[tenant,expiryBatch]),/immutable|check constraint/);
+  await assert.rejects(()=>restored.query("DELETE FROM private.quarantine_expiry_receipts WHERE tenant_id=$1 AND batch_id=$2",[tenant,expiryBatch]),/append-only/i);
+  assert.equal((await restored.query("SELECT id FROM public.import_batches WHERE tenant_id=$1 AND id=$2",[tenant,expiryBatch])).rowCount,1);
   assert.equal((await restored.query("SELECT private.replay_import_disposal($1,$2,$3,$4,$5) AS removed",args)).rows[0].removed,0);
   assert.equal((await restored.query("SELECT id FROM public.import_batches WHERE tenant_id=$1 AND id=$2",[tenant,batch])).rowCount,0);
   assert.equal((await restored.query("SELECT id FROM public.raw_import_rows WHERE tenant_id=$1 AND batch_id=$2",[tenant,batch])).rowCount,0);
