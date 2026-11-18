@@ -24,7 +24,9 @@ const expected=new Map([
   ["GET /v1/tenants/:tenantId/privacy/account","step-up"],
   ["POST /v1/tenants/:tenantId/privacy/account/correct-email","step-up"],
   ["POST /v1/tenants/:tenantId/privacy/invoices/:batchId/disposal-preview","step-up"],
-  ["POST /v1/tenants/:tenantId/privacy/invoices/:batchId/disposals/:orderId","step-up"]
+  ["POST /v1/tenants/:tenantId/privacy/invoices/:batchId/disposals/:orderId","step-up"],
+  ["POST /v1/tenants/:tenantId/privacy/cases/:caseId","step-up"],
+  ["GET /v1/tenants/:tenantId/privacy/cases/:caseId","step-up"]
 ]);
 
 test("every registered API endpoint has an explicit reviewed authorization classification",()=>{
