@@ -99,6 +99,24 @@ test("synthetic logical backup restores all source rows and preserves tenant bou
   const securityBinding={backupSha256:archive,expectedManifestSha256:securityRecoveryDigest(securityDoc)};
   await assert.rejects(()=>replaySecurityRecovery(restored,securityDoc,keys.publicKey,{...securityBinding,expectedManifestSha256:"0".repeat(64)}),/binding/);
   assert.equal(await isSessionActive(),true);
+  // Post-snapshot case history or an account correction cannot be silently lost.
+  const sensitiveSource=await source.connect();
+  try{
+   await sensitiveSource.query("BEGIN");
+   await sensitiveSource.query("INSERT INTO private.privacy_rights_cases(tenant_id,id,kind,channel,opened_by) VALUES($1,$2,'access','self',$3)",[tenant,randomUUID(),uid]);
+   const updated=await readSecurityInventory(sensitiveSource);
+   assert.notEqual(updated.sensitive[0].digest,secInventory.sensitive[0].digest);
+   const newer=signSecurityRecovery(updated,archive,keys.privateKey);
+   await assert.rejects(()=>replaySecurityRecovery(restored,newer,keys.publicKey,{backupSha256:archive,expectedManifestSha256:securityRecoveryDigest(newer)}),/isolated/);
+   assert.equal(await isSessionActive(),true);
+   await sensitiveSource.query("ROLLBACK");
+   await sensitiveSource.query("BEGIN");
+   await sensitiveSource.query("UPDATE public.users SET email='corrected@example.invalid' WHERE id=$1",[uid]);
+   const changedEmail=await readSecurityInventory(sensitiveSource);
+   assert.notEqual(changedEmail.sensitive[0].digest,secInventory.sensitive[0].digest);
+   const emailDoc=signSecurityRecovery(changedEmail,archive,keys.privateKey);
+   await assert.rejects(()=>replaySecurityRecovery(restored,emailDoc,keys.publicKey,{backupSha256:archive,expectedManifestSha256:securityRecoveryDigest(emailDoc)}),/isolated/);
+  }finally{await sensitiveSource.query("ROLLBACK");sensitiveSource.release();}
   const applied=await replaySecurityRecovery(restored,securityDoc,keys.publicKey,securityBinding);
   assert.equal(applied.sessions,1);assert.equal(applied.incidents,1);
   assert.ok(Object.values(await replaySecurityRecovery(restored,securityDoc,keys.publicKey,securityBinding)).every(n=>n===0));
