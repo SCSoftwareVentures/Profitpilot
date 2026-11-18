@@ -120,3 +120,23 @@ patched automatically. Review vulnerability reports, inventory and upstream
 security updates regularly; explicitly replace digests and rerun all gates.
 A production registry, signed release provenance, retention and independent
 penetration testing remain deployment acceptance work.
+
+### Container vulnerability remediation
+
+CI #1605 reported 11 HIGH findings in npm's global build-tool dependencies.
+CI #1613 verified zero HIGH/CRITICAL findings in the minimized API image, but
+reported 25 HIGH and one CRITICAL Go standard-library finding in PostgreSQL's
+bundled gosu binary. No suppressions or scanner exclusions were added.
+
+The reviewed remediation retains the digest-pinned upstream PostgreSQL base
+and replaces the obsolete runtime utility with Alpine's signed su-exec
+package, pinned to 0.3-r0. PostgreSQL's upstream initialization and entrypoint
+are unchanged. The local bootstrap, CI database integration and vulnerability
+scan all use this custom Dockerfile. CI verifies the privilege drop (effective
+UID/GID, no root supplementary group, actual PostgreSQL PID 1 ownership,
+including after TLS restart), migrations, recovery and TLS. Do not use the
+old unmodified database image. Do not report remediation as verified until
+the complete gate for the resulting commit passes. The replacement removes
+the binary from the final runtime filesystem; the inherited base layers remain.
+Package installation uses the distribution's signed APK metadata; the final
+built image still requires an immutable release digest and independent review.
