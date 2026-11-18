@@ -84,6 +84,7 @@ jobs:
         run: |
           set -eu
           docker build --pull -f database/Dockerfile.postgres -t profitpilot-postgres:ci database
+          test "$(docker image inspect profitpilot-postgres:ci --format '{{len .RootFS.Layers}}')" = 1
           docker run -d --name profitpilot-postgres-ci -p 127.0.0.1:5432:5432 -e POSTGRES_DB=profitpilot -e POSTGRES_USER=profitpilot_admin -e POSTGRES_PASSWORD=ci-admin-password profitpilot-postgres:ci
           export PGPASSWORD=ci-admin-password
           for attempt in $(seq 1 45); do
@@ -92,11 +93,13 @@ jobs:
           done
           psql -h 127.0.0.1 -U profitpilot_admin -d profitpilot -v ON_ERROR_STOP=1 -c 'SELECT 1'
           docker exec profitpilot-postgres-ci sh -ec '
-            test "$(readlink /usr/local/bin/gosu)" = /sbin/su-exec
-            test "$(gosu postgres id -u)" = "$(id -u postgres)"
-            test "$(gosu postgres id -g)" = "$(id -g postgres)"
+            test ! -e /usr/local/bin/gosu
+            test ! -L /usr/local/bin/gosu
+            test -x /sbin/su-exec
+            test "$(su-exec postgres id -u)" = "$(id -u postgres)"
+            test "$(su-exec postgres id -g)" = "$(id -g postgres)"
             test "$(id -u postgres)" != 0
-            case " $(gosu postgres id -G) " in *" 0 "*) exit 1;; esac
+            case " $(su-exec postgres id -G) " in *" 0 "*) exit 1;; esac
             test "$(awk "/^Uid:/ {print \$2}" /proc/1/status)" = "$(id -u postgres)"
             test "$(awk "/^Gid:/ {print \$2}" /proc/1/status)" = "$(id -g postgres)"
           '
@@ -425,6 +428,8 @@ jobs:
           set -eu
           SCANNER="$RUNNER_TEMP/profitpilot-trivy"
           docker build --pull -f database/Dockerfile.postgres -t profitpilot-postgres:scan database
+          test "$(docker image inspect profitpilot-postgres:scan --format '{{len .RootFS.Layers}}')" = 1
+          docker run --rm --network none --entrypoint sh profitpilot-postgres:scan -ec 'test ! -e /usr/local/bin/gosu; test ! -L /usr/local/bin/gosu; test -x /sbin/su-exec; postgres --version'
           result=0
           "$SCANNER" image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed=false --exit-code 1 --no-progress --timeout 5m --ignorefile /dev/null profitpilot-api:scan || result=1
           "$SCANNER" image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed=false --exit-code 1 --no-progress --timeout 5m --ignorefile /dev/null profitpilot-postgres:scan || result=1
