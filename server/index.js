@@ -11,6 +11,7 @@ import {validateProductionSecrets} from "./production-config.js";
 import {MAX_BATCH_ROWS,createRequestAdmission,enforceJsonBudget} from "./request-budget.js";
 import {proxyTrust,corsOrigins,createBoundedServer} from "./network-boundary.js";
 import {importIntakeGate,promotionProof} from "./intake-security.js";
+import {coreWorkspaceGate,workspaceInput,validSetupId} from "./core-workspace.js";
 import {createReadinessGuard} from "./readiness-guard.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
@@ -38,6 +39,7 @@ app.get("/health",async(req,res)=>{try{if(process.env.NODE_ENV==="production"){i
 app.use("/v1",authRequired());
 app.use("/v1",sessionRequired(checkIdentitySession));
 app.use("/v1/tenants/:tenantId/imports",importIntakeGate());
+app.use("/v1/tenants/:tenantId/workspaces",coreWorkspaceGate());
 app.use("/v1",express.json({limit:"100kb",inflate:false}));
 app.use("/v1",enforceJsonBudget);
 const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -70,6 +72,29 @@ app.get("/v1/tenants/:tenantId/contracts",membership,async(req,res,next)=>{try{
  const items=rows.slice(0,size);
  res.json({items,nextCursor:rows.length>size?items[items.length-1].id:null});
  }catch(e){next(e);}});
+// Create a new business/site/contract/draft-version atomically. The client
+// owns the UUID setup key and retries with identical inputs on interruption.
+app.post("/v1/tenants/:tenantId/workspaces",membership,requireRole("owner","admin"),async(req,res,next)=>{
+ const input=workspaceInput(req.body);
+ if(!input)return res.status(400).json({error:"Invalid workspace setup fields"});
+ try{
+  const result=await requestTenant(req,req.membership.tenantId,async c=>(await c.query("SELECT private.create_core_workspace($1,$2,$3::jsonb) AS receipt",[req.membership.tenantId,input.setupId,JSON.stringify(input.data)])).rows[0].receipt);
+  res.status(result.idempotent?200:201).json({...result,versionStatus:"draft"});
+ }catch(e){
+  if(e.code==="42501")return res.status(403).json({error:"Workspace authority denied"});
+  if(["22023","22007","22008"].includes(e.code))return res.status(400).json({error:"Invalid workspace setup fields"});
+  next(e);
+ }
+});
+app.get("/v1/tenants/:tenantId/workspaces/:setupId",membership,async(req,res,next)=>{
+ if(!validSetupId(req.params.setupId)||Object.keys(req.query).length)return res.status(400).json({error:"Invalid workspace lookup"});
+ try{
+  const result=await requestTenant(req,req.membership.tenantId,async db=>(await db.query(
+   "SELECT b.id AS business_id,b.name AS business_name,s.id AS site_id,s.name AS site_name,c.id AS contract_id,c.customer_name,v.id AS version_id,v.version_no,v.effective_from::text,v.price::text,v.currency,v.tax_basis,v.billing_basis,CASE WHEN v.approved_at IS NOT NULL AND v.approved_by IS NOT NULL THEN 'approved' ELSE 'draft' END AS version_status FROM public.audit_events e JOIN public.contracts c ON c.tenant_id=e.tenant_id AND c.id=e.object_id JOIN public.businesses b ON b.tenant_id=c.tenant_id AND b.id=c.business_id JOIN public.sites s ON s.tenant_id=b.tenant_id AND s.business_id=b.id AND s.id=(e.metadata->>'siteId')::uuid JOIN public.contract_versions v ON v.tenant_id=c.tenant_id AND v.contract_id=c.id AND v.id=(e.metadata->>'versionId')::uuid WHERE e.tenant_id=$1 AND e.object_id=$2 AND e.action='core_workspace_created' AND e.object_type='contract'",[req.membership.tenantId,req.params.setupId])).rows[0]);
+  if(!result)return res.status(404).json({error:"Workspace not found"});
+  res.json(result);
+ }catch(e){next(e);}
+});
 app.post("/v1/tenants/:tenantId/imports",membership,requireRole("owner","admin","analyst"),async(req,res,next)=>{
  try{
   const {sourceType,fileName,sha256,permissionReference,periodStart,periodEnd}=req.body||{};
