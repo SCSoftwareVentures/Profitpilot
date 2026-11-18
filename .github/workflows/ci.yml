@@ -168,6 +168,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/039_live_security_catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/040_emergency_tenant_containment.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/041_security_command_snapshot.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/042_security_catalog_internal_integrity.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
@@ -297,6 +298,7 @@ jobs:
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/emergency-containment.integration.test.js
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/security-command-centre.integration.test.js
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/emergency-race.integration.test.js
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/worker-credential-boundary.integration.test.js
 
       - name: Prepare quarantine expiry recovery fixture
         env:
@@ -407,6 +409,7 @@ jobs:
 
   supply-chain:
     name: Container and software supply-chain audit
+    needs: [verify]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -504,7 +507,7 @@ jobs:
   security-gate:
     name: Security CI release gate
     runs-on: ubuntu-latest
-    needs: [verify, database, supply-chain]
+    needs: [verify, database, supply-chain, provenance]
     if: ${{ always() }}
     permissions:
       contents: read
@@ -514,6 +517,8 @@ jobs:
           VERIFY_RESULT: ${{ needs.verify.result }}
           DATABASE_RESULT: ${{ needs.database.result }}
           SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
+          PROVENANCE_RESULT: ${{ needs.provenance.result }}
+          PROVENANCE_REQUIRED: ${{ github.repository == 'luxhustle01-ux/Profitpilot' && ((github.event_name == 'push' && github.ref == 'refs/heads/security/tenant-isolation-release-gate-20261118') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'security/tenant-isolation-release-gate-20261118')) }}
           TESTED_SHA: ${{ github.sha }}
         run: |
           set -eu
@@ -523,12 +528,14 @@ jobs:
           test "$VERIFY_RESULT" = success
           test "$DATABASE_RESULT" = success
           test "$SUPPLY_CHAIN_RESULT" = success
+          if [ "$PROVENANCE_REQUIRED" = true ]; then test "$PROVENANCE_RESULT" = success; else test "$PROVENANCE_RESULT" = skipped; fi
           {
             echo "## ProfitPilot security CI gate"
             echo "- Commit: \`$TESTED_SHA\`"
             echo "- Node.js application checks: $VERIFY_RESULT"
             echo "- PostgreSQL, tenant RLS, identity/session revocation, audit chains/checkpoints, authenticated API, distributed limits, key lifecycle, invoice privacy boundary, retention/holds/disposal, MFA-gated export, encrypted file quarantine, scanner protocol, strict CSV preflight, approved manifest promotion and expiry, encrypted synthetic recovery and revocation/tombstone replay, TLS and container checks: $DATABASE_RESULT"
             echo "- Container and software supply-chain audit: $SUPPLY_CHAIN_RESULT"
+            echo "- Signed candidate provenance: $PROVENANCE_RESULT (required: $PROVENANCE_REQUIRED)"
             echo "- Scope: automated repository CI only; not penetration testing or production certification"
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -537,7 +544,7 @@ jobs:
     name: Signed candidate provenance and independent byte verification
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [security-gate]
+    needs: [verify, database, supply-chain]
     if: ${{ github.repository == 'luxhustle01-ux/Profitpilot' && ((github.event_name == 'push' && github.ref == 'refs/heads/security/tenant-isolation-release-gate-20261118') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'security/tenant-isolation-release-gate-20261118')) }}
     permissions:
       contents: read
