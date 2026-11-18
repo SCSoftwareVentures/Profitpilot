@@ -12,7 +12,7 @@ test("all production import paths reject before parsing, without disabling other
  app.use("/v1/tenants/:tenantId/imports",importIntakeGate({NODE_ENV:"production",QUARANTINE_UPLOADS_ENABLED:"true",ALLOW_LIVE_IMPORTS:"true"}));
  app.use((req,res,next)=>{parsed++;next();});
  app.use(express.json());
- app.post("/v1/tenants/:tenantId/imports/*rest",(req,res)=>{routed++;res.sendStatus(200);});
+ app.use("/v1/tenants/:tenantId/imports",(req,res)=>{routed++;res.sendStatus(200);});
  app.get("/health",(req,res)=>res.sendStatus(200));
  const server=app.listen(0,"127.0.0.1");await new Promise(resolve=>server.once("listening",resolve));
  try{
