@@ -67,6 +67,12 @@ test("synthetic logical backup restores all source rows and preserves tenant bou
   await assert.rejects(()=>restored.query("DELETE FROM private.financial_retention_holds WHERE tenant_id=$1 AND allocation_run_id=$2",retainedArgs),e=>e.code==="55000");
   assert.equal((await runtime.query("SELECT id FROM public.contracts")).rowCount,0,"unsigned connections must not enumerate restored contracts");
   await assert.rejects(()=>runtime.query("SELECT secret FROM private.tenant_context_keys"),/permission denied/i);
+  const delivery=(await restored.query("SELECT d.tenant_id,d.case_id,d.order_id FROM private.privacy_delivery_authorizations d JOIN public.tenants t ON t.id=d.tenant_id WHERE t.legal_name='Synthetic assisted privacy delivery'")).rows;
+  assert.equal(delivery.length,1,"populated assisted release authority must survive encrypted restore");
+  assert.equal((await restored.query("SELECT private.verify_audit_chain($1) AS ok",[delivery[0].tenant_id])).rows[0].ok,true);
+  await assert.rejects(()=>runtime.query("SELECT * FROM private.privacy_delivery_authorizations"),/permission denied/i);
+  await assert.rejects(()=>restored.query("DELETE FROM private.privacy_delivery_authorizations WHERE tenant_id=$1 AND order_id=$2",[delivery[0].tenant_id,delivery[0].order_id]),e=>e.code==="55000");
+  console.log("Assisted privacy release authorization and immutable audit restored");
   const tenant="33333333-3333-4333-8333-333333333333",subject="isolation-tenant-c";
   const result=await restored.query("SELECT key_id,secret FROM private.tenant_context_keys WHERE active ORDER BY key_id LIMIT 1");
   assert.equal(result.rowCount,1,"restored database must have active tenant context key");

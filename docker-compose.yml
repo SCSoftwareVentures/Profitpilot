@@ -71,6 +71,7 @@ services:
       - ./database/migrations/053_financial_retention_register.sql:/docker-entrypoint-initdb.d/055-financial-retention-register.sql:ro
       - ./database/migrations/054_retention_work_authority.sql:/docker-entrypoint-initdb.d/056-retention-work-authority.sql:ro
       - ./database/migrations/055_financial_dependency_backup_plan.sql:/docker-entrypoint-initdb.d/057-financial-dependency-backup-plan.sql:ro
+      - ./database/migrations/056_privacy_delivery_authority.sql:/docker-entrypoint-initdb.d/058-privacy-delivery-authority.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
