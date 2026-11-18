@@ -1,15 +1,17 @@
 -- Migration-time reviewed schema fingerprint. No application data or secret
 -- values are included. Runtime can ask for a boolean verification only.
 BEGIN;
--- pg_dump/pg_restore re-parses the SQL-standard substring expression
--- in this legacy check; use an equivalent, unambiguous function form.
--- Keep every validation predicate and revalidate all existing rows.
+-- A named, fingerprinted immutable predicate avoids deparser differences
+-- caused by pg_dump/pg_restore regrouping compound CHECK expressions.
+-- Preserve the original predicate exactly and validate all existing rows.
+CREATE FUNCTION private.payroll_source_key_valid(p_key text)
+RETURNS boolean LANGUAGE sql IMMUTABLE STRICT SET search_path=pg_catalog AS $fn$
+ SELECT length(p_key) BETWEEN 1 AND 128 AND substring(p_key,1,1) ~ '^[A-Za-z0-9]'
+ AND translate(p_key,'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:-','')=''
+$fn$;
+REVOKE ALL ON FUNCTION private.payroll_source_key_valid(text) FROM PUBLIC,profitpilot_app;
 ALTER TABLE public.payroll_source_rows DROP CONSTRAINT payroll_source_rows_source_row_key_check,
- ADD CONSTRAINT payroll_source_rows_source_row_key_check CHECK(
- length(source_row_key) BETWEEN 1 AND 128 AND
- pg_catalog.left(source_row_key,1) ~ '^[A-Za-z0-9]' AND
- translate(source_row_key,'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._:-','')=''
- );
+ ADD CONSTRAINT payroll_source_rows_source_row_key_check CHECK(private.payroll_source_key_valid(source_row_key));
 CREATE TABLE private.security_catalog_baseline(
  singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
  revision integer NOT NULL CHECK(revision=39),
