@@ -105,10 +105,17 @@ BEGIN
   t:=NEW.tenant_id; pool_id:=NEW.payroll_pool_id;
   PERFORM 1 FROM public.payroll_pools WHERE tenant_id=t AND id=pool_id FOR UPDATE;
  ELSIF TG_TABLE_NAME='payroll_pools' THEN
-  t:=OLD.tenant_id; pool_id:=OLD.id;
+  IF TG_OP='INSERT' THEN t:=NEW.tenant_id; batch_id_value:=NEW.batch_id;
+   PERFORM 1 FROM public.import_batches WHERE tenant_id=t AND id=batch_id_value FOR UPDATE;
+  ELSE t:=OLD.tenant_id; pool_id:=OLD.id; END IF;
  ELSIF TG_TABLE_NAME='raw_import_rows' THEN
   IF TG_OP='INSERT' THEN t:=NEW.tenant_id; batch_id_value:=NEW.batch_id;
   ELSE t:=OLD.tenant_id; batch_id_value:=OLD.batch_id; END IF;
+  -- Do not change the invoice staging path.
+  IF NOT EXISTS(SELECT 1 FROM public.import_batches WHERE tenant_id=t AND id=batch_id_value AND source_type='payroll')
+   AND (TG_OP<>'UPDATE' OR NOT EXISTS(SELECT 1 FROM public.import_batches WHERE tenant_id=NEW.tenant_id AND id=NEW.batch_id AND source_type='payroll')) THEN
+   IF TG_OP='DELETE' THEN RETURN OLD; END IF; RETURN NEW;
+  END IF;
   PERFORM 1 FROM public.import_batches WHERE tenant_id=t AND id=batch_id_value FOR UPDATE;
   IF TG_OP='UPDATE' AND ROW(OLD.tenant_id,OLD.batch_id) IS DISTINCT FROM ROW(NEW.tenant_id,NEW.batch_id) THEN
    RAISE EXCEPTION 'Raw payroll evidence cannot be moved' USING ERRCODE='55000'; END IF;
@@ -127,7 +134,7 @@ CREATE TRIGGER payroll_confirmed_line_guard BEFORE INSERT ON public.allocation_l
  FOR EACH ROW EXECUTE FUNCTION private.guard_confirmed_payroll_evidence();
 CREATE TRIGGER payroll_confirmed_source_guard BEFORE INSERT ON public.payroll_source_rows
  FOR EACH ROW EXECUTE FUNCTION private.guard_confirmed_payroll_evidence();
-CREATE TRIGGER payroll_confirmed_pool_guard BEFORE UPDATE OR DELETE ON public.payroll_pools
+CREATE TRIGGER payroll_confirmed_pool_guard BEFORE INSERT OR UPDATE OR DELETE ON public.payroll_pools
  FOR EACH ROW EXECUTE FUNCTION private.guard_confirmed_payroll_evidence();
 -- Runtime invoice staging remains unchanged: the definer can check the
 -- private receipt without giving the runtime role a direct read grant.
