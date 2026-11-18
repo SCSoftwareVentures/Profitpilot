@@ -250,7 +250,7 @@ BEGIN
  WHEN 'invoices' THEN
   IF TG_OP<>'INSERT' THEN linked:=EXISTS(SELECT 1 FROM private.invoice_intake_lines WHERE tenant_id=t AND invoice_id=OLD.id); END IF;
  WHEN 'invoice_lines' THEN
-  IF TG_OP='INSERT' THEN linked:=EXISTS(SELECT 1 FROM private.invoice_intake_lines l JOIN public.import_batches b USING(tenant_id,batch_id) WHERE l.tenant_id=t AND b.status='accepted' AND (l.invoice_id=NEW.invoice_id OR l.raw_row_id=NEW.source_row_id));
+  IF TG_OP='INSERT' THEN linked:=EXISTS(SELECT 1 FROM private.invoice_intake_lines l JOIN public.import_batches b ON b.tenant_id=l.tenant_id AND b.id=l.batch_id WHERE l.tenant_id=t AND b.status='accepted' AND (l.invoice_id=NEW.invoice_id OR l.raw_row_id=NEW.source_row_id));
   ELSE linked:=EXISTS(SELECT 1 FROM private.invoice_intake_lines WHERE tenant_id=t AND (line_id=OLD.id OR invoice_id=OLD.invoice_id)); END IF;
  WHEN 'match_reviews' THEN
   IF TG_OP='INSERT' THEN linked:=EXISTS(SELECT 1 FROM private.invoice_intake_lines WHERE tenant_id=t AND line_id=NEW.invoice_line_id);
