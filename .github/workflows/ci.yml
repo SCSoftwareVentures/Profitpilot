@@ -45,6 +45,22 @@ jobs:
       - name: Audit resolved production dependencies
         run: npm audit --omit=dev --audit-level=high
 
+      - name: Verify OpenAPI YAML structure and reject duplicate mapping keys
+        run: |
+          ruby -rpsych -e '
+            doc=Psych.parse_file("api/openapi.yaml")
+            visit=lambda do |node|
+              if node.is_a?(Psych::Nodes::Mapping)
+                keys=node.children.each_slice(2).map { |k,v| k.value }
+                abort "Duplicate OpenAPI mapping key" unless keys.uniq.length==keys.length
+              end
+              (node.children || []).each { |child| visit.call(child) }
+            end
+            visit.call(doc)
+            spec=Psych.safe_load_file("api/openapi.yaml",aliases:false)
+            abort "Missing OpenAPI root fields" unless %w[openapi info paths components].all? { |key| spec.key?(key) }
+          '
+
       - name: Syntax checks
         run: npm run check
 
