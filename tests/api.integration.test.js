@@ -116,6 +116,24 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(ownBody.items[0].id,contractA);
     const scopedRows=await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT id FROM contracts ORDER BY id"));
     assert.deepEqual(scopedRows.rows.map(row=>row.id),[contractA],"database RLS must hide tenant B contract rows even from a tenant A scoped connection");
+    const secondContract="77777777-7777-4777-8777-777777777778";
+    await admin.query("INSERT INTO contracts(id,tenant_id,business_id,customer_name,status) VALUES ($1,$2,$3,'CI second contract','active')",[secondContract,tenantA,businessA]);
+    const listPath=`/v1/tenants/${tenantA}/contracts`;
+    const page1=await request(listPath+"?limit=1",{subject:"ci-api-reader"});
+    assert.equal(page1.status,200);
+    const firstPage=await page1.json();
+    assert.deepEqual(firstPage.items.map(x=>x.id),[contractA]);
+    assert.equal(firstPage.nextCursor,contractA);
+    const page2=await request(listPath+"?limit=1&cursor="+firstPage.nextCursor,{subject:"ci-api-reader"});
+    assert.equal(page2.status,200);
+    const lastPage=await page2.json();
+    assert.deepEqual(lastPage.items.map(x=>x.id),[secondContract]);
+    assert.equal(lastPage.nextCursor,null);
+    for(const query of ["?limit=101","?limit=0","?limit=1&limit=2","?cursor=bad","?cursor="+contractA+"&cursor="+contractB,"?tenantId="+tenantB]){
+     assert.equal((await request(listPath+query,{subject:"ci-api-reader"})).status,400);
+    }
+    assert.equal((await request(listPath+"?cursor="+contractB,{subject:"ci-api-reader"})).status,200,"foreign cursor is a lower-bound value, not an object lookup");
+    await admin.query("DELETE FROM contracts WHERE tenant_id=$1 AND id=$2",[tenantA,secondContract]);
     const ownIdentityRows=await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT auth_subject FROM users ORDER BY auth_subject"));
     assert.deepEqual(ownIdentityRows.rows.map(row=>row.auth_subject),["ci-api-analyst"],"a signed subject may read only its own global identity row");
     const unscopedIdentityRows=await appPool.query("SELECT auth_subject FROM users");
@@ -386,6 +404,23 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(secondChunkRow.rows[0].row_number,2);
     const invalidStartRow=await request(`/v1/tenants/${tenantA}/imports/${invoiceBatch}/rows`,{subject:"ci-api-analyst",method:"POST",body:{startRowNumber:0,rows:[{invoice_id:"INV-3"}]}});
     assert.equal(invalidStartRow.status,400);
+
+    const validatePath=`/v1/tenants/${tenantA}/imports/${invoiceBatch}/validate`;
+    const validated=await request(validatePath,{subject:"ci-api-analyst",method:"POST"});
+    assert.equal(validated.status,200);
+    const proposed=await validated.json();assert.equal(proposed.newProposals,2);assert.equal(proposed.preservedProposals,0);
+    const review=(await admin.query("SELECT m.id,m.raw_row_id FROM mapping_decisions m JOIN raw_import_rows r ON r.id=m.raw_row_id AND r.tenant_id=m.tenant_id WHERE r.batch_id=$1 ORDER BY r.row_number LIMIT 1",[invoiceBatch])).rows[0];
+    await admin.query("UPDATE mapping_decisions SET decision='accepted',reviewer_id=$1,reviewed_at=clock_timestamp(),reason='CI reviewed mapping' WHERE id=$2",[userA,review.id]);
+    const reviewed=await admin.query("SELECT decision,reviewer_id,reviewed_at,reason FROM mapping_decisions WHERE id=$1",[review.id]);
+    const revalidated=await request(validatePath,{subject:"ci-api-analyst",method:"POST"});
+    assert.equal(revalidated.status,200);
+    const replay=await revalidated.json();assert.equal(replay.newProposals,0);assert.equal(replay.preservedProposals,2);assert.equal(replay.automaticallyAccepted,0);
+    assert.deepEqual((await admin.query("SELECT decision,reviewer_id,reviewed_at,reason FROM mapping_decisions WHERE id=$1",[review.id])).rows,reviewed.rows);
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("UPDATE mapping_decisions SET decision='candidate' WHERE id=$1",[review.id])),/permission denied/i);
+    const insertProposal=(subject,decision,method)=>withTenant(tenantA,subject,c=>c.query("INSERT INTO mapping_decisions(tenant_id,raw_row_id,target_type,decision,confidence,method_version,reason) VALUES($1,$2,'invoice_row',$3,'LOW',$4,'CI proposal') ON CONFLICT DO NOTHING",[tenantA,review.raw_row_id,decision,method]));
+    await assert.rejects(()=>insertProposal("ci-api-analyst","accepted","invoice-validator-0.1.0"),e=>e.code==="42501");
+    await assert.rejects(()=>insertProposal("ci-api-analyst","candidate","unapproved-validator"),e=>e.code==="42501");
+    await assert.rejects(()=>insertProposal("ci-api-reader","candidate","invoice-validator-0.1.0"),e=>e.code==="42501");
 
     // Privacy boundary: fail the whole chunk, never store or echo prohibited values.
     const privateFixture="9".repeat(9);
