@@ -168,3 +168,58 @@ BEGIN
  RETURN manifest.row_count;
 END $fn$;
 
+
+CREATE OR REPLACE FUNCTION private.claim_quarantine_scan()
+RETURNS TABLE(tenant_id uuid,batch_id uuid,file_sha256 text,key_id text,nonce bytea,auth_tag bytea,ciphertext bytea,lease_id uuid)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $fn$
+DECLARE candidate private.quarantined_files%ROWTYPE;
+BEGIN
+ SELECT q.* INTO candidate FROM private.quarantined_files q
+ WHERE NOT EXISTS(SELECT 1 FROM private.tenant_emergency_incidents i WHERE i.tenant_id=q.tenant_id AND i.released_at IS NULL)
+ AND q.created_at>clock_timestamp()-interval '24 hours' AND q.attempts<3
+ AND (q.scan_state IN ('pending','error') OR (q.scan_state='scanning' AND q.lease_until<clock_timestamp()))
+ ORDER BY q.created_at,q.batch_id LIMIT 1 FOR UPDATE SKIP LOCKED;
+ IF NOT FOUND THEN RETURN; END IF;
+ UPDATE private.quarantined_files q SET scan_state='scanning',lease_id=gen_random_uuid(),
+ lease_until=clock_timestamp()+interval '2 minutes',attempts=q.attempts+1
+ WHERE q.tenant_id=candidate.tenant_id AND q.batch_id=candidate.batch_id RETURNING q.* INTO candidate;
+ INSERT INTO private.quarantine_lifecycle_events(tenant_id,batch_id,event_type)
+ VALUES(candidate.tenant_id,candidate.batch_id,'claimed');
+ RETURN QUERY SELECT candidate.tenant_id,candidate.batch_id,candidate.file_sha256,candidate.key_id,candidate.nonce,candidate.auth_tag,candidate.ciphertext,candidate.lease_id;
+END $fn$;
+
+
+CREATE OR REPLACE FUNCTION private.finish_quarantine_scan(p_tenant uuid,p_batch uuid,p_lease uuid,p_verdict text)
+RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $fn$
+BEGIN
+ IF NOT private.lock_tenant_available(p_tenant) THEN RETURN false; END IF;
+ IF p_verdict IS NULL OR p_verdict NOT IN ('clean','infected','error') THEN RAISE EXCEPTION 'Invalid scan verdict'; END IF;
+ UPDATE private.quarantined_files q SET scan_state=p_verdict,lease_id=NULL,lease_until=NULL,scanned_at=clock_timestamp()
+ WHERE q.tenant_id=p_tenant AND q.batch_id=p_batch AND q.scan_state='scanning'
+ AND q.lease_id=p_lease AND q.lease_until>=clock_timestamp();
+ IF NOT FOUND THEN RETURN false; END IF;
+ INSERT INTO private.quarantine_lifecycle_events(tenant_id,batch_id,event_type) VALUES(p_tenant,p_batch,p_verdict);
+ RETURN true;
+END $fn$;
+
+
+CREATE OR REPLACE FUNCTION private.claim_quarantine_promotion()
+RETURNS TABLE(tenant_id uuid,batch_id uuid,file_sha256 text,key_id text,nonce bytea,auth_tag bytea,ciphertext bytea,lease_id uuid)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $fn$
+DECLARE p private.quarantine_promotions%ROWTYPE; q private.quarantined_files%ROWTYPE;
+BEGIN
+ SELECT x.* INTO p FROM private.quarantine_promotions x JOIN private.quarantined_files f ON f.tenant_id=x.tenant_id AND f.batch_id=x.batch_id
+ WHERE NOT EXISTS(SELECT 1 FROM private.tenant_emergency_incidents i WHERE i.tenant_id=x.tenant_id AND i.released_at IS NULL)
+ AND x.attempts<3 AND (x.state='approved' OR (x.state='processing' AND x.lease_until<clock_timestamp()))
+ AND f.scan_state='clean' AND f.content_state='validated' AND f.ciphertext IS NOT NULL
+ AND f.created_at>clock_timestamp()-interval '24 hours'
+ ORDER BY x.approved_at,x.batch_id LIMIT 1 FOR UPDATE OF x SKIP LOCKED;
+ IF NOT FOUND THEN RETURN; END IF;
+ SELECT * INTO q FROM private.quarantined_files f WHERE f.tenant_id=p.tenant_id AND f.batch_id=p.batch_id;
+ UPDATE private.quarantine_promotions x SET state='processing',lease_id=gen_random_uuid(),lease_until=clock_timestamp()+interval '2 minutes',attempts=x.attempts+1
+ WHERE x.tenant_id=p.tenant_id AND x.batch_id=p.batch_id RETURNING x.* INTO p;
+ INSERT INTO private.quarantine_lifecycle_events(tenant_id,batch_id,event_type) VALUES(p.tenant_id,p.batch_id,'promotion_claimed');
+ RETURN QUERY SELECT q.tenant_id,q.batch_id,q.file_sha256,q.key_id,q.nonce,q.auth_tag,q.ciphertext,p.lease_id;
+END $fn$;
+
+
