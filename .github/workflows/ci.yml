@@ -123,6 +123,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/027_audit_checkpoint_reader.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/028_quarantine_expiry_recovery.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/029_private_privilege_boundary.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/030_invoice_batch_budget.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
 
@@ -184,6 +185,12 @@ jobs:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/shared-rate-limit.test.js
+
+      - name: Verify invoice batch resource budget under concurrent writes
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
+        run: |
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/invoice-capacity.integration.test.js
 
       - name: Stress shared security quotas and lock recovery
         env:
