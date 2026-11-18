@@ -14,11 +14,14 @@ export function prepareInvoiceReview(rows, contract) {
   });
 }
 
-export function syntheticPeriodReport({rows, decisions, contract, labourCost = null}) {
+export function syntheticPeriodReport({rows, decisions, contract}) {
   if (!Array.isArray(decisions)) throw new TypeError("Decisions must be an array");
   const reviewed = prepareInvoiceReview(rows, contract);
   const seen = new Set();
-  let eligibleRevenue = 0;
+  const rowIds = reviewed.map(item => String(item.rowNumber));
+  if (new Set(rowIds).size !== rowIds.length) throw new Error("Duplicate source row numbers");
+  if (decisions.some(d => !rowIds.includes(String(d.rowNumber)))) throw new Error("Decision references unknown row");
+  let confirmedInvoiceAmount = 0;
   const entries = reviewed.map(item => {
     const matches = decisions.filter(d => String(d.rowNumber) === String(item.rowNumber));
     if (matches.length > 1) throw new Error("Conflicting or duplicate decisions");
@@ -32,7 +35,7 @@ export function syntheticPeriodReport({rows, decisions, contract, labourCost = n
       const invoiceId = item.record.invoice_id;
       if (seen.has(invoiceId)) throw new Error("Duplicate confirmed invoice ID");
       seen.add(invoiceId);
-      eligibleRevenue = money(eligibleRevenue + Number(item.record.amount));
+      confirmedInvoiceAmount = money(confirmedInvoiceAmount + Number(item.record.amount));
     }
     return {rowNumber:item.rowNumber, invoiceId:item.record.invoice_id ?? null,
       status:item.status === "held" ? "held" : (decision?.status ?? "pending"),
@@ -40,7 +43,7 @@ export function syntheticPeriodReport({rows, decisions, contract, labourCost = n
   });
   // An invoice-only prototype is not an audited contribution or complete revenue measure.
   return {contractId:contract.id, periodStart:contract.periodStart, periodEnd:contract.periodEnd,
-    confirmedInvoiceAmount:money(eligibleRevenue), currency:"AUD",
+    confirmedInvoiceAmount:money(confirmedInvoiceAmount), currency:"AUD",
     eligibleRevenue:null, deliveryCosts:null, contribution:null,
     completeness:"incomplete", exclusions:["Other revenue sources not verified","Payroll and other delivery costs not reconciled"],
     entries};
