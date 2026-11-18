@@ -161,6 +161,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/036_privacy_recovery_inventory.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/037_automated_mapping_integrity.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/038_session_bound_promotion.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/039_live_security_catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
@@ -286,7 +287,7 @@ jobs:
         env:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
-          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/financial-access-budget.integration.test.js tests/actor-threat-containment.integration.test.js
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/financial-access-budget.integration.test.js tests/actor-threat-containment.integration.test.js tests/live-catalog-drift.integration.test.js
 
       - name: Prepare quarantine expiry recovery fixture
         env:
@@ -321,6 +322,7 @@ jobs:
           psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -f tests/rls-policy-inventory.catalog.sql
           psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
+          test "$(psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -Atc 'SELECT private.verify_security_catalog()')" = t
           psql "$RESTORE_APP_URL" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.runtime.sql
           TEST_RESTORE_BACKUP_SHA256="$(sha256sum "$ARCHIVE" | cut -d ' ' -f 1)" TEST_RESTORE_ADMIN_DATABASE_URL="$RESTORE_ADMIN_URL" TEST_RESTORE_APP_DATABASE_URL="$RESTORE_APP_URL" node --test tests/backup-restore.integration.test.js
           psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DROP DATABASE profitpilot_restore_ci'
