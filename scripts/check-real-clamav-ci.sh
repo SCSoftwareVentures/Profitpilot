@@ -3,33 +3,35 @@
 # current official definitions. This is an ephemeral CI daemon, not a
 # production deployment. No freshness bypass or substitute test signatures.
 set -euo pipefail
+trap 'echo "Scanner acceptance preparation failed at line $LINENO" >&2' ERR
 umask 077
 WORK="$(mktemp -d /tmp/pp-clamav-XXXXXX)"
 PID=""
 cleanup(){ if [ -n "$PID" ]; then kill "$PID" 2>/dev/null || true; wait "$PID" 2>/dev/null || true; fi; rm -rf "$WORK"; }
 trap cleanup EXIT
-# Freshclam's distribution setup may already have the current official
-# database; refresh only if the required version is missing or stale.
-if ! sudo clamd --version | node -e 'let s="";process.stdin.on("data",b=>s+=b);process.stdin.on("end",async()=>{const {signaturesFresh}=await import("./server/clamav.js");if(!signaturesFresh(s.trim()))process.exitCode=1})'; then
-  sudo freshclam --stdout
-fi
+# Ensure the distro updater has completed all three official databases.
+# Current VERSION alone does not establish that main and bytecode exist.
+sudo freshclam --stdout
 test -d /var/lib/clamav
-# The distro freshclam user owns signature files. Copy only the official
-# database files into a private, runner-owned directory; never broaden
-# the system database permissions or run the scanner daemon as root.
 mkdir "$WORK/db"
 for name in main daily bytecode; do
   selected=""
-  for extension in cvd cld; do
+  # An incremental CLD may coexist with the original CVD. Prefer the
+  # official updated CLD; freshness is subsequently checked by the API.
+  for extension in cld cvd; do
     candidate="/var/lib/clamav/$name.$extension"
     if sudo test -f "$candidate"; then
-      test -z "$selected"
       sudo test ! -L "$candidate"
       selected="$candidate"
+      break
     fi
   done
-  test -n "$selected"
+  if [ -z "$selected" ]; then
+    echo "Required official signature database missing: $name" >&2
+    exit 1
+  fi
   sudo install -m 0600 -o "$(id -u)" -g "$(id -g)" "$selected" "$WORK/db/"
+  echo "Prepared official signature database: $(basename "$selected")"
 done
 cat > "$WORK/clamd.conf" <<EOF
 Foreground yes
