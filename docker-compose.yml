@@ -62,6 +62,7 @@ services:
       - ./database/migrations/044_recovery_catalog_gate.sql:/docker-entrypoint-initdb.d/046-recovery-catalog-gate.sql:ro
       - ./database/migrations/045_payroll_proposal_review.sql:/docker-entrypoint-initdb.d/047-payroll-proposal-review.sql:ro
       - ./database/migrations/046_payroll_attested_confirmation.sql:/docker-entrypoint-initdb.d/048-payroll-attested-confirmation.sql:ro
+      - ./database/migrations/047_security_work_authority.sql:/docker-entrypoint-initdb.d/049-security-work-authority.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
