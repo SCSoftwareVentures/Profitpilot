@@ -262,3 +262,27 @@ authentication timestamp and targeted session revocation while holding the
 actor lock. No access token or raw session ID is persisted. Test cases
 cover proof forgery, cross-batch reuse, targeted revocation after claim and
 an unaffected separate session. This is not live IdP/scanner validation.
+
+### Live database security drift detection
+
+Migration 039 captures a SHA-256 fingerprint of the migration-time security
+catalog (relations, types/defaults, ACLs, policies, triggers, constraints,
+indexes, non-extension functions and function ACLs, reviewed roles/memberships,
+schema/default grants and extensions). No data or secrets are included.
+A private immutable baseline is visible only to administrators; the API can
+call a boolean verifier. CI tests deliberate catalog tampering, then verifies
+the same baseline after a synthetic logical restore. Production starts only
+after this check, key verification and TLS readiness pass. Requests share a
+coalesced readiness result cached for 15 seconds, then fail closed if renewed
+verification fails; negative results are cached for three seconds.
+
+The fingerprint detects drift from the installed baseline, not the trustworthiness
+of an independently compromised migration source or a superuser who can alter
+the baseline/verifier. Only reviewed clean deployments may capture a baseline.
+Each future migration must explicitly advance the baseline and acceptance tests;
+never refresh it to suppress a detected failure. Catalog representation is
+PostgreSQL-version sensitive; a supported server upgrade or intentional role
+or schema change needs reviewed reconciliation. The check does not cancel
+already admitted work and has a bounded polling delay. Production load and
+managed-provider compatibility, independent DDL audit/monitoring, recovery
+authorization and escalation after a mismatch remain operator responsibilities.
