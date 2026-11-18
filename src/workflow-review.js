@@ -18,7 +18,7 @@ export function prepareInvoiceReview(rows, contract) {
     throw new TypeError("Contract identity, site and period are required");
   }
   if (contract.currency !== undefined && contract.currency !== "AUD") throw new Error("Synthetic workflow supports AUD only");
-  if (contract.periodEnd < contract.periodStart) throw new Error("Invalid contract period");
+  if (!/^\\d{4}-\\d{2}-\\d{2}$/.test(contract.periodStart) || !/^\\d{4}-\\d{2}-\\d{2}$/.test(contract.periodEnd) || !Number.isFinite(Date.parse(contract.periodStart+"T00:00:00Z")) || !Number.isFinite(Date.parse(contract.periodEnd+"T00:00:00Z")) || new Date(contract.periodStart+"T00:00:00Z").toISOString().slice(0,10)!==contract.periodStart || new Date(contract.periodEnd+"T00:00:00Z").toISOString().slice(0,10)!==contract.periodEnd || contract.periodEnd < contract.periodStart) throw new Error("Invalid contract period");
   return validateInvoiceRows(rows).map(item => {
     const amount = item.record?.amount;
     if (typeof amount !== "string" && typeof amount !== "number") item.errors.push("Invalid amount type");
