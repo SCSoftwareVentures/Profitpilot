@@ -60,6 +60,7 @@ services:
       - ./database/migrations/042_security_catalog_internal_integrity.sql:/docker-entrypoint-initdb.d/044-security-catalog-internal-integrity.sql:ro
       - ./database/migrations/043_security_recovery_inventory.sql:/docker-entrypoint-initdb.d/045-security-recovery-inventory.sql:ro
       - ./database/migrations/044_recovery_catalog_gate.sql:/docker-entrypoint-initdb.d/046-recovery-catalog-gate.sql:ro
+      - ./database/migrations/045_core_workspace_setup.sql:/docker-entrypoint-initdb.d/047-core-workspace-setup.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
