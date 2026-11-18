@@ -328,7 +328,10 @@ jobs:
           echo "::add-mask::$BACKUP_ENCRYPTION_KEY"
           PG_CONTAINER=profitpilot-postgres-ci
           test -n "$PG_CONTAINER"
+          psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -v persist_recovery_fixture=1 -f tests/payroll-attested-confirmation.sql
+          backup_start=$(date +%s)
           docker exec -e PGPASSWORD "$PG_CONTAINER" pg_dump -h 127.0.0.1 -U profitpilot_admin -Fc profitpilot | node scripts/secure-backup.js encrypt-stdin "$ARCHIVE"
+          restore_start=$(date +%s)
           test -s "$ARCHIVE"
           node scripts/secure-backup.js decrypt "$ARCHIVE" "$DUMP"
           test -s "$DUMP"
@@ -350,6 +353,8 @@ jobs:
           fi
           psql "$RESTORE_APP_URL" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.runtime.sql
           TEST_RESTORE_BACKUP_SHA256="$(sha256sum "$ARCHIVE" | cut -d ' ' -f 1)" TEST_RESTORE_ADMIN_DATABASE_URL="$RESTORE_ADMIN_URL" TEST_RESTORE_APP_DATABASE_URL="$RESTORE_APP_URL" node --test tests/backup-restore.integration.test.js
+          restore_end=$(date +%s)
+          echo "Synthetic encrypted backup duration: $((restore_start-backup_start))s; isolated restore plus security reconciliation: $((restore_end-restore_start))s (not production RTO/RPO)"
           psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DROP DATABASE profitpilot_restore_ci'
 
       - name: Build production API image
