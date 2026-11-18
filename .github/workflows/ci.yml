@@ -384,10 +384,10 @@ jobs:
           WORK="$(mktemp -d)"
           trap 'rm -rf "$WORK"' EXIT
           cd "$WORK"
-          BASE=https://github.com/aquasecurity/trivy/releases/download/v0.65.0
-          ARCHIVE=trivy_0.65.0_Linux-64bit.tar.gz
+          BASE=https://github.com/aquasecurity/trivy/releases/download/v0.69.3
+          ARCHIVE=trivy_0.69.3_Linux-64bit.tar.gz
           curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 2 --max-time 120 "$BASE/$ARCHIVE" -o "$ARCHIVE"
-          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 2 --max-time 120 "$BASE/trivy_0.65.0_checksums.txt" -o checksums.txt
+          curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --retry 2 --max-time 120 "$BASE/trivy_0.69.3_checksums.txt" -o checksums.txt
           awk -v name="$ARCHIVE" '$2==name || $2=="*"name {print}' checksums.txt > selected.txt
           test "$(wc -l < selected.txt)" -eq 1
           sha256sum --check --strict selected.txt
