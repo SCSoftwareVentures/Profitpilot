@@ -3,7 +3,7 @@
 DO $audit$
 DECLARE role_name text; p record; t record; privilege text; allowed boolean; expected text[];
 BEGIN
- FOREACH role_name IN ARRAY ARRAY['profitpilot_app','profitpilot_scanner','profitpilot_identity_operator','profitpilot_audit_reader','profitpilot_recovery_reader','profitpilot_incident_operator','profitpilot_incident_recovery'] LOOP
+ FOREACH role_name IN ARRAY ARRAY['profitpilot_app','profitpilot_scanner','profitpilot_identity_operator','profitpilot_audit_reader','profitpilot_recovery_reader','profitpilot_incident_operator','profitpilot_incident_recovery','profitpilot_security_reader'] LOOP
   IF NOT EXISTS(SELECT 1 FROM pg_roles WHERE rolname=role_name AND NOT (rolsuper OR rolbypassrls OR rolcreaterole OR rolcreatedb OR rolreplication))
    OR EXISTS(SELECT 1 FROM pg_auth_members m JOIN pg_roles r ON r.oid=m.member WHERE r.rolname=role_name)
    OR has_schema_privilege(role_name,'public','CREATE') OR has_schema_privilege(role_name,'private','CREATE')
@@ -25,6 +25,7 @@ BEGIN
     'private.claim_quarantine_promotion()','private.finish_quarantine_promotion(uuid,uuid,uuid,jsonb)'];
    WHEN 'profitpilot_identity_operator' THEN expected:=ARRAY[
     'private.provision_verified_identity(text,text,text)','private.administer_membership(uuid,uuid,text,text,text)'];
+   WHEN 'profitpilot_security_reader' THEN expected:=ARRAY['private.security_command_snapshot(integer,uuid)'];
    WHEN 'profitpilot_incident_operator' THEN expected:=ARRAY['private.activate_tenant_emergency(uuid,uuid,text,text)'];
    WHEN 'profitpilot_incident_recovery' THEN expected:=ARRAY['private.release_tenant_emergency(uuid,uuid,text)'];
    WHEN 'profitpilot_recovery_reader' THEN expected:=ARRAY['private.privacy_recovery_inventory()'];
