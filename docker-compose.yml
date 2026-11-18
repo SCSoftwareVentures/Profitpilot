@@ -54,6 +54,7 @@ services:
       - ./database/migrations/036_privacy_recovery_inventory.sql:/docker-entrypoint-initdb.d/038-privacy-recovery-inventory.sql:ro
       - ./database/migrations/037_automated_mapping_integrity.sql:/docker-entrypoint-initdb.d/039-automated-mapping-integrity.sql:ro
       - ./database/migrations/038_session_bound_promotion.sql:/docker-entrypoint-initdb.d/040-session-bound-promotion.sql:ro
+      - ./database/migrations/039_live_security_catalog.sql:/docker-entrypoint-initdb.d/041-live-security-catalog.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
