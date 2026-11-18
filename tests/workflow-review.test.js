@@ -28,3 +28,10 @@ test("duplicate confirmations are denied",()=>{
 test("held invalid invoice cannot be confirmed",()=>{
  assert.throws(()=>syntheticPeriodReport({rows:[{...rows[0],amount:"-2"}],decisions:[{rowNumber:2,status:"confirmed",reviewer:"demo",evidenceRef:"synthetic:1"}],contract}));
 });
+
+test("duplicate source row numbers are denied",()=>{
+ assert.throws(()=>syntheticPeriodReport({rows:[rows[0],{...rows[0],invoice_id:"INV2"}],decisions:[],contract}));
+});
+test("decisions for nonexistent source rows are denied",()=>{
+ assert.throws(()=>syntheticPeriodReport({rows,decisions:[{rowNumber:99,status:"pending"}],contract}));
+});
