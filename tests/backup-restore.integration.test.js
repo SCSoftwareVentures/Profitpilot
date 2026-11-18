@@ -28,6 +28,23 @@ test("synthetic logical backup restores all source rows and preserves tenant bou
    const a=(await source.query(query)).rows[0],b=(await restored.query(query)).rows[0];
    assert.ok(a.n===b.n&&a.fingerprint===b.fingerprint,"restored content mismatch: "+name);
   }
+  // Verify a confirmed payroll record was actually present in the encrypted
+  // snapshot, not just an empty new table. Never print receipt or session data.
+  const payroll = (await restored.query(`SELECT c.tenant_id,c.allocation_run_id,pp.id AS pool_id
+   FROM private.payroll_confirmation_receipts c
+   JOIN public.tenants t ON t.id=c.tenant_id
+   JOIN public.allocation_runs r ON r.tenant_id=c.tenant_id AND r.id=c.allocation_run_id
+   JOIN public.payroll_pools pp ON pp.tenant_id=r.tenant_id AND pp.id=r.payroll_pool_id
+   JOIN private.payroll_proposal_decisions d ON d.tenant_id=c.tenant_id AND d.proposal_id=c.proposal_id
+   WHERE t.legal_name='Synthetic payroll review' AND r.status='confirmed'
+   AND r.reviewer_id=c.reviewer_id AND d.decision='reviewed' AND d.reviewer_id=c.reviewer_id`)).rows;
+  assert.equal(payroll.length,1,"confirmed payroll fixture must survive the actual encrypted restore");
+  const restoredPayroll=payroll[0];
+  assert.equal((await restored.query("SELECT private.verify_audit_chain($1) AS ok",[restoredPayroll.tenant_id])).rows[0].ok,true);
+  await assert.rejects(()=>runtime.query("SELECT * FROM private.payroll_confirmation_receipts"),/permission denied/i);
+  await assert.rejects(()=>restored.query("DELETE FROM private.payroll_confirmation_receipts WHERE tenant_id=$1 AND allocation_run_id=$2",[restoredPayroll.tenant_id,restoredPayroll.allocation_run_id]),e=>e.code==="55000");
+  await assert.rejects(()=>restored.query("UPDATE public.payroll_pools SET source_ref='restore-probe' WHERE tenant_id=$1 AND id=$2",[restoredPayroll.tenant_id,restoredPayroll.pool_id]),e=>e.code==="55000");
+  console.log("Confirmed payroll receipt, chained audit and immutable evidence verified in isolated encrypted restore");
   assert.equal((await runtime.query("SELECT id FROM public.contracts")).rowCount,0,"unsigned connections must not enumerate restored contracts");
   await assert.rejects(()=>runtime.query("SELECT secret FROM private.tenant_context_keys"),/permission denied/i);
   const tenant="33333333-3333-4333-8333-333333333333",subject="isolation-tenant-c";
