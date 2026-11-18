@@ -18,6 +18,11 @@ BEGIN
     'private.approve_quarantine_promotion_attested(uuid,uuid,bigint,bigint,text,bigint,text,text,text)',
     'private.site_payroll_summary(uuid,uuid,date,date)','private.read_calculation_summary(uuid,uuid)',
     'private.verify_security_catalog()','private.verify_startup_signing_key(text,bigint,text,text)','private.admit_actor_request(uuid)','private.lock_tenant_available(uuid)',
+    'private.api_payroll_review(uuid,uuid,text,text,bigint,bigint,text,bigint,text,text,text)',
+    'private.api_confirm_payroll(uuid,uuid,text,bigint,bigint,text,bigint,text,text,text)',
+    'private.api_account_privacy(uuid,uuid,text,text,bigint,bigint,text,bigint,text,text,text,text)',
+    'private.api_invoice_disposal_preview(uuid,uuid,text,text,bigint,bigint,text,bigint,text,text,text)',
+    'private.api_invoice_disposal_step(uuid,uuid,uuid,text,text,bigint,bigint,text,bigint,text,text,text)',
     'public.consume_api_rate_limit(text)','public.purge_api_rate_limits()'];
    WHEN 'profitpilot_scanner' THEN expected:=ARRAY[
     'private.claim_quarantine_scan()','private.expire_quarantine_bytes()',
