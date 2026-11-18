@@ -14,7 +14,7 @@ import {proxyTrust,corsOrigins,createBoundedServer} from "./network-boundary.js"
 import {importIntakeGate,promotionProof} from "./intake-security.js";
 import {createReadinessGuard} from "./readiness-guard.js";
 import {productionReleaseGate} from "./release-gate.js";
-import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof,privacyCaseProof} from "./sensitive-operation-proof.js";
+import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof,privacyCaseProof,payrollCorrectionPreviewProof,payrollCorrectionStatusProof,payrollCorrectionStepProof} from "./sensitive-operation-proof.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
 import {quarantineConfig,sealQuarantine,MAX_QUARANTINE_BYTES} from "./quarantine.js";
@@ -360,6 +360,36 @@ app.get("/v1/tenants/:tenantId/privacy/cases/:caseId",membership,requireRole("ow
   if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
   const tenant=req.membership.tenantId,id=req.params.caseId.toLowerCase(),proof=privacyCaseProof(tenant,id,"privacy_case_status",null,null,null,req.identity);
   return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_rights_case($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) AS result",[...proof,null,null,null]));
+ }catch(e){return failSensitive(e,res,next);}
+});
+
+
+const correctionReasons=["allocation_error","source_correction","duplicate_source","privacy_correction"];
+const validCorrectionInput=body=>typeof body.proposalId==="string"&&uuidPattern.test(body.proposalId)&&correctionReasons.includes(body.reason)&&typeof body.authorityEvidenceDigest==="string"&&/^[a-f0-9]{64}$/.test(body.authorityEvidenceDigest)&&!/^0+$/.test(body.authorityEvidenceDigest);
+app.post("/v1/tenants/:tenantId/payroll/runs/:runId/correction-preview",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!exactBody(req.body,["proposalId","reason","authorityEvidenceDigest"])||!validCorrectionInput(req.body))return res.status(400).json({error:"Exact correction scope required"});
+  const t=req.membership.tenantId,oldRun=req.params.runId.toLowerCase(),b=req.body;
+  const proof=payrollCorrectionPreviewProof(t,oldRun,b.proposalId.toLowerCase(),b.reason,b.authorityEvidenceDigest,req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_payroll_correction_preview($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) AS result",proof));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/payroll/corrections/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  const proof=payrollCorrectionStatusProof(req.membership.tenantId,req.params.orderId.toLowerCase(),req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_payroll_correction_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) AS result",proof));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/payroll/corrections/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body||{},consume=b.step==="consume";
+  if(!emptyQuery(req)||!exactBody(b,["oldRunId","proposalId","reason","authorityEvidenceDigest","scopeDigest","step","confirm",...(consume?["proposalDigest"]:[])])||b.confirm!==true||
+  !validCorrectionInput(b)||typeof b.oldRunId!=="string"||!uuidPattern.test(b.oldRunId)||!["request","approve","reject","consume"].includes(b.step)||
+  typeof b.scopeDigest!=="string"||!/^[a-f0-9]{64}$/.test(b.scopeDigest)||/^0+$/.test(b.scopeDigest)||
+  (consume&&(typeof b.proposalDigest!=="string"||!/^[a-f0-9]{64}$/.test(b.proposalDigest)||/^0+$/.test(b.proposalDigest))))return res.status(400).json({error:"Explicit exact correction action required"});
+  const proof=payrollCorrectionStepProof(req.membership.tenantId,req.params.orderId.toLowerCase(),b.oldRunId.toLowerCase(),b.proposalId.toLowerCase(),b.reason,b.authorityEvidenceDigest,b.scopeDigest,b.step,consume?b.proposalDigest:null,req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_payroll_correction_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) AS result",proof));
  }catch(e){return failSensitive(e,res,next);}
 });
 
