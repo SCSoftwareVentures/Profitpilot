@@ -12,6 +12,8 @@ test("public grant inventory rejects direct and inherited column privilege drift
    ["GRANT UPDATE(email) ON public.users TO profitpilot_app",/Unexpected public column privilege/],
    ["GRANT UPDATE(evidence) ON public.match_reviews TO profitpilot_app",/Unexpected public column privilege/],
    ["GRANT UPDATE ON public.import_batches TO profitpilot_app",/Unexpected public table privilege/],
+   ["GRANT UPDATE(decision) ON public.mapping_decisions TO profitpilot_app",/Unexpected public column privilege/],
+   ["GRANT INSERT(reviewer_id) ON public.mapping_decisions TO profitpilot_app",/Unexpected public column privilege/],
    ["GRANT DELETE ON public.mapping_decisions TO profitpilot_app",/Unexpected public table privilege/],
    ["GRANT SELECT(inputs) ON public.calculation_runs TO profitpilot_app",/Unexpected public column privilege/],
    ["GRANT SELECT ON public.payroll_source_rows TO PUBLIC",/Unexpected public table privilege/],
