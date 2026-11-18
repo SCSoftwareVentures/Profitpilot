@@ -31,6 +31,14 @@ paths:
       - $ref: '#/components/parameters/TenantId'
     get:
       summary: List contracts visible to the verified tenant member
+      description: Stable UUID-ordered keyset pagination; cursor is an exclusive lower bound within the authenticated tenant. No total count. Concurrent changes may affect subsequent pages.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
       responses:
         "200":
           description: Contract list
@@ -38,11 +46,13 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [items]
+                required: [items, nextCursor]
                 properties:
                   items:
                     type: array
+                    maxItems: 100
                     items: { $ref: '#/components/schemas/ContractSummary' }
+                  nextCursor: { type: [string, 'null'], format: uuid, description: Exclusive cursor for the next page or null at the end }
         "400": { description: Invalid tenant ID }
         "401": { description: Unauthenticated }
         "403": { description: Tenant membership not authorised }
@@ -162,6 +172,7 @@ paths:
       - $ref: '#/components/parameters/BatchId'
     post:
       summary: Validate source rows and produce held/review candidates
+      description: Structural validation creates only new unreviewed proposals. Existing proposals and reviewed decisions remain unchanged. Structural counts describe validator results, not current review states.
       responses:
         "200":
           description: Invoice rows structurally validated into candidate/held states; no row is automatically accepted
@@ -354,12 +365,14 @@ components:
         startRowNumber: { type: integer, minimum: 1 }
     ValidationResponse:
       type: object
-      required: [batchId, total, validCandidateRows, heldRows, automaticallyAccepted]
+      required: [batchId, total, validCandidateRows, heldRows, newProposals, preservedProposals, automaticallyAccepted]
       properties:
         batchId: { type: string, format: uuid }
         total: { type: integer, minimum: 0 }
         validCandidateRows: { type: integer, minimum: 0 }
         heldRows: { type: integer, minimum: 0 }
+        newProposals: { type: integer, minimum: 0 }
+        preservedProposals: { type: integer, minimum: 0 }
         automaticallyAccepted: { const: 0 }
     MatchDecisionResponse:
       type: object
