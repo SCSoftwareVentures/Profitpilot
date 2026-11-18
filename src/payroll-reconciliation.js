@@ -4,14 +4,14 @@ import {isIsoDate,money} from "./engine.js";
 // Pure, versioned planning only. Never writes to the database or approves a run.
 export const PAYROLL_PLAN_VERSION = "payroll-reconciliation-1.0.0";
 const keyPattern=/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
-const opaque=value=>typeof value==="string"&&keyPattern.test(value);
+const opaque=value=>typeof value==="string"&&value===value.trim()&&keyPattern.test(value);
 const object=value=>value!==null&&typeof value==="object"&&!Array.isArray(value);
 const exact=(value,keys)=>object(value)&&Object.keys(value).length===keys.length&&keys.every(k=>Object.hasOwn(value,k));
-const currency=value=>typeof value==="string"&&/^[A-Z]{3}$/.test(value);
+const currency=value=>typeof value==="string"&&value.length===3&&/^[A-Z]{3}$/.test(value);
 const cmp=(a,b)=>a<b?-1:a>b?1:0;
 const sha=value=>createHash("sha256").update(value,"utf8").digest("hex");
 const cents=value=>{
-  if(typeof value!=="string"||!/^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,2})?$/.test(value))return null;
+  if(typeof value!=="string"||value!==value.trim()||!/^(?:0|[1-9][0-9]{0,11})(?:\.[0-9]{1,2})?$/.test(value))return null;
   const canonical=money(value);
   return canonical===null?null:BigInt(canonical.replace(".",""));
 };
