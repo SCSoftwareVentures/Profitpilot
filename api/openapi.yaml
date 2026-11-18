@@ -302,6 +302,153 @@ paths:
         "403": { description: Insufficient role, tenant membership or recent MFA }
         "404": { description: Calculation unavailable in tenant }
         "429": { description: Rate limit exceeded }
+  /tenants/{tenantId}/payroll/runs/{runId}/submit:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: runId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Submit a reconciled payroll run
+      description: Synthetic candidate only. Active membership, appropriate role and fresh issuer-attested MFA required. Live routes remain locked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false, required: [submit], properties: { submit: { const: true } } }
+      responses:
+        "200": { description: Minimised operation result }
+        "400": { description: Invalid request }
+        "401": { description: Unauthenticated }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting or stale evidence }
+        "422": { description: Ineligible operation }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/payroll/proposals/{proposalId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: proposalId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read a minimised payroll proposal
+      description: Synthetic candidate only. Active membership, appropriate role and fresh issuer-attested MFA required. Live routes remain locked.
+      responses:
+        "200": { description: Minimised operation result }
+        "400": { description: Invalid request }
+        "401": { description: Unauthenticated }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting or stale evidence }
+        "422": { description: Ineligible operation }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/payroll/proposals/{proposalId}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: proposalId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Confirm the exact reviewed payroll digest
+      description: Synthetic candidate only. Active membership, appropriate role and fresh issuer-attested MFA required. Live routes remain locked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false, required: [confirm, evidenceDigest], properties: { confirm: { const: true }, evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' } } }
+      responses:
+        "200": { description: Minimised operation result }
+        "400": { description: Invalid request }
+        "401": { description: Unauthenticated }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting or stale evidence }
+        "422": { description: Ineligible operation }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/privacy/account:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      summary: Access own stored account and selected tenant membership
+      description: Synthetic candidate only. Active membership, appropriate role and fresh issuer-attested MFA required. Live routes remain locked.
+      responses:
+        "200": { description: Minimised operation result }
+        "400": { description: Invalid request }
+        "401": { description: Unauthenticated }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting or stale evidence }
+        "422": { description: Ineligible operation }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/privacy/account/correct-email:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      summary: Correct own stored email from current verified issuer claim
+      description: Synthetic candidate only. Active membership, appropriate role and fresh issuer-attested MFA required. Live routes remain locked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false, required: [confirm], properties: { confirm: { const: true } } }
+      responses:
+        "200": { description: Minimised operation result }
+        "400": { description: Invalid request }
+        "401": { description: Unauthenticated }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting or stale evidence }
+        "422": { description: Ineligible operation }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/privacy/invoices/{batchId}/disposal-preview:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: batchId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Preview eligible invoice staging disposal scope
+      description: Synthetic candidate only. Active membership, appropriate role and fresh issuer-attested MFA required. Live routes remain locked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false, maxProperties: 0 }
+      responses:
+        "200": { description: Minimised operation result }
+        "400": { description: Invalid request }
+        "401": { description: Unauthenticated }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting or stale evidence }
+        "422": { description: Ineligible operation }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/privacy/invoices/{batchId}/disposals/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: batchId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Request, decide or consume exact scoped disposal authority
+      description: Synthetic candidate only. Active membership, appropriate role and fresh issuer-attested MFA required. Live routes remain locked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false, required: [step, scopeDigest, confirm], properties: { step: { enum: [request, approve, reject, consume] }, scopeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }, confirm: { const: true } } }
+      responses:
+        "200": { description: Minimised operation result }
+        "400": { description: Invalid request }
+        "401": { description: Unauthenticated }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting or stale evidence }
+        "422": { description: Ineligible operation }
+        "503": { description: Live processing closed or unavailable }
 components:
   schemas:
     ErrorResponse:
