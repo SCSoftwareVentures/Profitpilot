@@ -32,3 +32,16 @@ test("server error logger does not serialize raw exception messages",()=>{
  assert.doesNotMatch(source,/process\.stderr\.write\([^\n]*message:err\.message/);
  assert.match(source,/event:"request_error",id,code:/);
 });
+
+test("unauthenticated HTTP financial report request is rejected before database access",async()=>{
+ const {default:app}=await import("../server/index.js");
+ const server=await new Promise(resolve=>{const s=app.listen(0,"127.0.0.1",()=>resolve(s));});
+ try{
+  const address=server.address();
+  const response=await fetch("http://127.0.0.1:"+address.port+"/v1/tenants/00000000-0000-4000-8000-000000000000/calculations/00000000-0000-4000-8000-000000000001");
+  assert.equal(response.status,401);
+  const body=await response.json();
+  assert.ok(body.error);
+  assert.equal(body.outputs,undefined);
+ }finally{await new Promise((resolve,reject)=>server.close(e=>e?reject(e):resolve()));}
+});
