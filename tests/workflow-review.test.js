@@ -35,3 +35,14 @@ test("duplicate source row numbers are denied",()=>{
 test("decisions for nonexistent source rows are denied",()=>{
  assert.throws(()=>syntheticPeriodReport({rows,decisions:[{rowNumber:99,status:"pending"}],contract}));
 });
+
+test("rejects scientific notation and excess fractional precision",()=>{
+ for(const amount of ["1e3","10.001","Infinity"]) {
+  const review=prepareInvoiceReview([{...rows[0],amount}],contract);
+  assert.equal(review[0].status,"held");
+ }
+});
+test("rejects unsupported currency and inverted contract period",()=>{
+ assert.throws(()=>prepareInvoiceReview(rows,{...contract,currency:"USD"}));
+ assert.throws(()=>prepareInvoiceReview(rows,{...contract,periodStart:"2026-12-01"}));
+});
