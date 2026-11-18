@@ -6,6 +6,7 @@ import {pathToFileURL} from "node:url";
 import pg from "pg";
 import {securityReaderConfig} from "./security-command-centre.js";
 import {checkedSecuritySnapshot} from "./security-dashboard.js";
+import {securityResponsePlan} from "../server/security-response-plan.js";
 const CATEGORIES=["snapshot_unavailable","catalog_drift","tenant_containment","actor_containment","scanner_backlog","promotion_backlog"];
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const SECRET=/^[a-f0-9]{64}$/;
@@ -113,7 +114,11 @@ export async function runAlertCycle({dir,read,deliver}){
 async function main(){
  const env=process.env,destination=alertDestination(env),pool=new pg.Pool(securityReaderConfig(env));
  try{
-  const result=await runAlertCycle({dir:env.SECURITY_ALERT_STATE_DIR,read:()=>checkedSecuritySnapshot(pool,{limit:1,cursor:null}),deliver:e=>deliverAlert(e,destination)});
+  const result=await runAlertCycle({dir:env.SECURITY_ALERT_STATE_DIR,read:async()=>{
+    let report=null;
+    try{report=await checkedSecuritySnapshot(pool,{limit:1,cursor:null});return report;}
+    finally{process.stdout.write(JSON.stringify(securityResponsePlan(report))+"\n");}
+   },deliver:e=>deliverAlert(e,destination)});
   process.stdout.write(JSON.stringify({event:"security_alert_cycle",...result})+"\n");
  }finally{await pool.end();}
 }

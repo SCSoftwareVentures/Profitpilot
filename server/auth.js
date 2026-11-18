@@ -41,7 +41,7 @@ export function authRequired(){
    });
    if(!acceptedAccessToken(protectedHeader,payload))return res.status(401).json({error:"Invalid access token profile"});
    if(typeof payload.sub!=="string"||!payload.sub||payload.sub.length>255||/[\p{C}]/u.test(payload.sub))return res.status(401).json({error:"Invalid identity subject"});
-   req.identity={subject:payload.sub,email:typeof payload.email==="string"?payload.email:null,authTime:payload.auth_time,issuedAt:payload.iat,sessionId:payload.sid,mfa:issuerAttestedMfa(payload)};
+   req.identity={subject:payload.sub,email:typeof payload.email==="string"?payload.email:null,emailVerified:payload.email_verified===true,authTime:payload.auth_time,issuedAt:payload.iat,sessionId:payload.sid,mfa:issuerAttestedMfa(payload)};
    next();
   }catch(e){
    const unavailable=e.message==="Authentication is not configured"||e.message==="Production issuer and JWKS endpoints must use HTTPS";

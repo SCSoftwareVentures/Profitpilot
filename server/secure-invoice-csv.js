@@ -44,7 +44,7 @@ function safeReference(value,max,{allowUuid=false,required=false}={}){
  // Use conservative ASCII references here; the DB privacy guard remains the
  // independent authoritative check before any future persisted ingestion.
  if(!/^[A-Za-z0-9 ._:/&'()-]*$/.test(value)||/^[=+\-@]/.test(value))reject();
- if(/(?:^|[^A-Za-z0-9])(?:tfn|tax[ _-]*file|medicare|passport|bank[ _-]*account|bsb|card[ _-]*number|credit[ _-]*card|cvv|cvc|password|access[ _-]*code|payslip)(?:$|[^A-Za-z0-9])/i.test(value))reject();
+ if(/(?:^|[^A-Za-z0-9])(?:tfn|tax[ _-]*file|medicare|passport|bank[ _-]*account|bsb|card[ _-]*number|credit[ _-]*card|cvv|cvc|password|access[ _-]*code|payslip|date[ _-]*of[ _-]*birth|dob|driver[ _-]*licen[cs]e|health[ _-]*record|medical[ _-]*record|super[ _-]*member|account[ _-]*number|routing[ _-]*number|api[ _-]*key|secret[ _-]*key|bearer[ _-]*token|private[ _-]*key)(?:$|[^A-Za-z0-9])/i.test(value))reject();
  if(/[0-9](?:[ .:/()-]*[0-9]){7,}/.test(value))reject();
 }
 function validateCell(name,value){

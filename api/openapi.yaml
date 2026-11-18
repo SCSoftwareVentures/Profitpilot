@@ -302,6 +302,870 @@ paths:
         "403": { description: Insufficient role, tenant membership or recent MFA }
         "404": { description: Calculation unavailable in tenant }
         "429": { description: Rate limit exceeded }
+  /tenants/{tenantId}/payroll/runs/{runId}/submit:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: runId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Submit a reconciled payroll run
+      description: Synthetic candidate only. Active membership, appropriate role and fresh issuer-attested MFA required. Live routes remain locked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false, required: [submit], properties: { submit: { const: true } } }
+      responses:
+        "200": { description: Minimised operation result }
+        "400": { description: Invalid request }
+        "401": { description: Unauthenticated }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting or stale evidence }
+        "422": { description: Ineligible operation }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/payroll/proposals/{proposalId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: proposalId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read a minimised payroll proposal
+      description: Synthetic candidate only. Active membership, appropriate role and fresh issuer-attested MFA required. Live routes remain locked.
+      responses:
+        "200": { description: Minimised operation result }
+        "400": { description: Invalid request }
+        "401": { description: Unauthenticated }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting or stale evidence }
+        "422": { description: Ineligible operation }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/payroll/proposals/{proposalId}/confirm:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: proposalId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Confirm the exact reviewed payroll digest
+      description: Synthetic candidate only. Active membership, appropriate role and fresh issuer-attested MFA required. Live routes remain locked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false, required: [confirm, evidenceDigest], properties: { confirm: { const: true }, evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' } } }
+      responses:
+        "200": { description: Minimised operation result }
+        "400": { description: Invalid request }
+        "401": { description: Unauthenticated }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting or stale evidence }
+        "422": { description: Ineligible operation }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/privacy/account:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      summary: Access own stored account and selected tenant membership
+      description: Synthetic candidate only. Active membership, appropriate role and fresh issuer-attested MFA required. Live routes remain locked.
+      responses:
+        "200": { description: Minimised operation result }
+        "400": { description: Invalid request }
+        "401": { description: Unauthenticated }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting or stale evidence }
+        "422": { description: Ineligible operation }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/privacy/account/correct-email:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      summary: Correct own stored email from current verified issuer claim
+      description: Synthetic candidate only. Active membership, appropriate role and fresh issuer-attested MFA required. Live routes remain locked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false, required: [confirm], properties: { confirm: { const: true } } }
+      responses:
+        "200": { description: Minimised operation result }
+        "400": { description: Invalid request }
+        "401": { description: Unauthenticated }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting or stale evidence }
+        "422": { description: Ineligible operation }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/privacy/invoices/{batchId}/disposal-preview:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: batchId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Preview eligible invoice staging disposal scope
+      description: Synthetic candidate only. Active membership, appropriate role and fresh issuer-attested MFA required. Live routes remain locked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false, maxProperties: 0 }
+      responses:
+        "200": { description: Minimised operation result }
+        "400": { description: Invalid request }
+        "401": { description: Unauthenticated }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting or stale evidence }
+        "422": { description: Ineligible operation }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/privacy/invoices/{batchId}/disposals/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: batchId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Request, decide or consume exact scoped disposal authority
+      description: Synthetic candidate only. Active membership, appropriate role and fresh issuer-attested MFA required. Live routes remain locked.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: false, required: [step, scopeDigest, confirm], properties: { step: { enum: [request, approve, reject, consume] }, scopeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }, confirm: { const: true } } }
+      responses:
+        "200": { description: Minimised operation result }
+        "400": { description: Invalid request }
+        "401": { description: Unauthenticated }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting or stale evidence }
+        "422": { description: Ineligible operation }
+        "503": { description: Live processing closed or unavailable }
+
+  /tenants/{tenantId}/privacy/cases/{caseId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: caseId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read minimised privacy case status
+      description: Self-service case owner or authorised staff, fresh MFA. No response documents or personal-data export.
+      responses:
+        "200": { description: Case status and internal escalation target }
+        "403": { description: Authority denied }
+        "503": { description: Live processing closed or unavailable }
+    post:
+      summary: Record an explicit privacy rights case action
+      description: Self request or staff-assisted verified intake, acknowledgement, independent evidenced outcome. No automatic disclosure, correction or erasure of other records.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [action, confirm, kind]
+                  properties:
+                    action: { const: request }
+                    confirm: { const: true }
+                    kind: { enum: [access, correction, disposal, complaint] }
+                - type: object
+                  additionalProperties: false
+                  required: [action, confirm, kind, evidenceDigest]
+                  properties:
+                    action: { const: intake }
+                    confirm: { const: true }
+                    kind: { enum: [access, correction, disposal, complaint] }
+                    evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                - type: object
+                  additionalProperties: false
+                  required: [action, confirm]
+                  properties:
+                    action: { const: acknowledge }
+                    confirm: { const: true }
+                - type: object
+                  additionalProperties: false
+                  required: [action, confirm, reasonCode, evidenceDigest]
+                  properties:
+                    action: { const: resolve }
+                    confirm: { const: true }
+                    reasonCode: { enum: [fulfilled, partially_fulfilled] }
+                    evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                - type: object
+                  additionalProperties: false
+                  required: [action, confirm, reasonCode, evidenceDigest]
+                  properties:
+                    action: { const: refuse }
+                    confirm: { const: true }
+                    reasonCode: { enum: [lawful_refusal, retention_required, identity_not_verified] }
+                    evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        "200": { description: Minimised case status }
+        "400": { description: Invalid request }
+        "401": { description: Authentication required }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting state }
+        "429": { description: Capacity reached, use assisted channel }
+        "503": { description: Live processing closed or unavailable }
+
+
+  /tenants/{tenantId}/payroll/runs/{runId}/correction-preview:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: runId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Preview scoped payroll supersession
+      description: Synthetic only. Owner/admin with recent MFA; independent source population verification is required outside the system.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [proposalId, reason, authorityEvidenceDigest]
+              properties:
+                proposalId: { type: string, format: uuid }
+                reason: { enum: [allocation_error, source_correction, duplicate_source, privacy_correction] }
+                authorityEvidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        "200": { description: Exact scope and proposal digest with original and proposed aggregate amounts }
+        "400": { description: Invalid request }
+        "403": { description: Authority denied }
+        "409": { description: Evidence conflict }
+        "429": { description: Access budget exceeded }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/payroll/corrections/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read scoped correction order status
+      description: Owner/admin with fresh MFA. Status does not guarantee that authority is still valid; execution revalidates all evidence and approvals.
+      responses:
+        "200": { description: Minimised correction status and scope }
+        "403": { description: Authority denied }
+        "503": { description: Live processing closed or unavailable }
+    post:
+      summary: Request, decide or execute an exact payroll correction
+      description: Separate proposal submitter, requesting operator and independent approver. Execution requires the reviewed replacement digest, fresh MFA and an approved unexpired one-use order.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [oldRunId, proposalId, reason, authorityEvidenceDigest, scopeDigest, step, confirm]
+              properties:
+                oldRunId: { type: string, format: uuid }
+                proposalId: { type: string, format: uuid }
+                reason: { enum: [allocation_error, source_correction, duplicate_source, privacy_correction] }
+                authorityEvidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                scopeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                step: { enum: [request, approve, reject, consume] }
+                confirm: { const: true }
+                proposalDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+              allOf:
+                - if:
+                    properties:
+                      step: { const: consume }
+                  then:
+                    required: [proposalDigest]
+                  else:
+                    not:
+                      required: [proposalDigest]
+      responses:
+        "200": { description: Correction status }
+        "400": { description: Invalid request }
+        "401": { description: Authentication required }
+        "403": { description: Authority denied or invalid scope }
+        "409": { description: Conflicting state }
+        "503": { description: Live processing closed or unavailable }
+
+  /tenants/{tenantId}/privacy/cases/{caseId}/deliveries/{orderId}/preview:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: caseId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Preview exact privacy response scope
+      description: Owner/admin with recent MFA. Candidate only; no response transport or release to a recipient.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [recipientType, recipientKeyDigest, senderKeyDigest, authorityDigest, redactionDigest, responseDigest, envelopeDigest]
+              properties:
+                recipientType: { enum: [self, assisted_subject, authorized_representative, former_user] }
+                recipientKeyDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                senderKeyDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                authorityDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                redactionDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                responseDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                envelopeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        "200": { description: Minimized scope or authorization status }
+        "400": { description: Invalid request }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting state }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/privacy/cases/{caseId}/deliveries/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: caseId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read minimized privacy release order status
+      responses:
+        "200": { description: Release status; never proof of delivery }
+        "403": { description: Authority denied }
+    post:
+      summary: Record scoped privacy release action
+      description: Owner/admin with recent MFA. Candidate only; no response transport or release to a recipient.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [recipientType, recipientKeyDigest, senderKeyDigest, authorityDigest, redactionDigest, responseDigest, envelopeDigest, scopeDigest, step, confirm]
+              properties:
+                recipientType: { enum: [self, assisted_subject, authorized_representative, former_user] }
+                recipientKeyDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                senderKeyDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                authorityDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                redactionDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                responseDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                envelopeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                scopeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                step: { enum: [request, approve, reject, consume] }
+                confirm: { const: true }
+      responses:
+        "200": { description: Minimized scope or authorization status }
+        "400": { description: Invalid request }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting state }
+        "503": { description: Live processing closed or unavailable }
+
+  /tenants/{tenantId}/privacy/cases/{caseId}/deliveries/{orderId}/receipts/{reviewId}/preview:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: caseId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: reviewId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Preview exact receipt evidence scope
+      description: Owner/admin with recent MFA; independent offline evidence verification required. No actual transport or delivery assertion.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [challengeDigest, receiptDigest, receiptKeyDigest, verificationEvidenceDigest]
+              properties:
+                challengeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                receiptDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                receiptKeyDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                verificationEvidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        "200": { description: Minimized scope or review state }
+        "400": { description: Invalid request }
+        "403": { description: Authority denied }
+        "409": { description: Already reconciled or conflicting state }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/privacy/cases/{caseId}/deliveries/{orderId}/receipts/{reviewId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: caseId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: reviewId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read minimized receipt-review status
+      responses:
+        "200": { description: Evidence status, not proof of delivery }
+        "403": { description: Authority denied }
+    post:
+      summary: Record scoped receipt review action
+      description: Owner/admin with recent MFA; independent offline evidence verification required. No actual transport or delivery assertion.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [challengeDigest, receiptDigest, receiptKeyDigest, verificationEvidenceDigest, scopeDigest, step, confirm]
+              properties:
+                challengeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                receiptDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                receiptKeyDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                verificationEvidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                scopeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                step: { enum: [request, approve, reject, consume] }
+                confirm: { const: true }
+      responses:
+        "200": { description: Minimized scope or review state }
+        "400": { description: Invalid request }
+        "403": { description: Authority denied }
+        "409": { description: Already reconciled or conflicting state }
+        "503": { description: Live processing closed or unavailable }
+
+  /tenants/{tenantId}/privacy/cases/{caseId}/deliveries/{orderId}/dispatch:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: caseId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read minimized dispatch status
+      responses:
+        "200": { description: Candidate ledger state; mayTransmit and deliveryVerified are always false }
+        "403": { description: Authority denied }
+    post:
+      summary: Reserve, spend or permanently revoke a candidate dispatch
+      description: Owner/admin with recent MFA. No real transmission or delivery authority.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [step, confirm, challengeDigest, receiptKeyDigest, expiresAtEpoch]
+                  properties:
+                    step: { enum: [reserve, burn] }
+                    confirm: { const: true }
+                    challengeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                    receiptKeyDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                    expiresAtEpoch: { type: integer, minimum: 1, maximum: 4102444800 }
+                - type: object
+                  additionalProperties: false
+                  required: [step, confirm, reasonCode, evidenceDigest]
+                  properties:
+                    step: { const: revoke }
+                    confirm: { const: true }
+                    reasonCode: { enum: [identity_uncertain, key_compromise, recipient_changed, authority_withdrawn, security_incident, ambiguous_dispatch] }
+                    evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        "200": { description: Minimized candidate state }
+        "400": { description: Invalid request }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting or spent state }
+        "503": { description: Live processing unavailable }
+
+  /tenants/{tenantId}/payroll/intakes/{batchId}/orders/{orderId}/preview:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: batchId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Preview exact minimized payroll source
+      description: Owner/admin with recent MFA; synthetic records only, independent approval required before source persistence.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [poolId, sourceNamespace, controlTotal, rowCount, authorityDigest, policyDigest, controlDigest, rows]
+              properties:
+                poolId: { type: string, format: uuid }
+                sourceNamespace: { type: string, format: uuid }
+                controlTotal: { type: string, pattern: '^(0|[1-9][0-9]{0,11})[.][0-9]{2}$' }
+                rowCount: { type: integer, minimum: 1, maximum: 200 }
+                authorityDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                policyDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                controlDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                rows:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [source_row_key, amount, currency]
+                    properties:
+                      source_row_key: { type: string, pattern: '^ppr_[a-f0-9]{64}$' }
+                      amount: { type: string, pattern: '^(0|[1-9][0-9]{0,11})[.][0-9]{2}$' }
+                      currency: { const: AUD }
+      responses:
+        "200": { description: Minimized scope or intake state }
+        "400": { description: Invalid request }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting source or approval state }
+        "503": { description: Live processing closed or unavailable }
+  /tenants/{tenantId}/payroll/intakes/{batchId}/orders/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: batchId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read minimized payroll intake status
+      responses:
+        "200": { description: Order state, not allocation confirmation }
+        "403": { description: Authority denied }
+    post:
+      summary: Record scoped payroll source intake action
+      description: Owner/admin with recent MFA; synthetic records only, independent approval required before source persistence.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [poolId, sourceNamespace, controlTotal, rowCount, authorityDigest, policyDigest, controlDigest, rows, scopeDigest, step, confirm]
+              properties:
+                poolId: { type: string, format: uuid }
+                sourceNamespace: { type: string, format: uuid }
+                controlTotal: { type: string, pattern: '^(0|[1-9][0-9]{0,11})[.][0-9]{2}$' }
+                rowCount: { type: integer, minimum: 1, maximum: 200 }
+                authorityDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                policyDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                controlDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                rows:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [source_row_key, amount, currency]
+                    properties:
+                      source_row_key: { type: string, pattern: '^ppr_[a-f0-9]{64}$' }
+                      amount: { type: string, pattern: '^(0|[1-9][0-9]{0,11})[.][0-9]{2}$' }
+                      currency: { const: AUD }
+                scopeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                step: { enum: [request, approve, reject, consume] }
+                confirm: { const: true }
+      responses:
+        "200": { description: Minimized scope or intake state }
+        "400": { description: Invalid request }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting source or approval state }
+        "503": { description: Live processing closed or unavailable }
+
+  /tenants/{tenantId}/payroll/pools/{poolId}/allocations/{runId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: poolId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: runId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read minimized candidate allocation state
+      responses:
+        "200": { description: Candidate or confirmed state }
+        "403": { description: Authority denied }
+    post:
+      summary: Materialize immutable candidate from reviewed payroll source
+      description: Owner/admin with recent MFA. Synthetic only. Complete allocations require independent confirmation. Unassigned cents remain explicit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirm, lines]
+              properties:
+                confirm: { const: true }
+                lines:
+                  type: array
+                  maxItems: 400
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [sourceRowKey, bucket, siteId, amount, evidenceRef]
+                    properties:
+                      sourceRowKey: { type: string, pattern: '^ppr_[a-f0-9]{64}$' }
+                      bucket: { enum: [approved_allocated, non_site, excluded] }
+                      siteId: { type: [string, 'null'], format: uuid }
+                      amount: { type: string, pattern: '^(0|[1-9][0-9]{0,11})[.][0-9]{2}$' }
+                      evidenceRef: { type: string, pattern: '^ev_[a-f0-9]{60}$' }
+      responses:
+        "200": { description: Immutable draft or independently reviewable proposal }
+        "400": { description: Invalid mapping }
+        "403": { description: Authority denied }
+        "409": { description: Ineligible or conflicting source }
+        "503": { description: Unavailable }
+
+
+  /tenants/{tenantId}/workspace/records/{recordId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: recordId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Create immutable managed workspace record
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirm, kind, parentId, relatedId, label]
+              properties:
+                confirm: { const: true }
+                kind: { enum: [business, customer, site, contract, contract_site] }
+                parentId: { type: [string, 'null'], format: uuid }
+                relatedId: { type: [string, 'null'], format: uuid }
+                label: { type: [string, 'null'], maxLength: 80 }
+      responses:
+        "201": { description: Record created }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting scope }
+  /tenants/{tenantId}/workspace/records-by-kind/{kind}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: kind
+        in: path
+        required: true
+        schema: { enum: [business, customer, site, contract, contract_site] }
+      - name: cursor
+        in: query
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read one page of managed workspace records
+      responses:
+        "200": { description: Page of up to 50 records }
+        "403": { description: Authority denied }
+  /tenants/{tenantId}/workspace/contracts/{contractId}/versions/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: contractId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read exact proposed commercial baseline terms and approval status
+      responses:
+        "200": { description: Terms and order state }
+        "403": { description: Authority denied }
+    post:
+      summary: Record exact independent commercial baseline approval action
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirm, step, versionId, periodStart, periodEnd, price, taxBasis, billingBasis, evidenceDigest]
+              properties:
+                confirm: { const: true }
+                step: { enum: [request, approve, reject, consume] }
+                versionId: { type: string, format: uuid }
+                periodStart: { type: string, format: date }
+                periodEnd: { type: string, format: date }
+                price: { type: string, pattern: '^(0|[1-9][0-9]{0,11})[.][0-9]{2}$' }
+                taxBasis: { enum: [gst_inclusive, gst_exclusive, no_gst] }
+                billingBasis: { enum: [monthly, weekly, fixed_period, per_service] }
+                evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        "200": { description: Immutable order state }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting baseline }
+
+  /tenants/{tenantId}/workspace/jobs:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: cursor
+        in: query
+        schema: { type: string, format: uuid }
+    get:
+      summary: List scoped jobs and readiness states
+      responses:
+        "200": { description: Page of up to 50 jobs }
+        "403": { description: Authority denied }
+  /tenants/{tenantId}/workspace/jobs/{jobId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: jobId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read job and readiness details
+      responses:
+        "200": { description: Job and shared readiness result }
+        "403": { description: Authority denied }
+    post:
+      summary: Create job or append an exact readiness or lifecycle event
+      description: Owner/admin with recent MFA. Evidence pointers are assertions only, not certification or customer acceptance.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirm, action, evidenceDigest]
+              properties:
+                confirm: { const: true }
+                action: { enum: [create, check, start, complete, cancel] }
+                evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                contractId: { type: string, format: uuid }
+                siteId: { type: string, format: uuid }
+                serviceDate: { type: string, format: date }
+                eventId: { type: string, format: uuid }
+                checkId: { enum: [customer, site, scope, service_date, price, currency, access, materials, skills, permissions, completion_evidence] }
+                checkStatus: { enum: [satisfied, missing, conflicting, unverified, not_applicable] }
+      responses:
+        "200": { description: Current job and readiness state }
+        "400": { description: Invalid action or fields }
+        "403": { description: Authority denied }
+        "409": { description: Ineligible transition }
+  /tenants/{tenantId}/invoice-intakes/{batchId}/orders/{orderId}/preview:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: batchId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Preview promoted customer invoice manifest and verified mapping
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [controlTotal, rowCount, evidenceDigest]
+              properties:
+                controlTotal: { type: string, pattern: '^(0|[1-9][0-9]{0,11})[.][0-9]{2}$' }
+                rowCount: { type: integer, minimum: 1, maximum: 200 }
+                evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        "200": { description: Exact reviewed preview, not accepted }
+        "403": { description: Authority denied }
+        "409": { description: Ineligible source }
+  /tenants/{tenantId}/invoice-intakes/{batchId}/orders/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: batchId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read exact reviewed invoice intake order
+      responses:
+        "200": { description: Review summary and state }
+        "403": { description: Authority denied }
+    post:
+      summary: Request, independently approve, reject or record reviewed customer invoice intake
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [controlTotal, rowCount, evidenceDigest, scopeDigest, confirm, step]
+              properties:
+                controlTotal: { type: string, pattern: '^(0|[1-9][0-9]{0,11})[.][0-9]{2}$' }
+                rowCount: { type: integer, minimum: 1, maximum: 200 }
+                evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                scopeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                confirm: { const: true }
+                step: { enum: [request, approve, reject, consume] }
+      responses:
+        "200": { description: Review state; accepted only after consumption }
+        "403": { description: Authority denied }
+        "409": { description: Ineligible source or conflicting state }
 components:
   schemas:
     ErrorResponse:

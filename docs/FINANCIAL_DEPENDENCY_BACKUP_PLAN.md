@@ -1,0 +1,7 @@
+# Financial dependency and backup-plan controls (candidate only)
+
+Migration 055 adds a tenant-scoped diagnostic of current payroll, correction reservations/supersession lineage, overlapping saved calculations and source-batch holds. Existing immutable evidence always blocks destructive action. Status is informational, never an execution gate. A date-based retention review alone is insufficient.
+
+A backup-plan record binds the exact confirmed allocation receipt, archive inventory digest, proposed disposition digest and UTC review date to existing signed, recent-MFA work orders, different requester and approver and one-time consumption. A recorded plan is not proof of media sanitisation, actual deletion, archive completeness or lawful disposal. Conflicting same-day plans cannot be treated as clearance; old plans expire for diagnostic purposes. No additional runtime privileges, hold release or deletion path. The signed sensitive recovery fingerprint includes plan entries; reissue signed inventories after migration. External archives, replicas, exports, subprocessors, lawful retention and erasure requirements require independently verified evidence before production acceptance.
+
+Tests use synthetic data, including scope substitution, self-approval, replay, stale dates, hold detection, lineage, report dependencies and no disposal authority. Direct trusted administrator writes remain outside the application threat boundary. No real archive has been disposed of.

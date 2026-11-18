@@ -1,0 +1,78 @@
+name: ProfitPilot production acceptance (no deployment)
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_run:
+        description: Successful exact-main CI run ID
+        required: true
+        type: string
+      candidate_attempt:
+        description: Exact CI run attempt
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+  attestations: read
+concurrency:
+  group: profitpilot-production-acceptance
+  cancel-in-progress: false
+jobs:
+  accept:
+    name: Verify protected production evidence
+    if: github.repository == 'luxhustle01-ux/Profitpilot' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    environment: production-acceptance
+    steps:
+      - name: Checkout reviewed source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Validate exact candidate run and approval environment policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+          CANDIDATE_ATTEMPT: ${{ inputs.candidate_attempt }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          [[ "$CANDIDATE_RUN" =~ ^[1-9][0-9]{0,19}$ ]]
+          [[ "$CANDIDATE_ATTEMPT" =~ ^[1-9][0-9]{0,5}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CANDIDATE_RUN" | jq -e \
+            --arg sha "$GITHUB_SHA" --arg repo "$GITHUB_REPOSITORY" --arg attempt "$CANDIDATE_ATTEMPT" \
+            '.head_sha==$sha and .head_repository.full_name==$repo and .event=="push" and .head_branch=="main" and .path==".github/workflows/ci.yml" and .conclusion=="success" and (.run_attempt|tostring)==$attempt' >/dev/null
+          gh api "repos/$GITHUB_REPOSITORY/environments/production-acceptance" | jq -e \
+            '.name=="production-acceptance" and .deployment_branch_policy.protected_branches==true and any(.protection_rules[]; .type=="required_reviewers" and .prevent_self_review==true and (.reviewers|length)>0)' >/dev/null
+      - name: Download and verify exact previously scanned candidate and attestation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+          CANDIDATE_ATTEMPT: ${{ inputs.candidate_attempt }}
+        run: |
+          set -euo pipefail
+          mkdir -m 700 "$RUNNER_TEMP/production-candidate" "$RUNNER_TEMP/production-provenance"
+          gh run download "$CANDIDATE_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "profitpilot-candidate-$GITHUB_SHA-$CANDIDATE_ATTEMPT" --dir "$RUNNER_TEMP/production-candidate"
+          gh run download "$CANDIDATE_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "profitpilot-provenance-$GITHUB_SHA-$CANDIDATE_ATTEMPT" --dir "$RUNNER_TEMP/production-provenance"
+          gh attestation verify "$RUNNER_TEMP/production-candidate/manifest.json" \
+            --bundle "$RUNNER_TEMP/production-provenance/provenance-bundle.jsonl" --repo "$GITHUB_REPOSITORY" \
+            --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/ci.yml" \
+            --source-ref refs/heads/main --source-digest "$GITHUB_SHA" --deny-self-hosted-runners
+          node scripts/release-candidate-manifest.js verify "$RUNNER_TEMP/production-candidate" "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$CANDIDATE_RUN" "$CANDIDATE_ATTEMPT"
+      - name: Verify independent, operational, legal and owner approvals
+        env:
+          PROFITPILOT_PRODUCTION_APPROVAL: ${{ secrets.PROFITPILOT_PRODUCTION_APPROVAL }}
+          RELEASE_SCOPE_SHA256: ${{ secrets.RELEASE_SCOPE_SHA256 }}
+          RELEASE_COUNSEL_PUBLIC_KEY: ${{ secrets.RELEASE_COUNSEL_PUBLIC_KEY }}
+          RELEASE_COUNSEL_FINGERPRINT: ${{ secrets.RELEASE_COUNSEL_FINGERPRINT }}
+          RELEASE_ASSESSOR_PUBLIC_KEY: ${{ secrets.RELEASE_ASSESSOR_PUBLIC_KEY }}
+          RELEASE_ASSESSOR_FINGERPRINT: ${{ secrets.RELEASE_ASSESSOR_FINGERPRINT }}
+          RELEASE_OPERATIONS_PUBLIC_KEY: ${{ secrets.RELEASE_OPERATIONS_PUBLIC_KEY }}
+          RELEASE_OPERATIONS_FINGERPRINT: ${{ secrets.RELEASE_OPERATIONS_FINGERPRINT }}
+          RELEASE_OWNER_PUBLIC_KEY: ${{ secrets.RELEASE_OWNER_PUBLIC_KEY }}
+          RELEASE_OWNER_FINGERPRINT: ${{ secrets.RELEASE_OWNER_FINGERPRINT }}
+        run: node scripts/verify-production-acceptance.js "$RUNNER_TEMP/production-candidate/manifest.json"
+      - name: Record verification result without releasing software
+        run: echo "Signed evidence verified. This workflow never deploys or unlocks live processing."

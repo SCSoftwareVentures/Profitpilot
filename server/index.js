@@ -1,5 +1,6 @@
 import "dotenv/config";
 import express from "express";
+import {fileURLToPath} from "node:url";
 import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
@@ -12,6 +13,13 @@ import {MAX_BATCH_ROWS,createRequestAdmission,enforceJsonBudget} from "./request
 import {proxyTrust,corsOrigins,createBoundedServer} from "./network-boundary.js";
 import {importIntakeGate,promotionProof} from "./intake-security.js";
 import {createReadinessGuard} from "./readiness-guard.js";
+import {productionReleaseGate} from "./release-gate.js";
+import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof,privacyCaseProof,payrollCorrectionPreviewProof,payrollCorrectionStatusProof,payrollCorrectionStepProof,privacyDeliveryPreviewProof,privacyDeliveryStatusProof,privacyDeliveryStepProof,privacyReceiptPreviewProof,privacyReceiptStatusProof,privacyReceiptStepProof,privacyDispatchStatusProof,privacyDispatchStepProof,payrollIntakePreviewProof,payrollIntakeStatusProof,payrollIntakeStepProof,payrollAllocationBuildProof,payrollAllocationStatusProof,workspaceCreateProof,workspaceReadProof,workspaceVersionProof,workspaceVersionStatusProof,workspaceJobWriteProof,workspaceJobReadProof,invoiceIntakePreviewProof,invoiceIntakeStatusProof,invoiceIntakeStepProof} from "./sensitive-operation-proof.js";
+import {canonicalPayrollRows} from "../src/payroll-source-intake.js";
+import {canonicalAllocationMapping} from "../src/payroll-allocation-mapping.js";
+import {WORKSPACE_KINDS,workspaceRecordFields,workspaceVersionFields} from "../src/workspace-records.js";
+import {workspaceJobFields,verifiedJobSummary} from "../src/workspace-jobs.js";
+import {invoiceIntakeFields,invoiceDigest} from "../src/invoice-intake.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
 import {quarantineConfig,sealQuarantine,MAX_QUARANTINE_BYTES} from "./quarantine.js";
@@ -35,13 +43,19 @@ app.use(process.env.NODE_ENV==="production"?sharedLimiter({windowMs:60_000,limit
 const mutationLimiter=process.env.NODE_ENV==="production"?sharedLimiter({windowMs:60_000,limit:60,scope:"write"}):rateLimit({windowMs:60_000,limit:60,standardHeaders:true,legacyHeaders:false,message:{error:"Too many write requests; retry later"}});
 app.use("/v1/tenants/:tenantId",(req,res,next)=>req.method==="POST"?mutationLimiter(req,res,next):next());
 app.get("/health",async(req,res)=>{try{if(process.env.NODE_ENV==="production"){if(!await readiness.check())throw new Error("Not ready");}else await health();res.json({status:"ok",database:"connected"});}catch{res.status(503).json({status:"unavailable"});}});
+// Global default-deny after bounded health, before any business endpoint.
+app.use(productionReleaseGate());
+if(process.env.NODE_ENV!=="production"&&process.env.SYNTHETIC_SECURITY_UI_ENABLED==="true"){
+ app.use("/candidate/security",express.static(fileURLToPath(new URL("./candidate-ui/",import.meta.url)),{index:"index.html",dotfiles:"deny",fallthrough:false,redirect:true,etag:false,lastModified:false}));
+ app.use("/candidate/workspace",express.static(fileURLToPath(new URL("./product-ui/",import.meta.url)),{index:"index.html",dotfiles:"deny",fallthrough:false,redirect:true,etag:false,lastModified:false}));
+}
 app.use("/v1",authRequired());
 app.use("/v1",sessionRequired(checkIdentitySession));
 app.use("/v1/tenants/:tenantId/imports",importIntakeGate());
 app.use("/v1",express.json({limit:"100kb",inflate:false}));
 app.use("/v1",enforceJsonBudget);
 const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-for(const param of ["batchId","matchId","runId"])app.param(param,(req,res,next,value)=>uuidPattern.test(value)?next():res.status(400).json({error:"Invalid resource ID"}));
+for(const param of ["batchId","matchId","runId","proposalId","orderId","caseId","reviewId","poolId","recordId","contractId","jobId"])app.param(param,(req,res,next,value)=>uuidPattern.test(value)?next():res.status(400).json({error:"Invalid resource ID"}));
 const requestTenant=(req,tenantId,fn)=>withTenant(tenantId,req.identity.subject,fn,req.identity);
 
 async function membership(req,res,next){
@@ -161,7 +175,7 @@ app.post("/v1/tenants/:tenantId/calculations",membership,requireRole("owner","ad
  const {contractId,siteId,periodStart,periodEnd}=req.body||{};
  if(typeof contractId!=="string"||!uuidPattern.test(contractId)||typeof siteId!=="string"||!uuidPattern.test(siteId)||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodEnd<periodStart)return res.status(400).json({error:"Valid contract, site and period are required"});
  const result=await requestTenant(req,req.membership.tenantId,async client=>{
-  const base=await client.query("SELECT c.id,cv.version_no,cv.currency,cv.tax_basis FROM contracts c JOIN contract_versions cv ON cv.contract_id=c.id AND cv.tenant_id=c.tenant_id JOIN sites s ON s.id=$2 AND s.tenant_id=c.tenant_id AND s.business_id=c.business_id WHERE c.id=$1 AND c.tenant_id=$3 AND cv.approved_at IS NOT NULL AND cv.approved_by IS NOT NULL AND cv.effective_from <= $4::date AND (cv.effective_to IS NULL OR cv.effective_to >= $5::date)",[contractId,siteId,req.membership.tenantId,periodStart,periodEnd]);
+  const base=await client.query("SELECT c.id,cv.version_no,cv.currency,cv.tax_basis FROM contracts c JOIN contract_versions cv ON cv.contract_id=c.id AND cv.tenant_id=c.tenant_id JOIN sites s ON s.id=$2 AND s.tenant_id=c.tenant_id AND s.business_id=c.business_id WHERE c.id=$1 AND c.tenant_id=$3 AND private.workspace_contract_site_allowed(c.tenant_id,c.id,s.id) AND cv.approved_at IS NOT NULL AND cv.approved_by IS NOT NULL AND cv.effective_from <= $4::date AND (cv.effective_to IS NULL OR cv.effective_to >= $5::date)",[contractId,siteId,req.membership.tenantId,periodStart,periodEnd]);
   if(!base.rowCount)return {error:"No matching contract/site and effective contract version for this period"};
   if(base.rowCount!==1)return {error:"Overlapping contract versions make this period ambiguous. Correct the contract baseline before calculating."};
   const ledger=await client.query("SELECT to_regclass('public.allocation_lines') IS NOT NULL AS available");
@@ -261,7 +275,339 @@ app.post("/v1/tenants/:tenantId/calculations/:runId/export",membership,requireRo
  }catch(e){if(e.code==="42501")return res.status(403).json({error:"Export authority denied"});next(e);}
 });
 
-app.use((err,req,res,next)=>{if(res.destroyed||res.writableEnded)return;if(res.headersSent)return next(err);const id=randomUUID();const status=err.code==="P4501"?429:err.code==="23505"?409:err.code==="54000"?413:err.code==="22P02"||err.code==="22P05"?400:err.status===503?503:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);if(status===503)res.set("Retry-After","5");if(err.code==="P4501")res.set("Retry-After","3600");process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:err.code==="P4501"?"Financial access limit reached; retry later":status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":status===503?"Request capacity temporarily unavailable":"Internal server error",reference:id});});
+
+// Candidate-only workflows. ProductionReleaseGate precedes all of these.
+// Exact parameter allowlists and MFA protect the action-specific capabilities.
+const emptyScope="0".repeat(64);
+const exactBody=(body,keys)=>body!==null&&typeof body==="object"&&!Array.isArray(body)&&Object.keys(body).length===keys.length&&keys.every(k=>Object.hasOwn(body,k));
+const emptyQuery=req=>Object.keys(req.query).length===0;
+const failSensitive=(e,res,next)=>{
+ if(e.code==="42501"||e.status===403)return res.status(403).json({error:"Sensitive operation denied"});
+ if(e.code==="23514"||e.code==="23505")return res.status(409).json({error:"Evidence or approval state changed; review again"});
+ if(e.code==="22023"||e.code==="P0001")return res.status(422).json({error:"Operation is not eligible"});
+ return next(e);
+};
+const sensitiveQuery=(req,sql,args)=>requestTenant(req,req.membership.tenantId,async c=>(await c.query(sql,args)).rows[0]?.result);
+app.post("/v1/tenants/:tenantId/payroll/runs/:runId/submit",membership,requireRole("owner","admin","analyst"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!exactBody(req.body,["submit"])||req.body.submit!==true)return res.status(400).json({error:"Explicit submission required"});
+  const tenant=req.membership.tenantId,run=req.params.runId.toLowerCase();
+  const result=await sensitiveQuery(req,"SELECT private.api_payroll_review($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) AS result",sensitiveApiProof(tenant,run,"payroll_submit",emptyScope,req.identity));
+  return res.status(200).json(result);
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/payroll/proposals/:proposalId",membership,requireRole("owner","admin","reviewer"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  const tenant=req.membership.tenantId,proposal=req.params.proposalId.toLowerCase();
+  const result=await sensitiveQuery(req,"SELECT private.api_payroll_review($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) AS result",sensitiveApiProof(tenant,proposal,"payroll_read",emptyScope,req.identity));
+  return res.json(result);
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/payroll/proposals/:proposalId/confirm",membership,requireRole("owner","admin","reviewer"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!exactBody(req.body,["confirm","evidenceDigest"])||req.body.confirm!==true||typeof req.body.evidenceDigest!=="string"||!/^[a-f0-9]{64}$/.test(req.body.evidenceDigest))return res.status(400).json({error:"Explicit confirmation and reviewed evidence digest required"});
+  const tenant=req.membership.tenantId,proposal=req.params.proposalId.toLowerCase();
+  const result=await sensitiveQuery(req,"SELECT private.api_confirm_payroll($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) AS result",payrollConfirmationProof(tenant,proposal,req.body.evidenceDigest,req.identity));
+  return res.json(result);
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/privacy/account",membership,requireRole("owner","admin","analyst","reviewer","read_only"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  const tenant=req.membership.tenantId;
+  return res.json(await sensitiveQuery(req,"SELECT private.api_account_privacy($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",[...sensitiveApiProof(tenant,tenant,"account_read",emptyScope,req.identity),null]));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/privacy/account/correct-email",membership,requireRole("owner","admin","analyst","reviewer","read_only"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!exactBody(req.body,["confirm"])||req.body.confirm!==true)return res.status(400).json({error:"Explicit correction required"});
+  const email=req.identity.email;
+  if(req.identity.emailVerified!==true||typeof email!=="string"||email.length<3||email.length>254||!/^[^\s@\p{C}]+@[^\s@\p{C}]+$/u.test(email))return res.status(403).json({error:"Current issuer-verified email required"});
+  const tenant=req.membership.tenantId,scope=createHash("sha256").update(email,"utf8").digest("hex");
+  return res.json(await sensitiveQuery(req,"SELECT private.api_account_privacy($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",[...sensitiveApiProof(tenant,tenant,"account_correct_email",scope,req.identity),email]));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/privacy/invoices/:batchId/disposal-preview",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!exactBody(req.body,[]))return res.status(400).json({error:"Invalid preview request"});
+  const tenant=req.membership.tenantId,batch=req.params.batchId.toLowerCase();
+  const scopeDigest=await sensitiveQuery(req,"SELECT private.api_invoice_disposal_preview($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) AS result",sensitiveApiProof(tenant,batch,"invoice_disposal_preview",emptyScope,req.identity));
+  return res.json({batchId:batch,scopeDigest});
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/privacy/invoices/:batchId/disposals/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!exactBody(req.body,["step","scopeDigest","confirm"])||req.body.confirm!==true||!["request","approve","reject","consume"].includes(req.body.step)||typeof req.body.scopeDigest!=="string"||!/^[a-f0-9]{64}$/.test(req.body.scopeDigest))return res.status(400).json({error:"Explicit scoped operation required"});
+  const tenant=req.membership.tenantId,batch=req.params.batchId.toLowerCase(),order=req.params.orderId.toLowerCase();
+  const proof=securityWorkProof(tenant,order,"privacy_disposal",req.body.scopeDigest,req.body.step,req.identity);
+  const [t,o,_kind,scope,step,...authority]=proof;
+  return res.json(await sensitiveQuery(req,"SELECT private.api_invoice_disposal_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",[t,o,batch,scope,step,...authority]));
+ }catch(e){return failSensitive(e,res,next);}
+});
+
+
+const privacyActionMap={request:"privacy_case_request",intake:"privacy_case_intake",acknowledge:"privacy_case_acknowledge",resolve:"privacy_case_resolve",refuse:"privacy_case_refuse"};
+app.post("/v1/tenants/:tenantId/privacy/cases/:caseId",membership,requireRole("owner","admin","analyst","reviewer","read_only"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!req.body||!Object.hasOwn(privacyActionMap,req.body.action)||req.body.confirm!==true)return res.status(400).json({error:"Explicit privacy case action required"});
+  const a=req.body.action,opening=a==="request"||a==="intake",outcome=a==="resolve"||a==="refuse";
+  const keys=["action","confirm",...(opening?["kind"]:[]),...(outcome?["reasonCode"]:[]),...(a==="intake"||outcome?["evidenceDigest"]:[])];
+  if(!exactBody(req.body,keys))return res.status(400).json({error:"Unsupported privacy case inputs"});
+  const tenant=req.membership.tenantId,id=req.params.caseId.toLowerCase(),kind=opening?req.body.kind:null,reason=outcome?req.body.reasonCode:null,evidence=a==="intake"||outcome?req.body.evidenceDigest:null;
+  if(a!=="request"&&!["owner","admin"].includes(req.membership.role))return res.status(403).json({error:"Sensitive operation denied"});
+  const proof=privacyCaseProof(tenant,id,privacyActionMap[a],kind,reason,evidence,req.identity);
+  const result=await sensitiveQuery(req,"SELECT private.api_privacy_rights_case($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) AS result",[...proof,kind,reason,evidence]);
+  return res.json(result);
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/privacy/cases/:caseId",membership,requireRole("owner","admin","analyst","reviewer","read_only"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  const tenant=req.membership.tenantId,id=req.params.caseId.toLowerCase(),proof=privacyCaseProof(tenant,id,"privacy_case_status",null,null,null,req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_rights_case($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) AS result",[...proof,null,null,null]));
+ }catch(e){return failSensitive(e,res,next);}
+});
+
+
+const correctionReasons=["allocation_error","source_correction","duplicate_source","privacy_correction"];
+const validCorrectionInput=body=>typeof body.proposalId==="string"&&uuidPattern.test(body.proposalId)&&correctionReasons.includes(body.reason)&&typeof body.authorityEvidenceDigest==="string"&&/^[a-f0-9]{64}$/.test(body.authorityEvidenceDigest)&&!/^0+$/.test(body.authorityEvidenceDigest);
+app.post("/v1/tenants/:tenantId/payroll/runs/:runId/correction-preview",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!exactBody(req.body,["proposalId","reason","authorityEvidenceDigest"])||!validCorrectionInput(req.body))return res.status(400).json({error:"Exact correction scope required"});
+  const t=req.membership.tenantId,oldRun=req.params.runId.toLowerCase(),b=req.body;
+  const proof=payrollCorrectionPreviewProof(t,oldRun,b.proposalId.toLowerCase(),b.reason,b.authorityEvidenceDigest,req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_payroll_correction_preview($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) AS result",proof));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/payroll/corrections/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  const proof=payrollCorrectionStatusProof(req.membership.tenantId,req.params.orderId.toLowerCase(),req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_payroll_correction_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) AS result",proof));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/payroll/corrections/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body||{},consume=b.step==="consume";
+  if(!emptyQuery(req)||!exactBody(b,["oldRunId","proposalId","reason","authorityEvidenceDigest","scopeDigest","step","confirm",...(consume?["proposalDigest"]:[])])||b.confirm!==true||
+  !validCorrectionInput(b)||typeof b.oldRunId!=="string"||!uuidPattern.test(b.oldRunId)||!["request","approve","reject","consume"].includes(b.step)||
+  typeof b.scopeDigest!=="string"||!/^[a-f0-9]{64}$/.test(b.scopeDigest)||/^0+$/.test(b.scopeDigest)||
+  (consume&&(typeof b.proposalDigest!=="string"||!/^[a-f0-9]{64}$/.test(b.proposalDigest)||/^0+$/.test(b.proposalDigest))))return res.status(400).json({error:"Explicit exact correction action required"});
+  const proof=payrollCorrectionStepProof(req.membership.tenantId,req.params.orderId.toLowerCase(),b.oldRunId.toLowerCase(),b.proposalId.toLowerCase(),b.reason,b.authorityEvidenceDigest,b.scopeDigest,b.step,consume?b.proposalDigest:null,req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_payroll_correction_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) AS result",proof));
+ }catch(e){return failSensitive(e,res,next);}
+});
+
+
+const deliveryFields=["recipientType","recipientKeyDigest","senderKeyDigest","authorityDigest","redactionDigest","responseDigest","envelopeDigest"];
+const validDeliveryInput=b=>["self","assisted_subject","authorized_representative","former_user"].includes(b.recipientType)&&deliveryFields.slice(1).every(k=>typeof b[k]==="string"&&/^[a-f0-9]{64}$/.test(b[k])&&!/^0+$/.test(b[k]))&&b.recipientKeyDigest!==b.senderKeyDigest;
+app.post("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId/preview",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;
+  if(!emptyQuery(req)||!exactBody(b,deliveryFields)||!validDeliveryInput(b))return res.status(400).json({error:"Exact privacy response scope required"});
+  const args=privacyDeliveryPreviewProof(req.membership.tenantId,req.params.caseId.toLowerCase(),req.params.orderId.toLowerCase(),deliveryFields.map(k=>b[k]),req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_delivery_preview($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) AS result",args));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  const args=privacyDeliveryStatusProof(req.membership.tenantId,req.params.caseId.toLowerCase(),req.params.orderId.toLowerCase(),req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_delivery_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",args));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;
+  if(!emptyQuery(req)||!exactBody(b,[...deliveryFields,"scopeDigest","step","confirm"])||!validDeliveryInput(b)||b.confirm!==true||!["request","approve","reject","consume"].includes(b.step)||
+   typeof b.scopeDigest!=="string"||!/^[a-f0-9]{64}$/.test(b.scopeDigest)||/^0+$/.test(b.scopeDigest))return res.status(400).json({error:"Explicit scoped privacy action required"});
+  const args=privacyDeliveryStepProof(req.membership.tenantId,req.params.caseId.toLowerCase(),req.params.orderId.toLowerCase(),deliveryFields.map(k=>b[k]),b.scopeDigest,b.step,req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_delivery_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) AS result",args));
+ }catch(e){return failSensitive(e,res,next);}
+});
+
+
+const receiptFields=["challengeDigest","receiptDigest","receiptKeyDigest","verificationEvidenceDigest"];
+const validReceiptInput=b=>receiptFields.every(k=>typeof b[k]==="string"&&/^[a-f0-9]{64}$/.test(b[k])&&!/^0+$/.test(b[k]))&&b.challengeDigest!==b.receiptDigest;
+const receiptIds=req=>[req.membership.tenantId,req.params.caseId.toLowerCase(),req.params.orderId.toLowerCase(),req.params.reviewId.toLowerCase()];
+app.post("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId/receipts/:reviewId/preview",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;
+  if(!emptyQuery(req)||!exactBody(b,receiptFields)||!validReceiptInput(b))return res.status(400).json({error:"Exact receipt evidence scope required"});
+  const args=privacyReceiptPreviewProof(...receiptIds(req),receiptFields.map(k=>b[k]),req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_receipt_preview($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) AS result",args));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId/receipts/:reviewId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  const args=privacyReceiptStatusProof(...receiptIds(req),req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_receipt_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) AS result",args));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId/receipts/:reviewId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;
+  if(!emptyQuery(req)||!exactBody(b,[...receiptFields,"scopeDigest","step","confirm"])||!validReceiptInput(b)||b.confirm!==true||!["request","approve","reject","consume"].includes(b.step)||
+   typeof b.scopeDigest!=="string"||!/^[a-f0-9]{64}$/.test(b.scopeDigest)||/^0+$/.test(b.scopeDigest))return res.status(400).json({error:"Explicit scoped receipt action required"});
+  const args=privacyReceiptStepProof(...receiptIds(req),receiptFields.map(k=>b[k]),b.scopeDigest,b.step,req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_receipt_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) AS result",args));
+ }catch(e){return failSensitive(e,res,next);}
+});
+
+
+const dispatchIds=req=>[req.membership.tenantId,req.params.caseId.toLowerCase(),req.params.orderId.toLowerCase()];
+const validDispatchDigest=x=>typeof x==="string"&&/^[a-f0-9]{64}$/.test(x)&&!/^0+$/.test(x);
+app.get("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId/dispatch",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_dispatch_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",privacyDispatchStatusProof(...dispatchIds(req),req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId/dispatch",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;
+  if(!emptyQuery(req)||!b||b.confirm!==true||!["reserve","burn","revoke"].includes(b.step))return res.status(400).json({error:"Explicit dispatch action required"});
+  let input;
+  if(b.step==="revoke"){
+   if(!exactBody(b,["step","confirm","reasonCode","evidenceDigest"])||!["identity_uncertain","key_compromise","recipient_changed","authority_withdrawn","security_incident","ambiguous_dispatch"].includes(b.reasonCode)||!validDispatchDigest(b.evidenceDigest))return res.status(400).json({error:"Exact protective revocation required"});
+   input=[null,null,null,b.reasonCode,b.evidenceDigest];
+  }else{
+   if(!exactBody(b,["step","confirm","challengeDigest","receiptKeyDigest","expiresAtEpoch"])||!validDispatchDigest(b.challengeDigest)||!validDispatchDigest(b.receiptKeyDigest)||!Number.isSafeInteger(b.expiresAtEpoch)||b.expiresAtEpoch<1||b.expiresAtEpoch>4102444800)return res.status(400).json({error:"Exact dispatch reservation required"});
+   input=[b.challengeDigest,b.receiptKeyDigest,b.expiresAtEpoch,null,null];
+  }
+  const args=privacyDispatchStepProof(...dispatchIds(req),b.step,input,req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_dispatch_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) AS result",args));
+ }catch(e){return failSensitive(e,res,next);}
+});
+
+
+const intakeFields=["poolId","sourceNamespace","controlTotal","rowCount","authorityDigest","policyDigest","controlDigest","rows"];
+const intakeIds=req=>[req.membership.tenantId,req.params.batchId.toLowerCase(),req.params.orderId.toLowerCase()];
+function validatedPayrollIntake(b){
+ if(!b||!uuidPattern.test(b.poolId||"")||!uuidPattern.test(b.sourceNamespace||"")||typeof b.poolId!=="string"||typeof b.sourceNamespace!=="string"||
+ typeof b.controlTotal!=="string"||!/^(0|[1-9][0-9]{0,11})\.[0-9]{2}$/.test(b.controlTotal)||!Number.isSafeInteger(b.rowCount)||
+ ![b.authorityDigest,b.policyDigest,b.controlDigest].every(validDispatchDigest))return null;
+ const bytes=canonicalPayrollRows(b.rows);
+ if(!bytes||b.rows.length!==b.rowCount)return null;
+ const fileSha256=createHash("sha256").update(bytes).digest("hex");
+ if(new Set(b.rows.map(r=>r.source_row_key)).size!==b.rowCount||b.rows.reduce((n,r)=>n+BigInt(r.amount.replace(".","")),0n)!==BigInt(b.controlTotal.replace(".","")))return null;
+ return {...Object.fromEntries(intakeFields.map(k=>[k,b[k]])),poolId:b.poolId.toLowerCase(),sourceNamespace:b.sourceNamespace.toLowerCase(),fileSha256};
+}
+app.post("/v1/tenants/:tenantId/payroll/intakes/:batchId/orders/:orderId/preview",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!exactBody(req.body,intakeFields))return res.status(400).json({error:"Exact minimized payroll source required"});
+  const input=validatedPayrollIntake(req.body);
+  if(!input)return res.status(400).json({error:"Minimized payroll source or controls invalid"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_payroll_intake_preview($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21) AS result",payrollIntakePreviewProof(...intakeIds(req),input,req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/payroll/intakes/:batchId/orders/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_payroll_intake_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",payrollIntakeStatusProof(...intakeIds(req),req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/payroll/intakes/:batchId/orders/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;
+  if(!emptyQuery(req)||!exactBody(b,[...intakeFields,"step","scopeDigest","confirm"])||b.confirm!==true||!["request","approve","reject","consume"].includes(b.step)||!validDispatchDigest(b.scopeDigest))
+   return res.status(400).json({error:"Explicit scoped intake action required"});
+  const input=validatedPayrollIntake(b);
+  if(!input)return res.status(400).json({error:"Minimized payroll source or controls invalid"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_payroll_intake_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20) AS result",payrollIntakeStepProof(...intakeIds(req),input,b.scopeDigest,b.step,req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+
+
+const allocationIds=req=>[req.membership.tenantId,req.params.poolId.toLowerCase(),req.params.runId.toLowerCase()];
+app.post("/v1/tenants/:tenantId/payroll/pools/:poolId/allocations/:runId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;
+  if(!emptyQuery(req)||!exactBody(b,["confirm","lines"])||b.confirm!==true||canonicalAllocationMapping(req.params.poolId.toLowerCase(),b.lines)===null)return res.status(400).json({error:"Exact candidate mapping required"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_payroll_allocation_build($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) AS result",payrollAllocationBuildProof(...allocationIds(req),b.lines,req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/payroll/pools/:poolId/allocations/:runId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_payroll_allocation_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",payrollAllocationStatusProof(...allocationIds(req),req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+
+app.post("/v1/tenants/:tenantId/workspace/records/:recordId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;if(!emptyQuery(req)||!exactBody(b,["kind","parentId","relatedId","label","confirm"])||b.confirm!==true)return res.status(400).json({error:"Explicit workspace creation required"});
+  const {confirm,...input}=b;if(!workspaceRecordFields(input))return res.status(400).json({error:"Invalid managed record"});
+  return res.status(201).json(await sensitiveQuery(req,"SELECT private.api_workspace_create($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) AS result",workspaceCreateProof(req.membership.tenantId,req.params.recordId.toLowerCase(),input,req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/workspace/records-by-kind/:kind",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const {cursor}=req.query;
+  if(!WORKSPACE_KINDS.includes(req.params.kind)||Object.keys(req.query).some(k=>k!=="cursor")||(cursor!==undefined&&(typeof cursor!=="string"||!uuidPattern.test(cursor))))return res.status(400).json({error:"Invalid workspace page"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_workspace_read($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) AS result",workspaceReadProof(req.membership.tenantId,req.params.kind,cursor?.toLowerCase()??null,req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/workspace/contracts/:contractId/versions/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;if(!emptyQuery(req)||!exactBody(b,["versionId","periodStart","periodEnd","price","taxBasis","billingBasis","evidenceDigest","step","confirm"])||b.confirm!==true||!["request","approve","reject","consume"].includes(b.step))return res.status(400).json({error:"Explicit baseline action required"});
+  const {confirm,step,...input}=b;if(!workspaceVersionFields(input))return res.status(400).json({error:"Invalid commercial baseline terms"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_workspace_version_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) AS result",workspaceVersionProof(req.membership.tenantId,req.params.contractId.toLowerCase(),req.params.orderId.toLowerCase(),input,step,req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/workspace/contracts/:contractId/versions/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_workspace_version_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",workspaceVersionStatusProof(req.membership.tenantId,req.params.contractId.toLowerCase(),req.params.orderId.toLowerCase(),req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+
+
+app.post("/v1/tenants/:tenantId/workspace/jobs/:jobId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!workspaceJobFields(req.body))return res.status(400).json({error:"Exact job action and evidence required"});
+  const result=await sensitiveQuery(req,"SELECT private.api_workspace_job_write($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) AS result",workspaceJobWriteProof(req.membership.tenantId,req.params.jobId.toLowerCase(),req.body,req.identity));
+  return res.json(verifiedJobSummary(result));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/workspace/jobs/:jobId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  const result=await sensitiveQuery(req,"SELECT private.api_workspace_job_read($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) AS result",workspaceJobReadProof(req.membership.tenantId,req.params.jobId.toLowerCase(),"status",null,req.identity));
+  return res.json(verifiedJobSummary(result));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/workspace/jobs",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const {cursor}=req.query;if(Object.keys(req.query).some(k=>k!=="cursor")||(cursor!==undefined&&(typeof cursor!=="string"||!uuidPattern.test(cursor))))return res.status(400).json({error:"Invalid job page"});
+  const tenant=req.membership.tenantId,result=await sensitiveQuery(req,"SELECT private.api_workspace_job_read($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) AS result",workspaceJobReadProof(tenant,tenant,"list",cursor?.toLowerCase()??null,req.identity));
+  return res.json({...result,items:result.items.map(verifiedJobSummary)});
+ }catch(e){return failSensitive(e,res,next);}
+});
+
+const invoiceIntakeIds=req=>[req.membership.tenantId,req.params.batchId.toLowerCase(),req.params.orderId.toLowerCase()];
+app.post("/v1/tenants/:tenantId/invoice-intakes/:batchId/orders/:orderId/preview",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req)||!invoiceIntakeFields(req.body))return res.status(400).json({error:"Exact invoice control totals and evidence required"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_invoice_intake_preview($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) AS result",invoiceIntakePreviewProof(...invoiceIntakeIds(req),req.body,req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/invoice-intakes/:batchId/orders/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_invoice_intake_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",invoiceIntakeStatusProof(...invoiceIntakeIds(req),req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/invoice-intakes/:batchId/orders/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;if(!emptyQuery(req)||!exactBody(b,["controlTotal","rowCount","evidenceDigest","scopeDigest","step","confirm"])||b.confirm!==true||!invoiceDigest(b.scopeDigest)||!["request","approve","reject","consume"].includes(b.step))return res.status(400).json({error:"Explicit invoice review action required"});
+  const {scopeDigest,step,confirm,...input}=b;if(!invoiceIntakeFields(input))return res.status(400).json({error:"Invalid invoice controls"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_invoice_intake_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) AS result",invoiceIntakeStepProof(...invoiceIntakeIds(req),input,scopeDigest,step,req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.use((err,req,res,next)=>{if(res.destroyed||res.writableEnded)return;if(res.headersSent)return next(err);const id=randomUUID();const status=err.code==="P4501"?429:(err.code==="23505"||err.code==="P4502")?409:err.code==="54000"?413:err.code==="22P02"||err.code==="22P05"?400:err.status===503?503:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);if(status===503)res.set("Retry-After","5");if(err.code==="P4501")res.set("Retry-After","3600");process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:err.code==="P4501"?"Financial access limit reached; retry later":err.code==="P4502"?"Payroll evidence was corrected; recalculate before relying on this result":status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":status===503?"Request capacity temporarily unavailable":"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
 if(process.env.NODE_ENV==="production"){
  try{if(!await readiness.check())throw new Error("Not ready");}

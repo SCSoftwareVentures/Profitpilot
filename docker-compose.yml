@@ -60,6 +60,30 @@ services:
       - ./database/migrations/042_security_catalog_internal_integrity.sql:/docker-entrypoint-initdb.d/044-security-catalog-internal-integrity.sql:ro
       - ./database/migrations/043_security_recovery_inventory.sql:/docker-entrypoint-initdb.d/045-security-recovery-inventory.sql:ro
       - ./database/migrations/044_recovery_catalog_gate.sql:/docker-entrypoint-initdb.d/046-recovery-catalog-gate.sql:ro
+      - ./database/migrations/045_payroll_proposal_review.sql:/docker-entrypoint-initdb.d/047-payroll-proposal-review.sql:ro
+      - ./database/migrations/046_payroll_attested_confirmation.sql:/docker-entrypoint-initdb.d/048-payroll-attested-confirmation.sql:ro
+      - ./database/migrations/047_security_work_authority.sql:/docker-entrypoint-initdb.d/049-security-work-authority.sql:ro
+      - ./database/migrations/048_sensitive_api_capabilities.sql:/docker-entrypoint-initdb.d/050-sensitive-api-capabilities.sql:ro
+      - ./database/migrations/049_privacy_rights_cases.sql:/docker-entrypoint-initdb.d/051-privacy-rights-cases.sql:ro
+      - ./database/migrations/050_payroll_correction_supersession.sql:/docker-entrypoint-initdb.d/052-payroll-correction-supersession.sql:ro
+      - ./database/migrations/051_sensitive_recovery_fence.sql:/docker-entrypoint-initdb.d/053-sensitive-recovery-fence.sql:ro
+      - ./database/migrations/052_payroll_correction_operator_api.sql:/docker-entrypoint-initdb.d/054-payroll-correction-operator-api.sql:ro
+      - ./database/migrations/053_financial_retention_register.sql:/docker-entrypoint-initdb.d/055-financial-retention-register.sql:ro
+      - ./database/migrations/054_retention_work_authority.sql:/docker-entrypoint-initdb.d/056-retention-work-authority.sql:ro
+      - ./database/migrations/055_financial_dependency_backup_plan.sql:/docker-entrypoint-initdb.d/057-financial-dependency-backup-plan.sql:ro
+      - ./database/migrations/056_privacy_delivery_authority.sql:/docker-entrypoint-initdb.d/058-privacy-delivery-authority.sql:ro
+      - ./database/migrations/057_privacy_delivery_operator_api.sql:/docker-entrypoint-initdb.d/059-privacy-delivery-operator-api.sql:ro
+      - ./database/migrations/058_privacy_receipt_evidence.sql:/docker-entrypoint-initdb.d/060-privacy-receipt-evidence.sql:ro
+      - ./database/migrations/059_privacy_receipt_operator_api.sql:/docker-entrypoint-initdb.d/061-privacy-receipt-operator-api.sql:ro
+      - ./database/migrations/060_privacy_dispatch_fence.sql:/docker-entrypoint-initdb.d/062-privacy-dispatch-fence.sql:ro
+      - ./database/migrations/061_privacy_dispatch_operator_api.sql:/docker-entrypoint-initdb.d/063-privacy-dispatch-operator-api.sql:ro
+      - ./database/migrations/062_privacy_key_lifecycle.sql:/docker-entrypoint-initdb.d/064-privacy-key-lifecycle.sql:ro
+      - ./database/migrations/063_reviewed_payroll_intake.sql:/docker-entrypoint-initdb.d/065-reviewed-payroll-intake.sql:ro
+      - ./database/migrations/064_payroll_intake_operator_api.sql:/docker-entrypoint-initdb.d/066-payroll-intake-operator-api.sql:ro
+      - ./database/migrations/065_payroll_allocation_builder.sql:/docker-entrypoint-initdb.d/067-payroll-allocation-builder.sql:ro
+      - ./database/migrations/066_workspace_commercial_baselines.sql:/docker-entrypoint-initdb.d/068-workspace-commercial-baselines.sql:ro
+      - ./database/migrations/067_workspace_job_readiness.sql:/docker-entrypoint-initdb.d/069-workspace-job-readiness.sql:ro
+      - ./database/migrations/068_reviewed_invoice_intake.sql:/docker-entrypoint-initdb.d/070-reviewed-invoice-intake.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
@@ -71,6 +95,7 @@ services:
     environment:
       # Local loopback development only; production requires a separate TLS-enabled deployment.
       NODE_ENV: development
+      SYNTHETIC_SECURITY_UI_ENABLED: ${SYNTHETIC_SECURITY_UI_ENABLED:-false}
       PORT: 8080
       DATABASE_URL: postgres://profitpilot_app:${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD}@db:5432/profitpilot
       DATABASE_SSL: "false"

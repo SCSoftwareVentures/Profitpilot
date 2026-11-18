@@ -2,12 +2,12 @@ import {createHash,createPrivateKey,createPublicKey,sign,verify} from "node:cryp
 import {createReadStream,lstatSync,readFileSync,writeFileSync} from "node:fs";
 import {pathToFileURL} from "node:url";
 import pg from "pg";
-const FORMAT="profitpilot-security-recovery-v1",MAX=100000,MAX_BYTES=32000000;
+const FORMAT="profitpilot-security-recovery-v2",MAX=100000,MAX_BYTES=32000000;
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/,SHA=/^[a-f0-9]{64}$/;
 const fields={
- tenants:["id","status"],users:["id","status","subject_hash"],memberships:["tenant_id","user_id","role","status"],cutoffs:["user_id","revoked_through"],sessions:["user_id","session_digest"],keys:["key_id","active"],incidents:["incident_id","tenant_id","category","released"]
+ tenants:["id","status"],users:["id","status","subject_hash"],memberships:["tenant_id","user_id","role","status"],cutoffs:["user_id","revoked_through"],sessions:["user_id","session_digest"],keys:["key_id","active"],incidents:["incident_id","tenant_id","category","released"],sensitive:["digest"]
 };
-const key=(k,x)=>k==="memberships"?x.tenant_id+":"+x.user_id:k==="sessions"?x.user_id+":"+x.session_digest:k==="cutoffs"?x.user_id:k==="keys"?x.key_id:k==="incidents"?x.incident_id:x.id;
+const key=(k,x)=>k==="sensitive"?"singleton":k==="memberships"?x.tenant_id+":"+x.user_id:k==="sessions"?x.user_id+":"+x.session_digest:k==="cutoffs"?x.user_id:k==="keys"?x.key_id:k==="incidents"?x.incident_id:x.id;
 const exact=(v,keys)=>v!==null&&typeof v==="object"&&!Array.isArray(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
 const matches=(v,p)=>typeof v==="string"&&p.test(v);
 const oneOf=(v,values)=>values.includes(v);
@@ -15,6 +15,7 @@ const iso=x=>typeof x==="string"&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$
 export function canonicalSecurityInventory(input){
  const kinds=Object.keys(fields);
  if(!exact(input,kinds)||kinds.some(k=>!Array.isArray(input[k]))||kinds.reduce((n,k)=>n+input[k].length,0)>MAX)throw Error("Invalid security inventory");
+ if(input.sensitive.length!==1||!matches(input.sensitive[0]?.digest,SHA)||/^0+$/.test(input.sensitive[0].digest))throw Error("Missing sensitive recovery fingerprint");
  const out={};
  for(const k of kinds){
   const rows=input[k].map(x=>{
@@ -74,6 +75,7 @@ export function recoveryPlan(current,authoritative){
  const desired=Object.fromEntries(Object.keys(fields).map(k=>[k,new Map(a[k].map(x=>[key(k,x),x]))]));
  const plan={memberships:[],tenants:[],users:[],keys:[],cutoffs:[],sessions:[],incidents:[]};
  const conflict=()=>{throw Error("Manual security reconciliation required; keep target isolated");};
+ if(c.sensitive[0].digest!==a.sensitive[0].digest)conflict();
  for(const k of ["tenants","users","memberships","keys"]){
   if(c[k].length!==a[k].length||c[k].some(x=>!desired[k].has(key(k,x))))conflict();
   for(const x of a[k]){

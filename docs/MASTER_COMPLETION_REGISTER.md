@@ -5,7 +5,11 @@
 **Visibility:** public; synthetic fixtures only  
 **Purpose:** one authoritative view of what is documented, what has been tested, what remains unproven, who must supply evidence and what constitutes completion.
 
-## 1. Executive status
+## Current engineering snapshot — 18 November 2026
+
+The [current engineering and acquisition readiness register](CURRENT_ENGINEERING_READINESS.md) supersedes older branch references and implementation-state assertions below. Prior sections remain historical records; they are not exact-head evidence. Production remains closed.
+
+## 1. Executive status (historical)
 
 **Overall status: NOT COMPLETE — active hardening and product implementation continue; production, customer validation and acquisition readiness remain unproven.**
 
