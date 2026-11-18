@@ -65,6 +65,7 @@ services:
       - ./database/migrations/047_security_work_authority.sql:/docker-entrypoint-initdb.d/049-security-work-authority.sql:ro
       - ./database/migrations/048_sensitive_api_capabilities.sql:/docker-entrypoint-initdb.d/050-sensitive-api-capabilities.sql:ro
       - ./database/migrations/049_privacy_rights_cases.sql:/docker-entrypoint-initdb.d/051-privacy-rights-cases.sql:ro
+      - ./database/migrations/050_payroll_correction_supersession.sql:/docker-entrypoint-initdb.d/052-payroll-correction-supersession.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
