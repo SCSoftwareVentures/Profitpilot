@@ -19,13 +19,14 @@ test("HTTP quarantine requires fresh MFA and separate scan/approval, promotes ex
  await new Promise(resolve=>jwks.listen(0,"127.0.0.1",resolve));
  Object.assign(process.env,{NODE_ENV:"test",DATABASE_URL:process.env.TEST_APP_DATABASE_URL,AUTH_ISSUER:issuer,AUTH_AUDIENCE:audience,AUTH_JWKS_URL:"http://127.0.0.1:"+jwks.address().port+"/jwks",QUARANTINE_UPLOADS_ENABLED:"true",QUARANTINE_KEY_ID:keyId,QUARANTINE_ENCRYPTION_KEY:secret});
  const {default:app}=await import("../server/index.js");
- const {pool,withTenant}=await import("../server/db.js");
+ const {pool,withTenant,sessionDigest}=await import("../server/db.js");
+ const {promotionProof}=await import("../server/intake-security.js");
  const api=createServer(app);
  await new Promise(resolve=>api.listen(0,"127.0.0.1",resolve));
  const base="http://127.0.0.1:"+api.address().port;
- async function request(batch,suffix,{method="POST",who=subject,t=tenant,mfa=true,body,type}={}){
+ async function request(batch,suffix,{method="POST",who=subject,t=tenant,mfa=true,session="ci-promotion-"+who,body,type}={}){
   const now=Math.floor(Date.now()/1000);
-  const token=await new SignJWT({sid:"ci-promotion-"+who,auth_time:now-10,amr:mfa?["pwd","mfa"]:["pwd"]}).setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(issuer).setAudience(audience).setSubject(who).setIssuedAt().setExpirationTime("5m").sign(privateKey);
+  const token=await new SignJWT({sid:session,auth_time:now-10,amr:mfa?["pwd","mfa"]:["pwd"]}).setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(issuer).setAudience(audience).setSubject(who).setIssuedAt().setExpirationTime("5m").sign(privateKey);
   const headers={authorization:"Bearer "+token};if(type)headers["content-type"]=type;
   return fetch(base+"/v1/tenants/"+t+"/imports/"+batch+suffix,{method,headers,body});
  }
@@ -83,6 +84,29 @@ test("HTTP quarantine requires fresh MFA and separate scan/approval, promotes ex
   await admin.query("SELECT private.set_import_disposal_hold($1,$2,true,'CI_PROMOTION_HOLD')",[tenant,third.batch]);
   assert.equal((await runQuarantineCycle(scanner,{keyId,secret,scan,limit:1})).promotionFailed,1);
   assert.equal(await count(third),0);
+  const fourth=await seed("INV-PROMO-D");
+  assert.equal((await upload(fourth)).status,201);
+  assert.equal((await runQuarantineCycle(scanner,{keyId,secret,scan,limit:1})).contentValidated,1);
+  await assert.rejects(()=>withTenant(tenant,subject,c=>c.query("SELECT private.approve_quarantine_promotion($1,$2)",[tenant,fourth.batch])),/permission denied/i);
+  const now=Math.floor(Date.now()/1000),approvalSession="ci-revoked-approval";
+  const valid=promotionProof(tenant,fourth.batch,{subject,mfa:true,authTime:now-10,issuedAt:now,sessionId:approvalSession});
+  const approveSql="SELECT private.approve_quarantine_promotion_attested($1,$2,$3,$4,$5,$6,$7,$8,$9)";
+  await assert.rejects(()=>withTenant(tenant,subject,c=>c.query(approveSql,[...valid.slice(0,-1),"0".repeat(64)])),e=>e.code==="42501");
+  await assert.rejects(()=>withTenant(tenant,subject,c=>c.query(approveSql,[tenant,third.batch,...valid.slice(2)])),e=>e.code==="42501");
+  assert.equal((await request(fourth.batch,"/file/approve",{session:approvalSession})).status,202);
+  assert.equal((await admin.query("SELECT approval_session_digest FROM private.quarantine_promotions WHERE batch_id=$1",[fourth.batch])).rows[0].approval_session_digest,sessionDigest(approvalSession));
+  const fourthClaim=(await scanner.query("SELECT * FROM private.claim_quarantine_promotion()")).rows[0];
+  assert.equal(fourthClaim.batch_id,fourth.batch);
+  await admin.query("SELECT private.revoke_identity_access($1,'revoke_session','CI_APPROVAL_REVOKED',$2)",[user,sessionDigest(approvalSession)]);
+  assert.equal((await scanner.query("SELECT private.finish_quarantine_promotion($1,$2,$3,$4) AS n",[tenant,fourth.batch,fourthClaim.lease_id,JSON.stringify(fourth.rows)])).rows[0].n,0);
+  assert.equal(await count(fourth),0);
+  assert.equal((await request(fourth.batch,"/file/approve",{session:approvalSession})).status,403);
+  const fifth=await seed("INV-PROMO-E");
+  assert.equal((await upload(fifth)).status,201);
+  assert.equal((await runQuarantineCycle(scanner,{keyId,secret,scan,limit:1})).contentValidated,1);
+  assert.equal((await approve(fifth)).status,202);
+  assert.equal((await runQuarantineCycle(scanner,{keyId,secret,scan,limit:1})).promoted,1,"independent unrevoked session remains usable");
+  assert.equal(await count(fifth),1);
   assert.equal((await admin.query("SELECT count(*)::int AS n FROM private.quarantine_insert_authority")).rows[0].n,0);
   assert.equal((await admin.query("SELECT private.verify_audit_chain($1) AS ok",[tenant])).rows[0].ok,true);
  }finally{
