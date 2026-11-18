@@ -1,36 +1,34 @@
 #!/usr/bin/env bash
-# A real daemon in a disposable CI directory, with one local synthetic hash
-# signature. This does not simulate a successful fresh public CVD. Production
-# acceptance separately requires the approved live fresh-signature daemon.
+# Use the actual authenticated distribution's ClamAV installation and
+# current official definitions. This is an ephemeral CI daemon, not a
+# production deployment. No freshness bypass or substitute test signatures.
 set -euo pipefail
 umask 077
-WORK="$(mktemp -d "$RUNNER_TEMP/pp-clamav-XXXXXX")"
+WORK="$(mktemp -d /tmp/pp-clamav-XXXXXX)"
 PID=""
 cleanup(){ if [ -n "$PID" ]; then kill "$PID" 2>/dev/null || true; wait "$PID" 2>/dev/null || true; fi; rm -rf "$WORK"; }
 trap cleanup EXIT
-mkdir "$WORK/db"
-printf '%s' 'ProfitPilot disposable scanner detection control 2026' > "$WORK/test-control.txt"
-SIZE="$(wc -c < "$WORK/test-control.txt" | tr -d ' ')"
-HASH="$(md5sum "$WORK/test-control.txt" | cut -d ' ' -f 1)"
-printf '%s:%s:ProfitPilot.Synthetic.Test\n' "$HASH" "$SIZE" > "$WORK/db/synthetic.hdb"
+# Freshclam's distribution setup may already have the current official
+# database; refresh only if the required version is missing or stale.
+if ! clamd --version | node -e 'let s="";process.stdin.on("data",b=>s+=b);process.stdin.on("end",async()=>{const {signaturesFresh}=await import("./server/clamav.js");if(!signaturesFresh(s.trim()))process.exitCode=1})'; then
+  sudo freshclam --stdout
+fi
+test -d /var/lib/clamav
 cat > "$WORK/clamd.conf" <<EOF
 Foreground yes
 LocalSocket $WORK/clamd.sock
 LocalSocketMode 0600
-DatabaseDirectory $WORK/db
+DatabaseDirectory /var/lib/clamav
 MaxThreads 2
-MaxConnectionQueueLength 8
 StreamMaxLength 64K
-MaxScanSize 2M
-MaxFileSize 1M
 EOF
 TZ=UTC clamd --config-file="$WORK/clamd.conf" > "$WORK/clamd.log" 2>&1 &
 PID=$!
-for _ in $(seq 1 30); do
-  test -d "$WORK/db"
+for _ in $(seq 1 60); do
   if [ -S "$WORK/clamd.sock" ]; then break; fi
-  kill -0 "$PID"
+  if ! kill -0 "$PID" 2>/dev/null; then cat "$WORK/clamd.log"; exit 1; fi
   sleep 1
 done
-test -S "$WORK/clamd.sock"
+if [ ! -S "$WORK/clamd.sock" ]; then cat "$WORK/clamd.log"; exit 1; fi
 CLAMAV_TEST_SOCKET="$WORK/clamd.sock" node --test tests/clamav-engine.integration.test.js
+CLAMAV_SOCKET_PATH="$WORK/clamd.sock" node scripts/check-live-scanner.js
