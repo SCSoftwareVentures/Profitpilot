@@ -65,6 +65,18 @@ test("synthetic logical backup restores all source rows and preserves tenant bou
   try{await securityReader.query("SET ROLE profitpilot_recovery_reader");secInventory=await readSecurityInventory(securityReader);await assert.rejects(()=>securityReader.query("SELECT * FROM public.users"),/permission denied/i);}
   finally{await securityReader.query("RESET ROLE");securityReader.release();}
   await assert.rejects(()=>runtime.query("SELECT private.security_recovery_inventory()"),/permission denied/i);
+  // A drifted authoritative catalogue must refuse both recovery inventories.
+  const drift=await source.connect();
+  try{
+   await drift.query("BEGIN");
+   await drift.query("GRANT UPDATE(decision) ON public.mapping_decisions TO profitpilot_app");
+   await drift.query("SET LOCAL ROLE profitpilot_recovery_reader");
+   for(const fn of ["security_recovery_inventory","privacy_recovery_inventory"]){
+    await drift.query("SAVEPOINT probe");
+    await assert.rejects(()=>drift.query("SELECT private."+fn+"()"),e=>e.code==="55000");
+    await drift.query("ROLLBACK TO SAVEPOINT probe");
+   }
+  }finally{await drift.query("ROLLBACK");drift.release();}
   const keys=generateKeyPairSync("ed25519"),archive=process.env.TEST_RESTORE_BACKUP_SHA256;
   const securityDoc=signSecurityRecovery(secInventory,archive,keys.privateKey);
   const securityBinding={backupSha256:archive,expectedManifestSha256:securityRecoveryDigest(securityDoc)};
