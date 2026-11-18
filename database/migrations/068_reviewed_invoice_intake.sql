@@ -264,12 +264,18 @@ BEGIN
  IF linked THEN RAISE EXCEPTION 'Reviewed invoice evidence is immutable' USING ERRCODE='55000'; END IF;
  -- Prevent moving an unmanaged row into an already managed identity.
  IF TG_OP='UPDATE' THEN
-  IF TG_TABLE_NAME='invoice_lines' AND EXISTS(SELECT 1 FROM private.invoice_intake_lines WHERE tenant_id=NEW.tenant_id AND (invoice_id=NEW.invoice_id OR raw_row_id=NEW.source_row_id))
-  THEN RAISE EXCEPTION 'Reviewed invoice evidence is immutable' USING ERRCODE='55000'; END IF;
-  IF TG_TABLE_NAME='match_reviews' AND EXISTS(SELECT 1 FROM private.invoice_intake_lines WHERE tenant_id=NEW.tenant_id AND line_id=NEW.invoice_line_id)
-  THEN RAISE EXCEPTION 'Reviewed invoice evidence is immutable' USING ERRCODE='55000'; END IF;
-  IF TG_TABLE_NAME='raw_import_rows' AND EXISTS(SELECT 1 FROM private.invoice_intake_receipts WHERE tenant_id=NEW.tenant_id AND batch_id=NEW.batch_id)
-  THEN RAISE EXCEPTION 'Reviewed invoice evidence is immutable' USING ERRCODE='55000'; END IF;
+  CASE TG_TABLE_NAME
+  WHEN 'invoice_lines' THEN
+   IF EXISTS(SELECT 1 FROM private.invoice_intake_lines WHERE tenant_id=NEW.tenant_id AND (invoice_id=NEW.invoice_id OR raw_row_id=NEW.source_row_id))
+   THEN RAISE EXCEPTION 'Reviewed invoice evidence is immutable' USING ERRCODE='55000'; END IF;
+  WHEN 'match_reviews' THEN
+   IF EXISTS(SELECT 1 FROM private.invoice_intake_lines WHERE tenant_id=NEW.tenant_id AND line_id=NEW.invoice_line_id)
+   THEN RAISE EXCEPTION 'Reviewed invoice evidence is immutable' USING ERRCODE='55000'; END IF;
+  WHEN 'raw_import_rows' THEN
+   IF EXISTS(SELECT 1 FROM private.invoice_intake_receipts WHERE tenant_id=NEW.tenant_id AND batch_id=NEW.batch_id)
+   THEN RAISE EXCEPTION 'Reviewed invoice evidence is immutable' USING ERRCODE='55000'; END IF;
+  ELSE NULL;
+  END CASE;
  END IF;
  IF TG_OP='DELETE' THEN RETURN OLD; END IF;RETURN NEW;
 END $fn$;
