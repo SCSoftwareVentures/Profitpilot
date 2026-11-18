@@ -56,7 +56,7 @@ test("reconciliation runs inside calculation creation, never match review",async
  assert.ok(matchStart>=0&&calculationStart>matchStart&&calculationRead>calculationStart);
  assert.ok(!source.slice(matchStart,calculationStart).includes("reconcileFinancialReport("));
  assert.ok(source.slice(calculationStart,calculationRead).includes("const reconciliation=reconcileFinancialReport(outputs,"));
- assert.ok(source.slice(calculationStart,calculationRead).includes("reconciliation})"));
+ assert.ok(source.slice(calculationStart,calculationRead).includes("reconciliation,sourceEvidence})"));
 });
 
 test("financial calculation persists bounded source-row fingerprints, not source identifiers",async()=>{
