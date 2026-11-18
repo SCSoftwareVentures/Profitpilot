@@ -1,6 +1,9 @@
 services:
   db:
-    image: postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e
+    image: profitpilot-postgres:local
+    build:
+      context: ./database
+      dockerfile: Dockerfile.postgres
     environment:
       POSTGRES_DB: profitpilot
       POSTGRES_USER: profitpilot_admin
