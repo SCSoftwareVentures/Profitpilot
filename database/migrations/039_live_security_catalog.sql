@@ -10,8 +10,8 @@ REVOKE ALL ON private.security_catalog_baseline FROM PUBLIC,profitpilot_app;
 CREATE TRIGGER security_catalog_baseline_immutable BEFORE UPDATE OR DELETE OR TRUNCATE ON private.security_catalog_baseline
  FOR EACH STATEMENT EXECUTE FUNCTION private.deny_audit_mutation();
 
-CREATE FUNCTION private.security_catalog_digest()
-RETURNS text LANGUAGE sql STABLE SET search_path=pg_catalog AS $fn$
+CREATE FUNCTION private.security_catalog_entries()
+RETURNS SETOF jsonb LANGUAGE sql STABLE SET search_path=pg_catalog AS $fn$
  WITH relations AS (
   SELECT c.*,n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
   WHERE n.nspname IN ('public','private') AND c.relkind IN ('r','p','v','m','f','S')
@@ -60,13 +60,17 @@ RETURNS text LANGUAGE sql STABLE SET search_path=pg_catalog AS $fn$
    CROSS JOIN LATERAL aclexplode(CASE WHEN cardinality(d.defaclacl)>0 THEN d.defaclacl END) a WHERE d.defaclnamespace=0 OR n.nspname IN ('public','private')
   UNION ALL SELECT jsonb_build_array('extension',e.extname,e.extversion,n.nspname,pg_get_userbyid(e.extowner)) FROM pg_extension e JOIN pg_namespace n ON n.oid=e.extnamespace
  )
- SELECT encode(public.digest(convert_to(coalesce(string_agg(item::text,E'\n' ORDER BY item::text COLLATE "C"),''),'UTF8'),'sha256'),'hex') FROM entries
+ SELECT item FROM entries
+$fn$;
+CREATE FUNCTION private.security_catalog_digest()
+RETURNS text LANGUAGE sql STABLE SET search_path=pg_catalog AS $fn$
+ SELECT encode(public.digest(convert_to(coalesce(string_agg(item::text,E'\n' ORDER BY item::text COLLATE "C"),''),'UTF8'),'sha256'),'hex') FROM private.security_catalog_entries() AS e(item)
 $fn$;
 CREATE FUNCTION private.verify_security_catalog()
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog AS $fn$
  SELECT coalesce((SELECT revision=39 AND digest=private.security_catalog_digest() FROM private.security_catalog_baseline WHERE singleton),false)
 $fn$;
-REVOKE ALL ON FUNCTION private.security_catalog_digest(),private.verify_security_catalog() FROM PUBLIC,profitpilot_app;
+REVOKE ALL ON FUNCTION private.security_catalog_entries(),private.security_catalog_digest(),private.verify_security_catalog() FROM PUBLIC,profitpilot_app;
 GRANT EXECUTE ON FUNCTION private.verify_security_catalog() TO profitpilot_app;
 INSERT INTO private.security_catalog_baseline(singleton,revision,digest) VALUES(true,39,private.security_catalog_digest());
 COMMIT;
