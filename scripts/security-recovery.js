@@ -41,7 +41,9 @@ export function canonicalSecurityInventory(input){
 }
 function payload(inventory,backupSha256,issuedAt){
  if(!matches(backupSha256,SHA)||!iso(issuedAt)||Date.parse(issuedAt)>Date.now()+5000)throw Error("Invalid recovery binding");
- return {format:FORMAT,backupSha256,issuedAt,inventory:canonicalSecurityInventory(inventory)};
+ const canonical=canonicalSecurityInventory(inventory);
+ if(canonical.cutoffs.some(x=>BigInt(x.revoked_through)>BigInt(Math.floor(Date.parse(issuedAt)/1000))))throw Error("Cutoff postdates recovery package");
+ return {format:FORMAT,backupSha256,issuedAt,inventory:canonical};
 }
 export const securityRecoveryDigest=doc=>createHash("sha256").update(JSON.stringify(doc)).digest("hex");
 export function signSecurityRecovery(inventory,backupSha256,privateKey,issuedAt=new Date().toISOString()){
