@@ -169,6 +169,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/040_emergency_tenant_containment.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/041_security_command_snapshot.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/042_security_catalog_internal_integrity.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/043_security_recovery_inventory.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
@@ -397,7 +398,8 @@ jobs:
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8080/health | grep -q '"database":"connected"'; then
               echo 'Production-mode verified database TLS health check passed'
-              docker rm -f profitpilot-api-ci
+              trap 'docker rm -f profitpilot-api-ci >/dev/null 2>&1 || true' EXIT
+              node scripts/check-production-network.js
               exit 0
             fi
             sleep 2
@@ -406,6 +408,32 @@ jobs:
           docker rm -f profitpilot-api-ci
           exit 1
 
+
+  operational:
+    name: Synthetic operational acceptance and real ClamAV engine controls
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [verify]
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout exact reviewed commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install authenticated distribution ClamAV packages
+        run: |
+          set -eu
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y clamav-daemon
+          sudo systemctl stop clamav-freshclam.service clamav-daemon.service clamav-daemon.socket || true
+          clamd --version
+      - name: Test isolated genuine ClamAV clean and detection controls and strict freshness denial
+        run: bash scripts/check-real-clamav-ci.sh
+      - name: Verify signed webhook delivery and dashboard request controls
+        run: node --test tests/security-alert-delivery.test.js tests/security-dashboard.test.js tests/security-recovery.test.js
 
   supply-chain:
     name: Container and software supply-chain audit
@@ -507,7 +535,7 @@ jobs:
   security-gate:
     name: Security CI release gate
     runs-on: ubuntu-latest
-    needs: [verify, database, supply-chain, provenance]
+    needs: [verify, database, supply-chain, operational, provenance]
     if: ${{ always() }}
     permissions:
       contents: read
@@ -517,6 +545,7 @@ jobs:
           VERIFY_RESULT: ${{ needs.verify.result }}
           DATABASE_RESULT: ${{ needs.database.result }}
           SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
+          OPERATIONAL_RESULT: ${{ needs.operational.result }}
           PROVENANCE_RESULT: ${{ needs.provenance.result }}
           PROVENANCE_REQUIRED: ${{ github.repository == 'luxhustle01-ux/Profitpilot' && ((github.event_name == 'push' && github.ref == 'refs/heads/security/tenant-isolation-release-gate-20261118') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'security/tenant-isolation-release-gate-20261118')) }}
           TESTED_SHA: ${{ github.sha }}
@@ -528,6 +557,7 @@ jobs:
           test "$VERIFY_RESULT" = success
           test "$DATABASE_RESULT" = success
           test "$SUPPLY_CHAIN_RESULT" = success
+          test "$OPERATIONAL_RESULT" = success
           if [ "$PROVENANCE_REQUIRED" = true ]; then test "$PROVENANCE_RESULT" = success; else test "$PROVENANCE_RESULT" = skipped; fi
           {
             echo "## ProfitPilot security CI gate"
@@ -535,6 +565,7 @@ jobs:
             echo "- Node.js application checks: $VERIFY_RESULT"
             echo "- PostgreSQL, tenant RLS, identity/session revocation, audit chains/checkpoints, authenticated API, distributed limits, key lifecycle, invoice privacy boundary, retention/holds/disposal, MFA-gated export, encrypted file quarantine, scanner protocol, strict CSV preflight, approved manifest promotion and expiry, encrypted synthetic recovery and revocation/tombstone replay, TLS and container checks: $DATABASE_RESULT"
             echo "- Container and software supply-chain audit: $SUPPLY_CHAIN_RESULT"
+            echo "- Synthetic operational acceptance and real scanner engine controls: $OPERATIONAL_RESULT"
             echo "- Signed candidate provenance: $PROVENANCE_RESULT (required: $PROVENANCE_REQUIRED)"
             echo "- Scope: automated repository CI only; not penetration testing or production certification"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -544,7 +575,7 @@ jobs:
     name: Signed candidate provenance and independent byte verification
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [verify, database, supply-chain]
+    needs: [verify, database, supply-chain, operational]
     if: ${{ github.repository == 'luxhustle01-ux/Profitpilot' && ((github.event_name == 'push' && github.ref == 'refs/heads/security/tenant-isolation-release-gate-20261118') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'security/tenant-isolation-release-gate-20261118')) }}
     permissions:
       contents: read
