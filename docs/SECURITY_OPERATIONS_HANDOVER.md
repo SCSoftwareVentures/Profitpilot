@@ -286,3 +286,47 @@ or schema change needs reviewed reconciliation. The check does not cancel
 already admitted work and has a bounded polling delay. Production load and
 managed-provider compatibility, independent DDL audit/monitoring, recovery
 authorization and escalation after a mismatch remain operator responsibilities.
+
+### Tenant emergency containment and controlled recovery
+
+Migration 040 adds a tenant-scoped incident fence independent of ordinary
+business status. The restricted incident operator can activate one incident
+with a unique incident UUID, a fixed reason category and an opaque approved
+reference. The separate incident recovery role can release only that exact
+active incident with an approved reference. Neither role can read or alter
+application tables directly, impersonate the API, or assume the other's
+capability. Provision separate approved credentials in the deployment
+environment; role separation does not itself prove two-person oversight.
+Never use the API runtime credentials for incident operations.
+
+On the approved isolated operator connection using verified TLS:
+- Activate using parameterized `SELECT private.activate_tenant_emergency($1,$2,$3,$4)`
+  with tenant UUID, incident UUID, one of suspected_compromise, data_exposure,
+  integrity_failure or operational_emergency, and an opaque authority reference.
+- On a separately controlled recovery connection, only after evidence review,
+  remediation and fresh identity/session approval, use parameterized
+  `SELECT private.release_tenant_emergency($1,$2,$3)` with the exact tenant and
+  incident UUID plus the authorized recovery reference. Do not release blindly.
+- Preserve durable external incident records and independently signed audit
+  checkpoints. Before restoring service from any snapshot, reconcile all
+  post-snapshot emergency activations, releases and identity/key revocations
+  with authoritative external records. A restored older backup is not
+  sufficient evidence that an incident is closed.
+
+The tenant's signed RLS context becomes unavailable; every authenticated
+tenant transaction acquires the shared tenant fence before performing work.
+The operator takes the exclusive fence and invalidates queued/processing
+file promotions in the same transaction. New scanner claims omit contained
+tenants; scanner completion and promotion check the fence. In-flight work
+that already holds the fence may complete before activation acquires it.
+Bytes already read by a worker cannot be recalled; halt and isolate suspect
+workers using the incident runbook. No automatic release or replay of failed
+approval occurs. Other tenants remain available. Operations on the
+privileged database administration boundary and authorized expiry/retention
+jobs are not globally disabled by a tenant incident. The old catalogue
+baseline is retained and the migration appends its reviewed revision.
+
+No live incident or deployment is executed by repository tests. Independent
+routing/on-call monitoring, immutable external incident records, backup
+incident reconciliation, operator identity controls and incident tabletop
+exercises remain operational acceptance requirements.
