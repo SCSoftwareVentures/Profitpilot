@@ -96,6 +96,7 @@ jobs:
             test "$(gosu postgres id -u)" = "$(id -u postgres)"
             test "$(gosu postgres id -g)" = "$(id -g postgres)"
             test "$(id -u postgres)" != 0
+            case " $(gosu postgres id -G) " in *" 0 "*) exit 1;; esac
             test "$(awk "/^Uid:/ {print \$2}" /proc/1/status)" = "$(id -u postgres)"
             test "$(awk "/^Gid:/ {print \$2}" /proc/1/status)" = "$(id -g postgres)"
           '
@@ -330,6 +331,7 @@ jobs:
             sleep 2
           done
           psql "$ADMIN_URL?sslmode=require" -v ON_ERROR_STOP=1 -c "SHOW ssl" | grep -q on
+          docker exec "$PG_CONTAINER" sh -ec 'test "$(awk "/^Uid:/ {print \$2}" /proc/1/status)" = "$(id -u postgres)"'
           {
             echo 'DATABASE_SSL_CA<<PROFITPILOT_CA'
             cat "$CERT"
