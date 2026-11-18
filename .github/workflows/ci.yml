@@ -121,6 +121,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/025_identity_admin_recovery.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/026_quarantine_promotion.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/027_audit_checkpoint_reader.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/028_quarantine_expiry_recovery.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
 
       - name: Audit every tenant-scoped table and tenant-to-tenant foreign key
@@ -212,6 +213,12 @@ jobs:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/calculation-export.integration.test.js
+
+      - name: Prepare quarantine expiry recovery fixture
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
+        run: |
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/quarantine-expiry-recovery.integration.test.js
 
       - name: Restore encrypted synthetic database backup and verify security after recovery
         env:
