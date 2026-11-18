@@ -63,3 +63,12 @@ test("restricted audit reader verifies externally signed historical prefix after
   await assert.rejects(()=>verifyHistoricalCheckpoint(reader,modified,publicKey),/Historical checkpoint mismatch/);
  }finally{await reader.query("RESET ROLE");reader.release();await Promise.all([admin.end(),app.end()]);}
 });
+
+test("containment alerts require sustained activity and clear without disclosing actor identifiers",()=>{
+ const evaluate=createSecurityAlertPolicy(),normal={requests:100,authDenied:0,roleDenied:0,rateLimited:0,actorContained:0,unavailable:0,serverError:0,slow:0,aborted:0};
+ const spike={...normal,rateLimited:5,actorContained:5};
+ assert.deepEqual(evaluate(spike),[]);
+ assert.deepEqual(evaluate(spike),[{event:"api_security_alert",category:"actor_containment_spike",state:"active"}]);
+ assert.deepEqual(evaluate(spike),[]);
+ assert.deepEqual(evaluate(normal),[{event:"api_security_alert",category:"actor_containment_spike",state:"cleared"}]);
+});
