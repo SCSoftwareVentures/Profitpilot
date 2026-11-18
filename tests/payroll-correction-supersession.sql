@@ -149,6 +149,60 @@ BEGIN
  IF private.financial_retention_status(t,runs[2])->>'status' IS DISTINCT FROM 'hold-recorded' OR private.verify_audit_chain(t) IS DISTINCT FROM true THEN RAISE EXCEPTION 'Authenticated hold or audit missing'; END IF;
  RAISE NOTICE 'Scoped retention review authority, self-approval denial, replay denial and immediate hold passed';
 
+
+ -- Dependencies are conservative: both superseded and replacement records
+ -- stay linked to immutable financial history; overlapping snapshots block.
+ IF private.financial_retention_dependency_status(t,runs[1])->>'currentPayroll' IS DISTINCT FROM 'false'
+ OR private.financial_retention_dependency_status(t,runs[2])->>'currentPayroll' IS DISTINCT FROM 'true'
+ OR private.financial_retention_dependency_status(t,runs[1])->>'correctionLineage' IS DISTINCT FROM 'true'
+ OR private.financial_retention_dependency_status(t,runs[1])->>'overlappingCalculations' IS DISTINCT FROM 'true'
+ OR private.financial_retention_dependency_status(t,runs[1])->>'backupPlan' IS DISTINCT FROM 'missing-or-stale'
+ OR private.financial_retention_dependency_status(gen_random_uuid(),runs[1])->>'status' IS DISTINCT FROM 'unavailable'
+ THEN RAISE EXCEPTION 'Dependency detection incorrect'; END IF;
+ PERFORM private.set_import_disposal_hold(t,batches[1],true,'CI_FINANCIAL_HOLD');
+ IF private.financial_retention_dependency_status(t,runs[1])->>'batchHold' IS DISTINCT FROM 'true' THEN RAISE EXCEPTION 'Batch hold omitted'; END IF;
+ work_id:=gen_random_uuid();
+ current_digest:=private.sensitive_recovery_fingerprint();
+ FOR ix IN 1..4 LOOP
+  phase:=CASE ix WHEN 1 THEN 'request' WHEN 2 THEN 'approve' WHEN 3 THEN 'approve' ELSE 'consume' END;
+  actor:=CASE ix WHEN 3 THEN admin_id ELSE owner_id END;
+  who:='ci-correction-'||actor;
+  now_s:=floor(extract(epoch FROM clock_timestamp()))::bigint;expiry:=now_s+20;
+  nonce:=encode(public.gen_random_bytes(16),'hex');session_hash:=encode(public.digest(actor::text,'sha256'),'hex');
+  context_sig:=encode(public.hmac(convert_to(t::text||E'\n'||who||E'\n'||expiry||E'\n'||nonce||E'\n'||key_id_value,'UTF8'),key_bytes,'sha256'),'hex');
+  PERFORM set_config('app.tenant_id',t::text,true),set_config('app.tenant_subject',who,true),set_config('app.tenant_expires',expiry::text,true),set_config('app.tenant_nonce',nonce,true),set_config('app.tenant_key_id',key_id_value,true),set_config('app.tenant_signature',context_sig,true);
+  scope_hash:=private.financial_backup_plan_scope(t,runs[1],repeat('a',64),repeat('b',64),CURRENT_DATE);
+  proof:=encode(public.hmac(convert_to('profitpilot-security-work-v1'||E'\n'||t||E'\n'||work_id||E'\n'||'privileged_operation'||E'\n'||scope_hash||E'\n'||phase||E'\n'||who||E'\n'||now_s||E'\n'||now_s||E'\n'||session_hash||E'\n'||expiry||E'\n'||nonce||E'\n'||key_id_value,'UTF8'),key_bytes,'sha256'),'hex');
+  IF ix=2 THEN
+   BEGIN
+    PERFORM private.record_financial_backup_plan(t,work_id,runs[1],repeat('a',64),repeat('b',64),CURRENT_DATE,scope_hash,phase,now_s,now_s,session_hash,expiry,nonce,key_id_value,proof);
+    RAISE EXCEPTION 'Backup self approval accepted';
+   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  ELSE
+   BEGIN
+    PERFORM private.record_financial_backup_plan(t,work_id,runs[2],repeat('a',64),repeat('b',64),CURRENT_DATE,scope_hash,phase,now_s,now_s,session_hash,expiry,nonce,key_id_value,proof);
+    RAISE EXCEPTION 'Backup plan scope transferable';
+   EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+   PERFORM private.record_financial_backup_plan(t,work_id,runs[1],repeat('a',64),repeat('b',64),CURRENT_DATE,scope_hash,phase,now_s,now_s,session_hash,expiry,nonce,key_id_value,proof);
+   IF ix<4 AND EXISTS(SELECT 1 FROM private.financial_backup_plans WHERE tenant_id=t AND order_id=work_id) THEN RAISE EXCEPTION 'Backup plan prematurely recorded'; END IF;
+  END IF;
+ END LOOP;
+ IF private.financial_retention_dependency_status(t,runs[1])->>'backupPlan' IS DISTINCT FROM 'recorded-unverified'
+ OR private.financial_retention_dependency_status(t,runs[1])->>'authorizesDisposal' IS DISTINCT FROM 'false'
+ OR private.sensitive_recovery_fingerprint() IS NOT DISTINCT FROM current_digest THEN RAISE EXCEPTION 'Backup plan or disposal fence incorrect'; END IF;
+ BEGIN
+  PERFORM private.record_financial_backup_plan(t,work_id,runs[1],repeat('a',64),repeat('b',64),CURRENT_DATE,scope_hash,'consume',now_s,now_s,session_hash,expiry,nonce,key_id_value,proof);
+  RAISE EXCEPTION 'Backup plan replay accepted'; EXCEPTION WHEN unique_violation THEN NULL; END;
+ BEGIN DELETE FROM private.financial_backup_plans WHERE tenant_id=t; RAISE EXCEPTION 'Backup plan mutable';
+ EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL; END;
+ BEGIN PERFORM private.financial_backup_plan_scope(t,runs[1],repeat('a',64),repeat('b',64),CURRENT_DATE-1);
+ RAISE EXCEPTION 'Stale backup plan accepted'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+ IF has_function_privilege('profitpilot_app','private.financial_retention_dependency_status(uuid,uuid)','EXECUTE')
+ OR has_function_privilege('profitpilot_app','private.record_financial_backup_plan(uuid,uuid,uuid,text,text,date,text,text,bigint,bigint,text,bigint,text,text,text)','EXECUTE')
+ OR has_any_column_privilege('profitpilot_app','private.financial_backup_plans','SELECT,INSERT,UPDATE,REFERENCES')
+ OR private.verify_audit_chain(t) IS DISTINCT FROM true THEN RAISE EXCEPTION 'Backup controls or audit invalid'; END IF;
+ RAISE NOTICE 'Financial dependency, dual-approved backup plan, stale evidence, scope, replay and non-disposal checks passed';
+
  RAISE NOTICE 'Atomic payroll supersession, bypass denial, rollback, replay, stale-report fence, audit and original evidence immutability checks passed';
 END $test$;
 -- Check deferred link to the new confirmation receipt before rolling back.
