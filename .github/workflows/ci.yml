@@ -370,15 +370,29 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Build pinned synthetic API image
-        run: docker build --pull -t profitpilot-api:scan .
+      - name: Build pinned synthetic API image and isolated dependency stage
+        run: |
+          docker build --pull --target dependencies -t profitpilot-dependencies:scan .
+          docker build --pull -t profitpilot-api:scan .
 
-      - name: Verify runtime user and installed dependency inventory
+      - name: Verify runtime user, package inventory and removal of build tools
         run: |
           set -eu
           test "$(docker run --rm --network none --entrypoint id profitpilot-api:scan -u)" != 0
-          docker run --rm --network none --read-only --entrypoint npm profitpilot-api:scan ls --omit=dev --all --json >/tmp/profitpilot-dependencies.json
-          docker run --rm --network none --read-only --entrypoint npm profitpilot-api:scan sbom --sbom-format cyclonedx --omit=dev --package-lock-only >/tmp/profitpilot-sbom.json
+          docker run --rm --network none --read-only --entrypoint npm profitpilot-dependencies:scan ls --omit=dev --all --json >/tmp/profitpilot-dependencies.json
+          docker run --rm --network none --read-only --entrypoint npm profitpilot-dependencies:scan sbom --sbom-format cyclonedx --omit=dev --package-lock-only >/tmp/profitpilot-sbom.json
+          docker run --rm --network none --read-only --entrypoint sh profitpilot-api:scan -ec 'for tool in npm npx corepack yarn pnpm; do ! command -v "$tool" || exit 1; done; test ! -d /usr/local/lib/node_modules; node --version'
+          docker run --rm --network none --read-only --entrypoint node profitpilot-api:scan --input-type=module -e '
+            import {readFileSync} from "node:fs";
+            const lock=JSON.parse(readFileSync("package-lock.json","utf8"));
+            for(const [path,p] of Object.entries(lock.packages)){
+              if(!path||p.dev)continue;
+              let installed;
+              try{installed=JSON.parse(readFileSync(path+"/package.json","utf8"));}
+              catch(e){if(p.optional&&e.code==="ENOENT")continue;throw e;}
+              if(installed.version!==p.version)throw Error("Runtime package version differs from lockfile");
+            }
+          '
 
       - name: Install versioned scanner with publisher checksum verification
         run: |
@@ -403,8 +417,10 @@ jobs:
           set -eu
           SCANNER="$RUNNER_TEMP/profitpilot-trivy"
           docker pull 'postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e'
-          "$SCANNER" image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed=false --exit-code 1 --no-progress --timeout 5m --ignorefile /dev/null profitpilot-api:scan
-          "$SCANNER" image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed=false --exit-code 1 --no-progress --timeout 5m --ignorefile /dev/null 'postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e'
+          result=0
+          "$SCANNER" image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed=false --exit-code 1 --no-progress --timeout 5m --ignorefile /dev/null profitpilot-api:scan || result=1
+          "$SCANNER" image --scanners vuln --severity HIGH,CRITICAL --ignore-unfixed=false --exit-code 1 --no-progress --timeout 5m --ignorefile /dev/null 'postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e' || result=1
+          exit "$result"
 
   security-gate:
     name: Security CI release gate
