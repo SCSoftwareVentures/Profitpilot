@@ -8,6 +8,7 @@ on:
     branches:
       - main
       - integration/pr25-pr26-validation
+      - security/tenant-isolation-release-gate-20261118
       - feature/job-readiness-engine
       - feature/promise-ledger
       - feature/verified-value-ledger
@@ -171,6 +172,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/042_security_catalog_internal_integrity.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/043_security_recovery_inventory.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/044_recovery_catalog_gate.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/045_core_workspace_setup.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
@@ -386,6 +388,10 @@ jobs:
           DATABASE_SSL_TEST_URL: postgresql://profitpilot_app:${{ env.POSTGRES_APP_PASSWORD }}@127.0.0.1:5432/profitpilot
         run: node --test tests/db-tls.integration.test.js tests/production-readiness.integration.test.js
 
+      - name: Verify core workspace authenticated API, idempotency and isolation
+        run: |
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/core-workspace.integration.test.js
+
       - name: Verify actual read-only dashboard through TLS database and HTTPS boundary
         env:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@127.0.0.1:5432/profitpilot
@@ -511,7 +517,7 @@ jobs:
           exit "$result"
 
       - name: Package exact scanned image archives and public build evidence
-        if: ${{ github.repository == 'luxhustle01-ux/Profitpilot' && ((github.event_name == 'push' && github.ref == 'refs/heads/security/tenant-isolation-release-gate-20261118') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'security/tenant-isolation-release-gate-20261118')) }}
+        if: ${{ github.repository == 'luxhustle01-ux/Profitpilot' && ((github.event_name == 'push' && (github.ref == 'refs/heads/security/tenant-isolation-release-gate-20261118' || github.ref == 'refs/heads/core/workspace-foundation-20261118')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.head_ref == 'security/tenant-isolation-release-gate-20261118' || github.head_ref == 'core/workspace-foundation-20261118'))) }}
         run: |
           set -euo pipefail
           umask 077
@@ -531,7 +537,7 @@ jobs:
             "$(docker image inspect profitpilot-postgres:scan --format '{{.Id}}')"
 
       - name: Retain immutable candidate artifact for verification
-        if: ${{ github.repository == 'luxhustle01-ux/Profitpilot' && ((github.event_name == 'push' && github.ref == 'refs/heads/security/tenant-isolation-release-gate-20261118') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'security/tenant-isolation-release-gate-20261118')) }}
+        if: ${{ github.repository == 'luxhustle01-ux/Profitpilot' && ((github.event_name == 'push' && (github.ref == 'refs/heads/security/tenant-isolation-release-gate-20261118' || github.ref == 'refs/heads/core/workspace-foundation-20261118')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.head_ref == 'security/tenant-isolation-release-gate-20261118' || github.head_ref == 'core/workspace-foundation-20261118'))) }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: profitpilot-candidate-${{ github.sha }}-${{ github.run_attempt }}
@@ -555,7 +561,7 @@ jobs:
           SUPPLY_CHAIN_RESULT: ${{ needs.supply-chain.result }}
           OPERATIONAL_RESULT: ${{ needs.operational.result }}
           PROVENANCE_RESULT: ${{ needs.provenance.result }}
-          PROVENANCE_REQUIRED: ${{ github.repository == 'luxhustle01-ux/Profitpilot' && ((github.event_name == 'push' && github.ref == 'refs/heads/security/tenant-isolation-release-gate-20261118') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'security/tenant-isolation-release-gate-20261118')) }}
+          PROVENANCE_REQUIRED: ${{ github.repository == 'luxhustle01-ux/Profitpilot' && ((github.event_name == 'push' && (github.ref == 'refs/heads/security/tenant-isolation-release-gate-20261118' || github.ref == 'refs/heads/core/workspace-foundation-20261118')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.head_ref == 'security/tenant-isolation-release-gate-20261118' || github.head_ref == 'core/workspace-foundation-20261118'))) }}
           TESTED_SHA: ${{ github.sha }}
         run: |
           set -eu
@@ -584,7 +590,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [verify, database, supply-chain, operational]
-    if: ${{ github.repository == 'luxhustle01-ux/Profitpilot' && ((github.event_name == 'push' && github.ref == 'refs/heads/security/tenant-isolation-release-gate-20261118') || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'security/tenant-isolation-release-gate-20261118')) }}
+    if: ${{ github.repository == 'luxhustle01-ux/Profitpilot' && ((github.event_name == 'push' && (github.ref == 'refs/heads/security/tenant-isolation-release-gate-20261118' || github.ref == 'refs/heads/core/workspace-foundation-20261118')) || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && (github.head_ref == 'security/tenant-isolation-release-gate-20261118' || github.head_ref == 'core/workspace-foundation-20261118'))) }}
     permissions:
       contents: read
       id-token: write

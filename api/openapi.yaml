@@ -56,6 +56,57 @@ paths:
         "400": { description: Invalid tenant ID }
         "401": { description: Unauthenticated }
         "403": { description: Tenant membership not authorised }
+  /tenants/{tenantId}/workspaces:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      summary: Create a synthetic business, site, contract and draft initial version atomically
+      description: Active owner/admin only. Synthetic non-production development only; production route closed. Supply a fresh UUIDv4 setupId and retry the identical request with the same actor on interruption. Changed inputs or duplicate ID conflict; no partial creation. This operation never approves financial terms.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [setupId, businessName, siteName, customerName, effectiveFrom, price, currency, taxBasis, billingBasis]
+              properties:
+                setupId: { type: string, format: uuid }
+                businessName: { type: string, minLength: 1, maxLength: 120 }
+                siteName: { type: string, minLength: 1, maxLength: 120 }
+                customerName: { type: string, minLength: 1, maxLength: 120 }
+                effectiveFrom: { type: string, format: date, description: Real ISO date from 2000 to 2099 }
+                price: { type: string, pattern: '^(0|[1-9][0-9]{0,11})[.][0-9]{2}$' }
+                currency: { type: string, const: AUD }
+                taxBasis: { type: string, enum: [gst_inclusive, gst_exclusive, no_gst, unknown] }
+                billingBasis: { type: string, const: monthly }
+      responses:
+        "201": { description: Created four linked records and audit receipt; version is draft }
+        "200": { description: Identical authorized retry returns original IDs }
+        "400": { description: Invalid fields }
+        "401": { description: Unauthenticated }
+        "403": { description: Insufficient active tenant authority }
+        "409": { description: Conflicting request or identifier }
+        "429": { description: Request limit reached }
+        "503": { description: Production onboarding not approved or unavailable }
+  /tenants/{tenantId}/workspaces/{setupId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: setupId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Retrieve the original core workspace and initial version
+      description: Active tenant members only. Tenant-scoped receipt lookup; no arbitrary audit metadata exposed. Synthetic non-production only.
+      responses:
+        "200": { description: Linked business, site, contract and initial version including exact price string and draft/approved indicator }
+        "400": { description: Invalid setup ID or unexpected query }
+        "401": { description: Unauthenticated }
+        "403": { description: Tenant access denied }
+        "404": { description: Workspace not found within authorized tenant }
+        "429": { description: Request limit reached }
+        "503": { description: Production onboarding not approved or unavailable }
   /tenants/{tenantId}/imports:
     parameters:
       - $ref: '#/components/parameters/TenantId'
