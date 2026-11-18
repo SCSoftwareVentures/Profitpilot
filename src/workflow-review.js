@@ -7,7 +7,12 @@ export function prepareInvoiceReview(rows, contract) {
   if (!contract || !contract.id || !contract.site || !contract.periodStart || !contract.periodEnd) {
     throw new TypeError("Contract identity, site and period are required");
   }
+  if (contract.currency !== undefined && contract.currency !== "AUD") throw new Error("Synthetic workflow supports AUD only");
+  if (contract.periodEnd < contract.periodStart) throw new Error("Invalid contract period");
   return validateInvoiceRows(rows).map(item => {
+    const amount = item.record?.amount;
+    if (typeof amount !== "string" && typeof amount !== "number") item.errors.push("Invalid amount type");
+    else if (!/^(?:0|[1-9]\\d*)(?:\\.\\d{1,2})?$/.test(String(amount)) || Number(amount) > 999999999999.99) item.errors.push("Amount must be a plain positive decimal with at most two places");
     if (item.errors.length) return {...item, candidate: null, status: "held"};
     const candidate = matchInvoice(item.record, contract);
     return {...item, candidate, status: candidate.confidence === "UNMATCHED" ? "held" : "pending_review"};
