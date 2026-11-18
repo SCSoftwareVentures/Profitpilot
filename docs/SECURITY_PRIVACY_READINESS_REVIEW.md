@@ -55,7 +55,7 @@ against cumulative authorized extraction. These controls passed CI #1700. CI #17
 
 ### Operational acceptance candidate
 
-New workstream: browser dashboard, signed notification delivery, signed security-state recovery inventory and deny-only reconciliation, real isolated ClamAV engine acceptance (synthetic signature), production-mode loopback attack/load exercise, independent test engagement scope, disaster-recovery runbook, and current Australian privacy/PIA review. See [PRODUCTION_SECURITY_ACCEPTANCE.md](PRODUCTION_SECURITY_ACCEPTANCE.md) and [AUSTRALIAN_PRIVACY_LEGAL_REVIEW.md](AUSTRALIAN_PRIVACY_LEGAL_REVIEW.md). Validation against the exact new candidate is required. Real environments, independent reviewers and counsel are still necessary.
+New workstream: browser dashboard, signed notification delivery, signed security-state recovery inventory and deny-only reconciliation, real isolated ClamAV engine acceptance (current official definitions and harmless EICAR control), production-mode loopback attack/load exercise, independent test engagement scope, disaster-recovery runbook, and current Australian privacy/PIA review. See [PRODUCTION_SECURITY_ACCEPTANCE.md](PRODUCTION_SECURITY_ACCEPTANCE.md) and [AUSTRALIAN_PRIVACY_LEGAL_REVIEW.md](AUSTRALIAN_PRIVACY_LEGAL_REVIEW.md). Validation against the exact new candidate is required. Real environments, independent reviewers and counsel are still necessary.
 
 ### Outstanding release blockers
 
