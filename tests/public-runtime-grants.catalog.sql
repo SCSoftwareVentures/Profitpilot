@@ -4,7 +4,7 @@ DO $runtime_grants$
 DECLARE
  r record; col record; action text; expected boolean; role_name text:='profitpilot_app';
  read_tables text[]:=ARRAY['tenants','users','tenant_memberships','businesses','sites','contracts','contract_versions','import_batches','raw_import_rows','mapping_decisions','payroll_pools','allocation_runs','invoices','invoice_lines','match_reviews','variations','audit_events'];
- insert_tables text[]:=ARRAY['import_batches','raw_import_rows','mapping_decisions','calculation_runs'];
+ insert_tables text[]:=ARRAY['import_batches','raw_import_rows','calculation_runs'];
  calc_cols text[]:=ARRAY['id','tenant_id','contract_id','site_id','period_start','period_end','formula_version','completeness','created_at','created_by'];
 BEGIN
  FOR r IN SELECT c.oid,c.relname,c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -27,10 +27,9 @@ BEGIN
    FOREACH action IN ARRAY ARRAY['SELECT','INSERT','UPDATE','REFERENCES'] LOOP
     expected:=CASE action
      WHEN 'SELECT' THEN r.relname=ANY(read_tables) OR (r.relname='calculation_runs' AND col.attname=ANY(calc_cols))
-     WHEN 'INSERT' THEN r.relname=ANY(insert_tables)
+     WHEN 'INSERT' THEN r.relname=ANY(insert_tables) OR (r.relname='mapping_decisions' AND col.attname IN ('tenant_id','raw_row_id','target_type','target_id','decision','confidence','method_version','reason'))
      WHEN 'UPDATE' THEN
       (r.relname='import_batches' AND col.attname='status') OR
-      (r.relname='mapping_decisions' AND col.attname IN ('decision','reason')) OR
       (r.relname='match_reviews' AND col.attname IN ('decision','reviewer_id','reviewed_at'))
      ELSE false END;
     IF has_column_privilege(role_name,r.oid,col.attnum,action) IS DISTINCT FROM expected THEN
