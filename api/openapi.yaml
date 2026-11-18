@@ -764,6 +764,55 @@ paths:
         "409": { description: Already reconciled or conflicting state }
         "503": { description: Live processing closed or unavailable }
 
+  /tenants/{tenantId}/privacy/cases/{caseId}/deliveries/{orderId}/dispatch:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: caseId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read minimized dispatch status
+      responses:
+        "200": { description: Candidate ledger state; mayTransmit and deliveryVerified are always false }
+        "403": { description: Authority denied }
+    post:
+      summary: Reserve, spend or permanently revoke a candidate dispatch
+      description: Owner/admin with recent MFA. No real transmission or delivery authority.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              oneOf:
+                - type: object
+                  additionalProperties: false
+                  required: [step, confirm, challengeDigest, receiptKeyDigest, expiresAtEpoch]
+                  properties:
+                    step: { enum: [reserve, burn] }
+                    confirm: { const: true }
+                    challengeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                    receiptKeyDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                    expiresAtEpoch: { type: integer, minimum: 1, maximum: 4102444800 }
+                - type: object
+                  additionalProperties: false
+                  required: [step, confirm, reasonCode, evidenceDigest]
+                  properties:
+                    step: { const: revoke }
+                    confirm: { const: true }
+                    reasonCode: { enum: [identity_uncertain, key_compromise, recipient_changed, authority_withdrawn, security_incident, ambiguous_dispatch] }
+                    evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+      responses:
+        "200": { description: Minimized candidate state }
+        "400": { description: Invalid request }
+        "403": { description: Authority denied }
+        "409": { description: Conflicting or spent state }
+        "503": { description: Live processing unavailable }
+
 components:
   schemas:
     ErrorResponse:

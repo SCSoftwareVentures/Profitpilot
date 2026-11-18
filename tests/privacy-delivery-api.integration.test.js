@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {createServer} from "node:http";
 import {randomUUID,createHash,generateKeyPairSync} from "node:crypto";
 import {privacyKeyFingerprint,privacyEnvelopeDigest,sealPrivacyResponse} from "../scripts/privacy-response-envelope.js";
-import {issuePrivacyReceiptChallenge,openAndAcknowledgePrivacyResponse} from "../scripts/privacy-delivery-receipt.js";
+import {issuePrivacyReceiptChallenge,openAndAcknowledgePrivacyResponse,verifyPrivacyReceiptChallenge} from "../scripts/privacy-delivery-receipt.js";
 import {startSyntheticCourier,syntheticCourierRequest} from "./support/synthetic-privacy-courier.js";
 import {syntheticTlsFixture} from "./support/synthetic-tls-fixture.js";
 import {generateKeyPair,exportJWK,SignJWT} from "jose";
@@ -109,6 +109,11 @@ test("actual authenticated privacy case and release API",{skip:!process.env.TEST
   // connection, authenticate and decrypt it, then reconcile the signed result.
   const expected={...responseContext,scopeSha256:deliveryPreview.scopeDigest,envelopeSha256:deliveryInput.envelopeDigest,recipientSigningKeySha256:privacyKeyFingerprint(receiptSigner.publicKey),authorizedAt:new Date(released.releaseAuthorizedAt).toISOString()};
   const challenge=issuePrivacyReceiptChallenge(expected,sender.privateKey);
+  const verifiedChallenge=verifyPrivacyReceiptChallenge({challenge,expected,senderPublicKey:sender.publicKey});
+  const dispatchPath=deliveryPath+"/dispatch";
+  const dispatchInput={confirm:true,challengeDigest:verifiedChallenge.challengeDigest,receiptKeyDigest:expected.recipientSigningKeySha256,expiresAtEpoch:Math.floor(verifiedChallenge.expiresAt/1000)};
+  assert.equal((await expect("owner",dispatchPath,200,{body:{...dispatchInput,step:"reserve"}})).state,"reserved");
+  assert.equal((await expect("owner",dispatchPath,200,{body:{...dispatchInput,step:"burn"}})).state,"attempt-spent");
   const tls=syntheticTlsFixture();
   const courier=await startSyntheticCourier({synthetic:true,expected,challenge,envelope,senderPublicKey:sender.publicKey,recipientSigningPublicKey:receiptSigner.publicKey,serverKey:tls.serverKey,serverCert:tls.serverCert,clientCert:tls.clientCert});
   let input;
@@ -130,6 +135,7 @@ test("actual authenticated privacy case and release API",{skip:!process.env.TEST
   await expect("owner",receiptPath+"/preview",403,{body:{...input,receiptKeyDigest:deliveryInput.senderKeyDigest}});
   await expect("owner",deliveryPath+"/receipts/"+deliveryOrder+"/preview",403,{body:input});
   await expect("owner",casePath+"/deliveries/"+randomUUID()+"/receipts/"+reviewId+"/preview",403,{body:input});
+  await expect("owner",receiptPath+"/preview",403,{body:{...input,challengeDigest:hash("different verified challenge")}});
   const preview=await expect("owner",receiptPath+"/preview",200,{body:input});
   assert.equal(preview.deliveryVerified,false);assert.equal(preview.receiptEvidenceRecorded,false);
   const op=(step,change={})=>({...input,scopeDigest:preview.scopeDigest,step,confirm:true,...change});

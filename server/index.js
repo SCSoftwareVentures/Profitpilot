@@ -14,7 +14,7 @@ import {proxyTrust,corsOrigins,createBoundedServer} from "./network-boundary.js"
 import {importIntakeGate,promotionProof} from "./intake-security.js";
 import {createReadinessGuard} from "./readiness-guard.js";
 import {productionReleaseGate} from "./release-gate.js";
-import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof,privacyCaseProof,payrollCorrectionPreviewProof,payrollCorrectionStatusProof,payrollCorrectionStepProof,privacyDeliveryPreviewProof,privacyDeliveryStatusProof,privacyDeliveryStepProof,privacyReceiptPreviewProof,privacyReceiptStatusProof,privacyReceiptStepProof} from "./sensitive-operation-proof.js";
+import {sensitiveApiProof,payrollConfirmationProof,securityWorkProof,privacyCaseProof,payrollCorrectionPreviewProof,payrollCorrectionStatusProof,payrollCorrectionStepProof,privacyDeliveryPreviewProof,privacyDeliveryStatusProof,privacyDeliveryStepProof,privacyReceiptPreviewProof,privacyReceiptStatusProof,privacyReceiptStepProof,privacyDispatchStatusProof,privacyDispatchStepProof} from "./sensitive-operation-proof.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
 import {quarantineConfig,sealQuarantine,MAX_QUARANTINE_BYTES} from "./quarantine.js";
@@ -447,6 +447,32 @@ app.post("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId/receip
    typeof b.scopeDigest!=="string"||!/^[a-f0-9]{64}$/.test(b.scopeDigest)||/^0+$/.test(b.scopeDigest))return res.status(400).json({error:"Explicit scoped receipt action required"});
   const args=privacyReceiptStepProof(...receiptIds(req),receiptFields.map(k=>b[k]),b.scopeDigest,b.step,req.identity);
   return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_receipt_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) AS result",args));
+ }catch(e){return failSensitive(e,res,next);}
+});
+
+
+const dispatchIds=req=>[req.membership.tenantId,req.params.caseId.toLowerCase(),req.params.orderId.toLowerCase()];
+const validDispatchDigest=x=>typeof x==="string"&&/^[a-f0-9]{64}$/.test(x)&&!/^0+$/.test(x);
+app.get("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId/dispatch",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_dispatch_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",privacyDispatchStatusProof(...dispatchIds(req),req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/privacy/cases/:caseId/deliveries/:orderId/dispatch",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  const b=req.body;
+  if(!emptyQuery(req)||!b||b.confirm!==true||!["reserve","burn","revoke"].includes(b.step))return res.status(400).json({error:"Explicit dispatch action required"});
+  let input;
+  if(b.step==="revoke"){
+   if(!exactBody(b,["step","confirm","reasonCode","evidenceDigest"])||!["identity_uncertain","key_compromise","recipient_changed","authority_withdrawn","security_incident","ambiguous_dispatch"].includes(b.reasonCode)||!validDispatchDigest(b.evidenceDigest))return res.status(400).json({error:"Exact protective revocation required"});
+   input=[null,null,null,b.reasonCode,b.evidenceDigest];
+  }else{
+   if(!exactBody(b,["step","confirm","challengeDigest","receiptKeyDigest","expiresAtEpoch"])||!validDispatchDigest(b.challengeDigest)||!validDispatchDigest(b.receiptKeyDigest)||!Number.isSafeInteger(b.expiresAtEpoch)||b.expiresAtEpoch<1||b.expiresAtEpoch>4102444800)return res.status(400).json({error:"Exact dispatch reservation required"});
+   input=[b.challengeDigest,b.receiptKeyDigest,b.expiresAtEpoch,null,null];
+  }
+  const args=privacyDispatchStepProof(...dispatchIds(req),b.step,input,req.identity);
+  return res.json(await sensitiveQuery(req,"SELECT private.api_privacy_dispatch_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) AS result",args));
  }catch(e){return failSensitive(e,res,next);}
 });
 

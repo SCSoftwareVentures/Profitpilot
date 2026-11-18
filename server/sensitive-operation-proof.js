@@ -122,3 +122,21 @@ export function privacyReceiptStepProof(tenant,caseId,release,review,input,scope
  const signed=securityWorkProof(tenant,review,"privileged_operation",scope,step,identity,env,now);
  return [tenant,caseId,release,review,...input,scope,step,...signed.slice(5)];
 }
+
+const dispatchReasons=["identity_uncertain","key_compromise","recipient_changed","authority_withdrawn","security_incident","ambiguous_dispatch"];
+const dispatchDigest=x=>typeof x==="string"&&digest.test(x)&&!/^0+$/.test(x);
+export function privacyDispatchStatusProof(tenant,caseId,release,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ if(![tenant,caseId,release].every(x=>typeof x==="string"&&uuid.test(x)))denied();
+ const scope=createHash("sha256").update(["profitpilot-privacy-dispatch-status-v1",caseId,release].join("\n")).digest("hex");
+ return [...signedAction("profitpilot-sensitive-api-v1",[tenant,release,"privacy_dispatch_status",scope],identity,env,now),caseId];
+}
+export function privacyDispatchStepProof(tenant,caseId,release,step,input,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ if(![tenant,caseId,release].every(x=>typeof x==="string"&&uuid.test(x))||!["reserve","burn","revoke"].includes(step)||!Array.isArray(input)||input.length!==5)denied();
+ const [challenge,signer,deadline,reason,evidence]=input;
+ if(step==="revoke"?(challenge!==null||signer!==null||deadline!==null||!dispatchReasons.includes(reason)||!dispatchDigest(evidence)):
+ (!dispatchDigest(challenge)||!dispatchDigest(signer)||!Number.isSafeInteger(deadline)||deadline<1||deadline>4102444800||reason!==null||evidence!==null))denied();
+ const action="privacy_dispatch_"+step;
+ const scope=createHash("sha256").update(["profitpilot-privacy-dispatch-v1",caseId,release,action,...input.map(x=>x??"")].join("\n")).digest("hex");
+ const signed=signedAction("profitpilot-sensitive-api-v1",[tenant,release,action,scope],identity,env,now);
+ return [tenant,caseId,release,action,...input,scope,...signed.slice(4)];
+}

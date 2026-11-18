@@ -69,6 +69,21 @@ async function operation(action){
      else{checked("receipt-confirm");body.step=el("receipt-step").value;body.scopeDigest=digest("receipt-scope");body.confirm=true;el("receipt-confirm").checked=false;}
     }break;
    }
+   case "dispatch-status":
+   case "dispatch-step":{
+    path="/privacy/cases/"+clean("dispatch-case")+"/deliveries/"+clean("dispatch-release")+"/dispatch";
+    if(action==="dispatch-step"){
+     checked("dispatch-confirm");
+     const step=el("dispatch-step").value;
+     if(step==="revoke")body={step,confirm:true,reasonCode:el("dispatch-reason").value,evidenceDigest:digest("dispatch-evidence")};
+     else{
+      const expiry=el("dispatch-expiry").value.trim();
+      if(!/^\d{1,10}$/.test(expiry))throw Error("Enter the exact UTC expiry in seconds.");
+      body={step,confirm:true,challengeDigest:digest("dispatch-challenge"),receiptKeyDigest:digest("dispatch-signer"),expiresAtEpoch:Number(expiry)};
+     }
+     el("dispatch-confirm").checked=false;
+    }break;
+   }
    default:throw Error("Unknown operation.");
   }
   busy=true;active=true;controller=new AbortController();
