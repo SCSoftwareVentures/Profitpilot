@@ -322,7 +322,14 @@ jobs:
           psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -f tests/rls-policy-inventory.catalog.sql
           psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
-          test "$(psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -Atc 'SELECT private.verify_security_catalog()')" = t
+          if [ "$(psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -Atc 'SELECT private.verify_security_catalog()')" != t ]; then
+            # Synthetic schema-only diagnostics: no application rows, keys, or secrets.
+            SQL="SELECT jsonb_build_array(item->>0,item->>1,item->>2,item->>3,encode(public.digest(convert_to(item::text,'UTF8'),'sha256'),'hex')) FROM private.security_catalog_entries() AS e(item) ORDER BY 1"
+            psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -Atc "$SQL" > "$WORK/source-catalog"
+            psql "$RESTORE_ADMIN_URL" -v ON_ERROR_STOP=1 -Atc "$SQL" > "$WORK/restored-catalog"
+            diff -u "$WORK/source-catalog" "$WORK/restored-catalog" || true
+            exit 1
+          fi
           psql "$RESTORE_APP_URL" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.runtime.sql
           TEST_RESTORE_BACKUP_SHA256="$(sha256sum "$ARCHIVE" | cut -d ' ' -f 1)" TEST_RESTORE_ADMIN_DATABASE_URL="$RESTORE_ADMIN_URL" TEST_RESTORE_APP_DATABASE_URL="$RESTORE_APP_URL" node --test tests/backup-restore.integration.test.js
           psql "$TEST_ADMIN_DATABASE_URL" -v ON_ERROR_STOP=1 -c 'DROP DATABASE profitpilot_restore_ci'
