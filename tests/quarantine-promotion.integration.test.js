@@ -107,6 +107,24 @@ test("HTTP quarantine requires fresh MFA and separate scan/approval, promotes ex
   assert.equal((await approve(fifth)).status,202);
   assert.equal((await runQuarantineCycle(scanner,{keyId,secret,scan,limit:1})).promoted,1,"independent unrevoked session remains usable");
   assert.equal(await count(fifth),1);
+  const sixth=await seed("INV-PROMO-F");
+  assert.equal((await upload(sixth)).status,201);
+  assert.equal((await runQuarantineCycle(scanner,{keyId,secret,scan,limit:1})).contentValidated,1);
+  assert.equal((await approve(sixth)).status,202);
+  const sixthClaim=(await scanner.query("SELECT * FROM private.claim_quarantine_promotion()")).rows[0];
+  assert.equal(sixthClaim.batch_id,sixth.batch);
+  const incident=randomUUID();
+  await admin.query("SELECT private.activate_tenant_emergency($1,$2,'suspected_compromise','CI_WORKER_INCIDENT')",[tenant,incident]);
+  try{
+   assert.equal((await request(sixth.batch,"/file/approve")).status,403);
+   assert.equal((await scanner.query("SELECT private.finish_quarantine_promotion($1,$2,$3,$4) AS n",[tenant,sixth.batch,sixthClaim.lease_id,JSON.stringify(sixth.rows)])).rows[0].n,-1);
+   assert.equal(await count(sixth),0);
+   assert.equal((await admin.query("SELECT state FROM private.quarantine_promotions WHERE batch_id=$1",[sixth.batch])).rows[0].state,"failed");
+  }finally{
+   await admin.query("SELECT private.release_tenant_emergency($1,$2,'CI_WORKER_RECOVERY')",[tenant,incident]);
+  }
+  assert.equal(await count(sixth),0,"release must not resume invalidated promotion");
+
   assert.equal((await admin.query("SELECT count(*)::int AS n FROM private.quarantine_insert_authority")).rows[0].n,0);
   assert.equal((await admin.query("SELECT private.verify_audit_chain($1) AS ok",[tenant])).rows[0].ok,true);
  }finally{
