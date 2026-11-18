@@ -6,7 +6,7 @@ DECLARE t uuid:=gen_random_uuid(); owner_id uuid:=gen_random_uuid(); admin_id uu
  batches uuid[]:=ARRAY[gen_random_uuid(),gen_random_uuid()]; pools uuid[]:=ARRAY[gen_random_uuid(),gen_random_uuid()];
  runs uuid[]:=ARRAY[gen_random_uuid(),gen_random_uuid()]; proposals uuid[]:=ARRAY[NULL::uuid,NULL::uuid]; digests text[]:=ARRAY[NULL::text,NULL::text];
  raw_id uuid; source_id uuid; amt numeric(14,2); ix integer; work_id uuid:=gen_random_uuid(); scope_hash text; correction_evidence text:=repeat('c',64);
- who text; actor uuid; phase text; now_s bigint; expiry bigint; nonce text; confirm_nonce text; key_id_value text; key_bytes bytea; session_hash text; context_sig text; proof text; confirmation text; total numeric; pending integer;
+ who text; actor uuid; phase text; now_s bigint; expiry bigint; nonce text; confirm_nonce text; key_id_value text; key_bytes bytea; session_hash text; context_sig text; proof text; confirmation text; total numeric; current_digest text;
 BEGIN
  INSERT INTO public.tenants(id,legal_name) VALUES(t,'Synthetic payroll supersession');
  INSERT INTO public.users(id,auth_subject,email) VALUES(owner_id,'ci-correction-'||owner_id,'owner@example.invalid'),(admin_id,'ci-correction-'||admin_id,'admin@example.invalid'),(analyst_id,'ci-correction-'||analyst_id,'analyst@example.invalid');
@@ -38,7 +38,8 @@ BEGIN
   IF phase='submit' THEN
    FOR ix IN 1..2 LOOP
     proposals[ix]:=private.submit_payroll_proposal(t,runs[ix]);
-    SELECT evidence_digest INTO digests[ix] FROM private.payroll_proposal_reviews WHERE tenant_id=t AND id=proposals[ix];
+    SELECT evidence_digest INTO current_digest FROM private.payroll_proposal_reviews WHERE tenant_id=t AND id=proposals[ix];
+    digests[ix]:=current_digest;
    END LOOP;
   ELSIF phase='old_confirm' THEN
    confirmation:=encode(public.hmac(convert_to('profitpilot-payroll-confirm-v1'||E'\n'||t||E'\n'||proposals[1]||E'\n'||digests[1]||E'\n'||who||E'\n'||now_s||E'\n'||now_s||E'\n'||session_hash||E'\n'||expiry||E'\n'||confirm_nonce||E'\n'||key_id_value,'UTF8'),key_bytes,'sha256'),'hex');
