@@ -409,6 +409,12 @@ test("authenticated API enforces tenant membership, role permissions and import 
     });
     assert.equal(readerWrite.status,403,"read_only members must not create imports");
 
+    await admin.query("UPDATE private.actor_request_security SET used=120,window_start=clock_timestamp(),blocked_until=NULL WHERE tenant_id=$1 AND actor_id=$2",[tenantA,userA]);
+    const contained=await request(`/v1/tenants/${tenantA}/contracts`,{subject:"ci-api-analyst"});
+    assert.equal(contained.status,429);assert.equal(contained.headers.get("retry-after"),"300");
+    assert.equal((await request(`/v1/tenants/${tenantA}/contracts`,{subject:"ci-api-reader"})).status,200);
+    await admin.query("UPDATE private.actor_request_security SET blocked_until=clock_timestamp()-interval '1 second' WHERE tenant_id=$1 AND actor_id=$2",[tenantA,userA]);
+    assert.equal((await request(`/v1/tenants/${tenantA}/contracts`,{subject:"ci-api-analyst"})).status,200);
     await admin.query("UPDATE tenant_memberships SET status='revoked' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);
     const revoked=await request(`/v1/tenants/${tenantA}/contracts`,{subject:"ci-api-analyst"});
     assert.equal(revoked.status,403,"revoked memberships must lose access immediately");
