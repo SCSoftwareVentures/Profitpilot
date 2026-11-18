@@ -41,7 +41,7 @@ export function validateInvoiceRows(rows){
 function payrollCents(value) {
   if (typeof value !== "string" && typeof value !== "number") return null;
   const raw = String(value).trim();
-  if (!/^-?\\d+(?:\\.\\d{1,2})?$/.test(raw)) return null;
+  if (!/^-?\d+(?:\.\d{1,2})?$/.test(raw)) return null;
   const negative = raw.startsWith("-");
   const [whole, fraction = ""] = (negative ? raw.slice(1) : raw).split(".");
   const cents = BigInt(whole) * 100n + BigInt(fraction.padEnd(2, "0"));
