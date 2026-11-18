@@ -57,7 +57,14 @@ async function membership(req,res,next){
  }catch(e){next(e);}
 }
 app.get("/v1/me",async(req,res)=>{res.json({subject:req.identity.subject,email:req.identity.email,membershipsEndpoint:"Membership discovery is not exposed until a separately reviewed security-definer function is installed."});});
-app.get("/v1/tenants/:tenantId/contracts",membership,async(req,res,next)=>{try{const rows=await requestTenant(req,req.membership.tenantId,async c=>(await c.query("SELECT id,customer_name,status FROM contracts WHERE tenant_id=$1 ORDER BY customer_name",[req.membership.tenantId])).rows);res.json({items:rows});}catch(e){next(e);}});
+app.get("/v1/tenants/:tenantId/contracts",membership,async(req,res,next)=>{try{
+ const {limit="50",cursor}=req.query;
+ if(Object.keys(req.query).some(k=>!["limit","cursor"].includes(k))||typeof limit!=="string"||!/^(?:[1-9][0-9]?|100)$/.test(limit)||(cursor!==undefined&&(typeof cursor!=="string"||!uuidPattern.test(cursor))))return res.status(400).json({error:"Invalid contract page parameters"});
+ const size=Number(limit);
+ const rows=await requestTenant(req,req.membership.tenantId,async c=>(await c.query("SELECT id,customer_name,status FROM public.contracts WHERE tenant_id=$1 AND ($2::uuid IS NULL OR id>$2::uuid) ORDER BY id LIMIT $3",[req.membership.tenantId,cursor??null,size+1])).rows);
+ const items=rows.slice(0,size);
+ res.json({items,nextCursor:rows.length>size?items[items.length-1].id:null});
+ }catch(e){next(e);}});
 app.post("/v1/tenants/:tenantId/imports",membership,requireRole("owner","admin","analyst"),async(req,res,next)=>{
  try{
   const {sourceType,fileName,sha256,permissionReference,periodStart,periodEnd}=req.body||{};
@@ -121,7 +128,7 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requireRol
    if(decision==="held")held++;else valid++;
    return {raw_row_id:raw.rows[i].id,decision,reason:item.errors.join("; ")||"Structural validation passed; requires mapping and human review"};
   });
-  await client.query("INSERT INTO mapping_decisions(tenant_id,raw_row_id,target_type,target_id,decision,confidence,method_version,reason) SELECT $1,v.raw_row_id,'invoice_row',NULL,v.decision,'LOW','invoice-validator-0.1.0',v.reason FROM jsonb_to_recordset($2::jsonb) AS v(raw_row_id uuid,decision text,reason text) ON CONFLICT(tenant_id,raw_row_id,method_version) DO UPDATE SET decision=EXCLUDED.decision,reason=EXCLUDED.reason",[req.membership.tenantId,JSON.stringify(decisions)]);
+  await client.query("INSERT INTO mapping_decisions(tenant_id,raw_row_id,target_type,target_id,decision,confidence,method_version,reason) SELECT $1,v.raw_row_id,'invoice_row',NULL,v.decision,'LOW','invoice-validator-0.1.0',v.reason FROM jsonb_to_recordset($2::jsonb) AS v(raw_row_id uuid,decision text,reason text) ON CONFLICT(tenant_id,raw_row_id,method_version) DO NOTHING",[req.membership.tenantId,JSON.stringify(decisions)]);
   await client.query("UPDATE import_batches SET status='review' WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
   return {status:200,batchId:req.params.batchId,total:raw.rowCount,validCandidateRows:valid,heldRows:held,automaticallyAccepted:0};
  });
