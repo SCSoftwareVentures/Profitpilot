@@ -196,6 +196,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/064_payroll_intake_operator_api.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/065_payroll_allocation_builder.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/066_workspace_commercial_baselines.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/067_workspace_job_readiness.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
@@ -227,7 +228,7 @@ jobs:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
-          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/api.integration.test.js tests/sensitive-api.integration.test.js tests/privacy-delivery-api.integration.test.js tests/privacy-dispatch-api.integration.test.js tests/payroll-intake-api.integration.test.js tests/workspace-api.integration.test.js
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/api.integration.test.js tests/sensitive-api.integration.test.js tests/privacy-delivery-api.integration.test.js tests/privacy-dispatch-api.integration.test.js tests/payroll-intake-api.integration.test.js tests/workspace-api.integration.test.js tests/workspace-jobs-api.integration.test.js
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" psql "postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" -v ON_ERROR_STOP=1 -f tests/tenant-isolation.runtime.sql
 
       - name: Verify signed audit checkpoints and alert policy

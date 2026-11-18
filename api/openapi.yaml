@@ -1051,6 +1051,55 @@ paths:
         "403": { description: Authority denied }
         "409": { description: Conflicting baseline }
 
+  /tenants/{tenantId}/workspace/jobs:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: cursor
+        in: query
+        schema: { type: string, format: uuid }
+    get:
+      summary: List scoped jobs and readiness states
+      responses:
+        "200": { description: Page of up to 50 jobs }
+        "403": { description: Authority denied }
+  /tenants/{tenantId}/workspace/jobs/{jobId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: jobId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read job and readiness details
+      responses:
+        "200": { description: Job and shared readiness result }
+        "403": { description: Authority denied }
+    post:
+      summary: Create job or append an exact readiness or lifecycle event
+      description: Owner/admin with recent MFA. Evidence pointers are assertions only, not certification or customer acceptance.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [confirm, action, evidenceDigest]
+              properties:
+                confirm: { const: true }
+                action: { enum: [create, check, start, complete, cancel] }
+                evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                contractId: { type: string, format: uuid }
+                siteId: { type: string, format: uuid }
+                serviceDate: { type: string, format: date }
+                eventId: { type: string, format: uuid }
+                checkId: { enum: [customer, site, scope, service_date, price, currency, access, materials, skills, permissions, completion_evidence] }
+                checkStatus: { enum: [satisfied, missing, conflicting, unverified, not_applicable] }
+      responses:
+        "200": { description: Current job and readiness state }
+        "400": { description: Invalid action or fields }
+        "403": { description: Authority denied }
+        "409": { description: Ineligible transition }
 components:
   schemas:
     ErrorResponse:
