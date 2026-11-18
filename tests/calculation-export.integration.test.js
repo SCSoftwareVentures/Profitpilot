@@ -78,6 +78,11 @@ test("single calculation export requires fresh issuer MFA, owner/admin role, ten
   const event=await admin.query("SELECT tenant_id,actor_user_id,calculation_id,purpose FROM private.calculation_export_events WHERE id=$1",[summary.exportId]);
   assert.deepEqual(event.rows[0],{tenant_id:tenant,actor_user_id:owner,calculation_id:run,purpose:"internal_review"});
   await assert.rejects(()=>withTenant(tenant,subject,c=>c.query("DELETE FROM private.calculation_export_events")),/permission denied/i);
+  await admin.query("UPDATE private.financial_actor_budgets SET used=10,window_start=clock_timestamp() WHERE tenant_id=$1 AND actor_id=$2 AND scope='calculation_export'",[tenant,owner]);
+  const throttled=await request(run);
+  assert.equal(throttled.status,429);
+  assert.equal(throttled.headers.get("retry-after"),"3600");
+  assert.equal((await admin.query("SELECT count(*)::int AS n FROM public.audit_events WHERE object_id=$1 AND action='calculation_summary_exported'",[run])).rows[0].n,1);
   await admin.query("UPDATE tenant_memberships SET status='revoked' WHERE tenant_id=$1 AND user_id=$2",[tenant,owner]);
   assert.equal((await request(run)).status,403);
   assert.equal((await admin.query("SELECT id FROM private.calculation_export_events WHERE calculation_id=$1",[run])).rowCount,1);
