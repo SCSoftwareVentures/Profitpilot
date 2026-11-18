@@ -18,6 +18,8 @@ export async function verifyDatabaseReadiness(db,env=process.env){
   to_regprocedure('private.admit_actor_request(uuid)') IS NOT NULL AND has_function_privilege(current_user,'private.admit_actor_request(uuid)','EXECUTE') AND NOT has_table_privilege(current_user,'private.actor_request_security','SELECT,INSERT,UPDATE,DELETE,TRUNCATE') AND NOT has_any_column_privilege(current_user,'private.actor_request_security','SELECT,INSERT,UPDATE,REFERENCES') AS actor_containment,
   NOT has_table_privilege(current_user,'public.audit_events','INSERT,UPDATE,DELETE,TRUNCATE') AS audit_restricted`);
  if(!security.rows[0]||Object.values(security.rows[0]).some(value=>value!==true))throw new Error("Database security readiness checks failed");
+ const catalog=await db.query("SELECT private.verify_security_catalog() AS verified");
+ if(catalog.rows[0]?.verified!==true)throw new Error("Database security catalog drift detected");
  const key=env.TENANT_CONTEXT_HMAC_KEY_ID||"primary",secret=env.TENANT_CONTEXT_HMAC_SECRET||"";
  if(!/^[a-f0-9]{64,}$/i.test(secret)||secret.length%2!==0)throw new Error("Signing key is missing");
  const time=String(Math.floor(Date.now()/1000)),nonce=randomBytes(16).toString("hex");
