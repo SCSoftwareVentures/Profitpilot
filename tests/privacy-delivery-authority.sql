@@ -5,7 +5,7 @@ DECLARE t uuid:=gen_random_uuid(); other_t uuid:=gen_random_uuid(); a uuid:=gen_
  case_id_value uuid:=gen_random_uuid(); blocked_case uuid:=gen_random_uuid(); pending_case uuid:=gen_random_uuid(); order_id_value uuid:=gen_random_uuid();
  who text; actor uuid; phase text; actual_step text; scope_hash text; recipient text:=repeat('a',64); sender text:=repeat('b',64);
  authority text:=repeat('c',64); redaction text:=repeat('d',64); response_hash text:=repeat('e',64); envelope text:=repeat('f',64);
- now_s bigint; expires bigint; nonce text; session_hash text; context_sig text; proof text; key_id_value text; key_bytes bytea; approver_session text;
+ now_s bigint; expires bigint; nonce text; session_hash text; context_sig text; proof text; key_id_value text; key_bytes bytea; approver_session text; receipt_review uuid; saved_fingerprint text;
 BEGIN
  INSERT INTO public.tenants(id,legal_name) VALUES(t,'Synthetic assisted privacy delivery'),(other_t,'Synthetic other privacy delivery');
  INSERT INTO public.users(id,auth_subject,email) VALUES(a,'ci-delivery-'||a,'owner@example.invalid'),(b,'ci-delivery-'||b,'admin@example.invalid'),(r,'ci-delivery-'||r,'reader@example.invalid');
@@ -59,6 +59,42 @@ BEGIN
  IF has_function_privilege('profitpilot_app','private.record_privacy_delivery(uuid,uuid,uuid,text,text,text,text,text,text,text,text,text,bigint,bigint,text,bigint,text,text,text)','EXECUTE')
  OR has_any_column_privilege('profitpilot_app','private.privacy_delivery_authorizations','SELECT,INSERT,UPDATE,REFERENCES') THEN RAISE EXCEPTION 'Privacy release internals exposed'; END IF;
  RAISE NOTICE 'Assisted privacy release, identity gate, exact recipient/envelope scope, independent approval, revocation, replay and privilege checks passed';
+
+ -- Reconcile verified-offline evidence as a separate dual-reviewed work order.
+ -- Synthetic digests do not claim actual cryptographic receipt or delivery.
+ receipt_review:=gen_random_uuid();
+ saved_fingerprint:=private.sensitive_recovery_fingerprint();
+ FOREACH phase IN ARRAY ARRAY['request','self','approve','consume'] LOOP
+  actor:=CASE phase WHEN 'approve' THEN b ELSE a END;
+  actual_step:=CASE WHEN phase='self' THEN 'approve' ELSE phase END;
+  who:='ci-delivery-'||actor;
+  now_s:=floor(extract(epoch FROM clock_timestamp()))::bigint;expires:=now_s+20;
+  nonce:=encode(public.gen_random_bytes(16),'hex');session_hash:=encode(public.digest(actor::text,'sha256'),'hex');
+  context_sig:=encode(public.hmac(convert_to(t::text||E'\n'||who||E'\n'||expires||E'\n'||nonce||E'\n'||key_id_value,'UTF8'),key_bytes,'sha256'),'hex');
+  PERFORM set_config('app.tenant_id',t::text,true),set_config('app.tenant_subject',who,true),set_config('app.tenant_expires',expires::text,true),set_config('app.tenant_nonce',nonce,true),set_config('app.tenant_key_id',key_id_value,true),set_config('app.tenant_signature',context_sig,true);
+  scope_hash:=private.privacy_receipt_scope(t,case_id_value,order_id_value,receipt_review,repeat('1',64),repeat('2',64),repeat('3',64),repeat('4',64));
+  proof:=encode(public.hmac(convert_to('profitpilot-security-work-v1'||E'\n'||t||E'\n'||receipt_review||E'\n'||'privileged_operation'||E'\n'||scope_hash||E'\n'||actual_step||E'\n'||who||E'\n'||now_s||E'\n'||now_s||E'\n'||session_hash||E'\n'||expires||E'\n'||nonce||E'\n'||key_id_value,'UTF8'),key_bytes,'sha256'),'hex');
+  IF phase='self' THEN
+   BEGIN PERFORM private.record_privacy_receipt_evidence(t,case_id_value,order_id_value,receipt_review,repeat('1',64),repeat('2',64),repeat('3',64),repeat('4',64),scope_hash,actual_step,now_s,now_s,session_hash,expires,nonce,key_id_value,proof);
+    RAISE EXCEPTION 'Receipt self-approval accepted'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+  ELSE
+   BEGIN PERFORM private.record_privacy_receipt_evidence(t,case_id_value,order_id_value,receipt_review,repeat('1',64),repeat('5',64),repeat('3',64),repeat('4',64),scope_hash,actual_step,now_s,now_s,session_hash,expires,nonce,key_id_value,proof);
+    RAISE EXCEPTION 'Receipt substitution accepted'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+   BEGIN PERFORM private.record_privacy_receipt_evidence(other_t,case_id_value,order_id_value,receipt_review,repeat('1',64),repeat('2',64),repeat('3',64),repeat('4',64),scope_hash,actual_step,now_s,now_s,session_hash,expires,nonce,key_id_value,proof);
+    RAISE EXCEPTION 'Cross tenant receipt accepted'; EXCEPTION WHEN insufficient_privilege THEN NULL; END;
+   PERFORM private.record_privacy_receipt_evidence(t,case_id_value,order_id_value,receipt_review,repeat('1',64),repeat('2',64),repeat('3',64),repeat('4',64),scope_hash,actual_step,now_s,now_s,session_hash,expires,nonce,key_id_value,proof);
+   IF phase<>'consume' AND EXISTS(SELECT 1 FROM private.privacy_receipt_evidence WHERE tenant_id=t AND release_order_id=order_id_value) THEN RAISE EXCEPTION 'Premature receipt evidence'; END IF;
+  END IF;
+ END LOOP;
+ IF (SELECT count(*) FROM private.privacy_receipt_evidence WHERE tenant_id=t AND release_order_id=order_id_value AND review_order_id=receipt_review)<>1
+ OR private.sensitive_recovery_fingerprint() IS NOT DISTINCT FROM saved_fingerprint OR private.verify_audit_chain(t) IS DISTINCT FROM true THEN RAISE EXCEPTION 'Receipt evidence or audit missing'; END IF;
+ BEGIN PERFORM private.record_privacy_receipt_evidence(t,case_id_value,order_id_value,receipt_review,repeat('1',64),repeat('2',64),repeat('3',64),repeat('4',64),scope_hash,'consume',now_s,now_s,session_hash,expires,nonce,key_id_value,proof);
+  RAISE EXCEPTION 'Receipt replay accepted'; EXCEPTION WHEN unique_violation THEN NULL; END;
+ BEGIN DELETE FROM private.privacy_receipt_evidence WHERE tenant_id=t; RAISE EXCEPTION 'Receipt evidence mutable'; EXCEPTION WHEN object_not_in_prerequisite_state THEN NULL; END;
+ IF has_function_privilege('profitpilot_app','private.record_privacy_receipt_evidence(uuid,uuid,uuid,uuid,text,text,text,text,text,text,bigint,bigint,text,bigint,text,text,text)','EXECUTE')
+ OR has_any_column_privilege('profitpilot_app','private.privacy_receipt_evidence','SELECT,INSERT,UPDATE,REFERENCES') THEN RAISE EXCEPTION 'Receipt reconciliation internals exposed'; END IF;
+ RAISE NOTICE 'Privacy receipt evidence, independent review, exact scope, replay, recovery and immutability checks passed';
+
 END $test$;
 \if :{?persist_recovery_fixture}
  \if :persist_recovery_fixture

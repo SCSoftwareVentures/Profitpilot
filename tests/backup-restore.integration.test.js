@@ -72,7 +72,12 @@ test("synthetic logical backup restores all source rows and preserves tenant bou
   assert.equal((await restored.query("SELECT private.verify_audit_chain($1) AS ok",[delivery[0].tenant_id])).rows[0].ok,true);
   await assert.rejects(()=>runtime.query("SELECT * FROM private.privacy_delivery_authorizations"),/permission denied/i);
   await assert.rejects(()=>restored.query("DELETE FROM private.privacy_delivery_authorizations WHERE tenant_id=$1 AND order_id=$2",[delivery[0].tenant_id,delivery[0].order_id]),e=>e.code==="55000");
-  console.log("Assisted privacy release authorization and immutable audit restored");
+  const receivedEvidence=(await restored.query("SELECT review_order_id,receipt_digest FROM private.privacy_receipt_evidence WHERE tenant_id=$1 AND release_order_id=$2",[delivery[0].tenant_id,delivery[0].order_id])).rows;
+  assert.equal(receivedEvidence.length,1,"independently reviewed receipt evidence must survive encrypted restore");
+  assert.notEqual(receivedEvidence[0].review_order_id,delivery[0].order_id);
+  await assert.rejects(()=>runtime.query("SELECT * FROM private.privacy_receipt_evidence"),/permission denied/i);
+  await assert.rejects(()=>restored.query("DELETE FROM private.privacy_receipt_evidence WHERE tenant_id=$1 AND release_order_id=$2",[delivery[0].tenant_id,delivery[0].order_id]),e=>e.code==="55000");
+  console.log("Assisted privacy release authorization, receipt evidence and immutable audit restored");
   const tenant="33333333-3333-4333-8333-333333333333",subject="isolation-tenant-c";
   const result=await restored.query("SELECT key_id,secret FROM private.tenant_context_keys WHERE active ORDER BY key_id LIMIT 1");
   assert.equal(result.rowCount,1,"restored database must have active tenant context key");
