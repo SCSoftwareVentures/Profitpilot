@@ -5,22 +5,28 @@ import {createServer} from "node:http";
 import {generateKeyPair,exportJWK,SignJWT} from "jose";
 import pg from "pg";
 
-test("core workspace is atomic, idempotent, tenant-scoped and financially unapproved",{skip:!process.env.TEST_APP_DATABASE_URL,timeout:45000},async()=>{
+test("core workspace is atomic, idempotent, tenant-scoped and financially unapproved",{skip:!process.env.TEST_APP_DATABASE_URL,timeout:45000},async(t)=>{
+ assert.ok(process.env.TEST_ADMIN_DATABASE_URL,"CI admin database URL is required");
+ assert.ok(process.env.TENANT_CONTEXT_HMAC_SECRET,"CI tenant context signing key is required");
  const tenant=randomUUID(),other=randomUUID(),owner=randomUUID(),reader=randomUUID(),otherOwner=randomUUID();
  const setupId=randomUUID(),body={setupId,businessName:"CI Synthetic Business",siteName:"CI Synthetic Site",customerName:"CI Synthetic Customer",effectiveFrom:"2026-11-01",price:"12345.67",currency:"AUD",taxBasis:"gst_exclusive",billingBasis:"monthly"};
  const issuer="https://profitpilot-ci.invalid/",audience="profitpilot-api";
  const {publicKey,privateKey}=await generateKeyPair("RS256");
  const jwk=await exportJWK(publicKey);Object.assign(jwk,{kid:"ci-workspace",use:"sig",alg:"RS256"});
  const jwks=createServer((_req,res)=>{res.setHeader("Content-Type","application/json");res.end(JSON.stringify({keys:[jwk]}));});
- await new Promise(resolve=>jwks.listen(0,"127.0.0.1",resolve));
+ t.after(async()=>{jwks.closeAllConnections();if(jwks.listening)await new Promise(resolve=>jwks.close(resolve));});
+ await new Promise((resolve,reject)=>{jwks.once("error",reject);jwks.listen(0,"127.0.0.1",resolve);});
  Object.assign(process.env,{NODE_ENV:"test",DATABASE_URL:process.env.TEST_APP_DATABASE_URL,AUTH_ISSUER:issuer,AUTH_AUDIENCE:audience,AUTH_JWKS_URL:"http://127.0.0.1:"+jwks.address().port+"/.well-known/jwks.json"});
- const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL});
+ const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL,ssl:{rejectUnauthorized:true,ca:process.env.DATABASE_SSL_CA},connectionTimeoutMillis:5000,statement_timeout:5000});
+ t.after(()=>admin.end());
  const [{default:app},{pool,withTenant}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);
- const api=createServer(app);await new Promise(resolve=>api.listen(0,"127.0.0.1",resolve));
+ t.after(()=>pool.end());
+ const api=createServer(app);t.after(async()=>{api.closeAllConnections();if(api.listening)await new Promise(resolve=>api.close(resolve));});
+ await new Promise((resolve,reject)=>{api.once("error",reject);api.listen(0,"127.0.0.1",resolve);});
  const base="http://127.0.0.1:"+api.address().port;
  const token=subject=>new SignJWT({email:subject+"@example.invalid",auth_time:Math.floor(Date.now()/1000)-10,sid:"ci-workspace-"+subject}).setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(issuer).setAudience(audience).setSubject(subject).setIssuedAt().setExpirationTime("5m").sign(privateKey);
- const req=async(t,subject,method="GET",suffix="",data)=>fetch(base+"/v1/tenants/"+t+"/workspaces"+suffix,{method,headers:{...(subject?{Authorization:"Bearer "+await token(subject)}:{}),...(data?{"Content-Type":"application/json"}:{})},body:data?JSON.stringify(data):undefined});
- try{
+ const req=async(t,subject,method="GET",suffix="",data)=>fetch(base+"/v1/tenants/"+t+"/workspaces"+suffix,{method,headers:{...(subject?{Authorization:"Bearer "+await token(subject)}:{}),...(data?{"Content-Type":"application/json"}:{})},body:data?JSON.stringify(data):undefined,signal:AbortSignal.timeout(8000)});
+ {
   await admin.query("INSERT INTO public.tenants(id,legal_name) VALUES($1,'CI Workspace Tenant'),($2,'CI Other Workspace Tenant')",[tenant,other]);
   await admin.query("INSERT INTO public.users(id,auth_subject,email) VALUES($1,'ci-workspace-owner','owner@example.invalid'),($2,'ci-workspace-reader','reader@example.invalid'),($3,'ci-workspace-other','other@example.invalid')",[owner,reader,otherOwner]);
   await admin.query("INSERT INTO public.tenant_memberships(tenant_id,user_id,role) VALUES($1,$2,'owner'),($1,$3,'read_only'),($4,$5,'owner')",[tenant,owner,reader,other,otherOwner]);
@@ -63,7 +69,5 @@ test("core workspace is atomic, idempotent, tenant-scoped and financially unappr
    assert.equal((await req(tenant,ownerSubject,"POST","",{...body,setupId:randomUUID()})).status,403);
    assert.equal((await req(tenant,readerSubject,"GET","/"+setupId)).status,403);
   }finally{await admin.query("SELECT private.release_tenant_emergency($1,$2,'CI_WORKSPACE_RECOVER')",[tenant,incident]);}
- }finally{
-  api.closeAllConnections();jwks.closeAllConnections();await Promise.all([new Promise(r=>api.close(r)),new Promise(r=>jwks.close(r)),pool.end(),admin.end()]);
  }
 });

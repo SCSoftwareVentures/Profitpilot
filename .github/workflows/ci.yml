@@ -389,8 +389,13 @@ jobs:
         run: node --test tests/db-tls.integration.test.js tests/production-readiness.integration.test.js
 
       - name: Verify core workspace authenticated API, idempotency and isolation
+        timeout-minutes: 2
+        env:
+          DATABASE_SSL: "true"
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
-          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/core-workspace.integration.test.js
+          test -n "$DATABASE_SSL_CA"
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/core-workspace.integration.test.js
 
       - name: Verify actual read-only dashboard through TLS database and HTTPS boundary
         env:
