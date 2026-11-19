@@ -27,9 +27,11 @@ The first delivery mode is a concierge validation service using secure, authoris
 - Production Docker image build and running-container database health smoke test
 - Migration 008 narrows runtime writes to current endpoint operations, removes automatic grants on future tables and prevents runtime modification/deletion of raw evidence, calculation snapshots and audit events. Expanded tenant-table and foreign-object regression tests passed CI #2944 (commit bad8319).
 
-- Import integrity: contiguous chunks, atomic conflict rejection, exact replay, serialized ingestion/validation and preserved review decisions; calculations use a consistent snapshot, full-period contract coverage and payroll currency checks. Regression tests passed CI #2945 and #2946. Source file hashes remain client-declared; original-byte verification is outstanding.
+- Import integrity: contiguous chunks, atomic conflict rejection, exact replay, serialized ingestion/validation and preserved review decisions; calculations use a consistent snapshot, full-period contract coverage and payroll currency checks. Regression tests passed CI #2945 and #2946. Legacy JSON ingestion remains client-declared; the new original-file route verifies actual bytes independently.
 
-- Payroll prototype: structural validation, reviewer-attested controls, exact decimal whole-row allocations, residuals, tenant-scoped source lineage and duplicate reference rollback (migration 009). CI #2947 passed. Migration 010 introduces v0.2 split-source allocations, source-record foreign keys, reviewer-only write policies, draft-to-confirmed database validation and post-confirmation insertion protection. New CI pending. Legacy/manual and v0.1 runs are not retroactively validated by these new controls; original-file verification and statutory payroll compliance remain outstanding.
+- Payroll prototype: structural validation, reviewer-attested controls, exact decimal whole-row allocations, residuals, tenant-scoped source lineage and duplicate reference rollback (migration 009). CI #2947 passed. Migration 010 introduces v0.2 split-source allocations, source-record foreign keys, reviewer-only write policies, draft-to-confirmed database validation and post-confirmation insertion protection. CI #2948 passed. Legacy/manual and v0.1 runs are not retrospectively validated; statutory payroll compliance remains outstanding.
+
+- Migration 011: bounded UTF-8 CSV upload, server and PostgreSQL SHA-256 checks, metadata-only source receipts, original byte retention, atomic ingestion and post-receipt sealing. CI pending. Byte integrity is distinct from source issuer identity. No malware scanner, production encryption/retention or issuer signature claim.
 
 ## What is not established
 

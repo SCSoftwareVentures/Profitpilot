@@ -5,6 +5,7 @@ import cors from "cors";
 import rateLimit from "express-rate-limit";
 import {randomUUID} from "node:crypto";
 import {withTenant,health} from "./db.js";
+import {parseSourceFile,MAX_SOURCE_BYTES} from "./source-file.js";
 import {authRequired,requireRole} from "./auth.js";
 import {validateInvoiceRows,validatePayrollRows,reconcilePayroll,isIsoDate} from "../src/engine.js";
 
@@ -48,6 +49,46 @@ app.post("/v1/tenants/:tenantId/imports",membership,requireRole("owner","admin",
  }catch(e){next(e);}
 });
 
+
+app.post("/v1/tenants/:tenantId/imports/:batchId/file",membership,requireRole("owner","admin","analyst"),
+ (req,res,next)=>{
+  if(!isUuid(req.params.batchId))return res.status(400).json({error:"Invalid batch ID"});
+  if(!req.is("text/csv")||(req.get("content-encoding")||"identity").toLowerCase()!=="identity")return res.status(415).json({error:"Only uncompressed text/csv is supported"});
+  next();
+ },express.raw({type:"text/csv",limit:MAX_SOURCE_BYTES,inflate:false}),async(req,res,next)=>{try{
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
+  const tenant=req.membership.tenantId,batchId=req.params.batchId;
+  const batch=await c.query("SELECT id,status,source_type,file_sha256,file_name FROM import_batches WHERE tenant_id=$1 AND id=$2 FOR UPDATE",[tenant,batchId]);
+  if(!batch.rowCount)return {status:404,error:"Import batch not found"};
+  const b=batch.rows[0];
+  if(!b.file_name.toLowerCase().endsWith(".csv")||b.file_name.includes("/")||b.file_name.includes(String.fromCharCode(92))||Array.from(b.file_name).some(ch=>ch.charCodeAt(0)<32||ch.charCodeAt(0)===127))return {status:422,error:"Source filename must be a plain CSV filename"};
+  let parsed;
+  try{parsed=parseSourceFile(req.body,b.source_type);}catch(e){return {status:422,error:e.message};}
+  if(parsed.sha256!==b.file_sha256)return {status:422,error:"Uploaded bytes do not match the declared SHA-256"};
+  const prior=await c.query("SELECT sha256,byte_count,row_count,parser_version FROM import_source_receipts WHERE tenant_id=$1 AND batch_id=$2",[tenant,batchId]);
+  if(prior.rowCount)return {status:200,receipt:prior.rows[0],sourceIntegrity:"byte_verified",idempotent:true};
+  if(b.status!=="uploaded")return {status:409,error:"Batch is not open for original-file ingestion"};
+  const existing=await c.query("SELECT 1 FROM raw_import_rows WHERE tenant_id=$1 AND batch_id=$2 LIMIT 1",[tenant,batchId]);
+  if(existing.rowCount)return {status:409,error:"Client-ingested rows cannot be retroactively labelled byte-verified"};
+  const actor=await c.query("SELECT u.id FROM users u JOIN tenant_memberships m ON m.user_id=u.id WHERE u.auth_subject=$1 AND m.tenant_id=$2 AND m.status='active' AND m.role IN ('owner','admin','analyst')",[req.identity.subject,tenant]);
+  if(!actor.rowCount)throw Object.assign(new Error("Active ingestion membership required"),{status:403});
+  const userId=actor.rows[0].id;
+  await c.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) SELECT $1,$2,p.ordinality::int,p.value FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY AS p(value,ordinality)",[tenant,batchId,JSON.stringify(parsed.rows)]);
+  const receipt=await c.query("INSERT INTO import_source_receipts(tenant_id,batch_id,sha256,byte_count,row_count,parser_version,original_bytes,received_by) VALUES($1,$2,$3,$4,$5,'strict-csv-0.1.0',$6,$7) RETURNING sha256,byte_count,row_count,parser_version",[tenant,batchId,parsed.sha256,req.body.length,parsed.rows.length,req.body,userId]);
+  await c.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'source_file_verified','import_batch',$3,'Original CSV checksum matched',$4)",[tenant,userId,batchId,JSON.stringify(receipt.rows[0])]);
+  return {status:201,sourceIntegrity:"byte_verified",receipt:receipt.rows[0]};
+ });
+ const {status,...body}=result;res.status(status).json(body);
+ }catch(e){next(e);}});
+
+app.get("/v1/tenants/:tenantId/imports/:batchId/source",membership,async(req,res,next)=>{try{
+ if(!isUuid(req.params.batchId))return res.status(400).json({error:"Invalid batch ID"});
+ const r=await withTenant(req.membership.tenantId,req.identity.subject,c=>c.query("SELECT b.id,b.file_sha256,r.sha256,r.byte_count,r.row_count,r.parser_version,r.received_at FROM import_batches b LEFT JOIN import_source_receipts r ON r.tenant_id=b.tenant_id AND r.batch_id=b.id WHERE b.tenant_id=$1 AND b.id=$2",[req.membership.tenantId,req.params.batchId]));
+ if(!r.rowCount)return res.status(404).json({error:"Import batch not found"});
+ const row=r.rows[0];
+ res.json({batchId:row.id,declaredSha256:row.file_sha256,sourceIntegrity:row.sha256?"byte_verified":"client_declared",receipt:row.sha256?{sha256:row.sha256,byte_count:row.byte_count,row_count:row.row_count,parser_version:row.parser_version,received_at:row.received_at}:null,issuerAuthenticated:false});
+ }catch(e){next(e);}});
+
 app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requireRole("owner","admin","analyst"),async(req,res,next)=>{try{
  const {rows,startRow=1}=req.body||{};
  if(!isUuid(req.params.batchId)||!Array.isArray(rows)||rows.length<1||rows.length>200||rows.some(x=>!x||typeof x!=="object"||Array.isArray(x))||!Number.isSafeInteger(startRow)||startRow<1||startRow+rows.length-1>MAX_IMPORT_ROWS)return res.status(400).json({error:"Provide 1–200 row objects and a valid one-based startRow (maximum 2000 rows per batch)"});
@@ -56,6 +97,8 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requireRole("o
   // Serialise all ingestion and validation operations for the same batch.
   const batch=await client.query("SELECT id,status FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[batchId,tenant]);
   if(!batch.rowCount)return {status:404,error:"Import batch not found"};
+  const verified=await client.query("SELECT 1 FROM import_source_receipts WHERE tenant_id=$1 AND batch_id=$2",[tenant,batchId]);
+  if(verified.rowCount)return {status:409,error:"Byte-verified rows cannot be replaced or extended through JSON ingestion"};
   const state=await client.query("SELECT COUNT(*)::int AS n,COALESCE(MAX(row_number),0)::int AS last FROM raw_import_rows WHERE batch_id=$1 AND tenant_id=$2",[batchId,tenant]);
   const {n,last}=state.rows[0];
   if(n!==last)return {status:409,error:"Source row numbering is inconsistent; administrator review required"};
@@ -91,7 +134,8 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requireRol
   // A repeat validation must never overwrite a human review or its recorded reason.
   await client.query("INSERT INTO mapping_decisions(tenant_id,raw_row_id,target_type,target_id,decision,confidence,method_version,reason) SELECT $1,p.id,$3,NULL,p.decision,'LOW',$4,p.reason FROM jsonb_to_recordset($2::jsonb) AS p(id uuid,decision text,reason text) ON CONFLICT(tenant_id,raw_row_id,method_version) DO NOTHING",[req.membership.tenantId,JSON.stringify(records),payroll?"payroll_row":"invoice_row",payroll?"payroll-validator-0.1.0":"invoice-validator-0.1.0"]);
   await client.query("UPDATE import_batches SET status='review' WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
-  return {status:200,batchId:req.params.batchId,total:raw.rowCount,validCandidateRows:raw.rowCount-held,heldRows:held,automaticallyAccepted:0};
+  const receipt=await client.query("SELECT 1 FROM import_source_receipts WHERE tenant_id=$1 AND batch_id=$2",[req.membership.tenantId,req.params.batchId]);
+  return {status:200,batchId:req.params.batchId,sourceIntegrity:receipt.rowCount?"byte_verified":"client_declared",total:raw.rowCount,validCandidateRows:raw.rowCount-held,heldRows:held,automaticallyAccepted:0};
  });
  if(result.error)return res.status(result.status).json({error:result.error});
  const {status,...body}=result;res.status(status).json(body);
@@ -124,6 +168,8 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/reconcile-payroll",membership,r
   const actor=await c.query("SELECT u.id FROM users u JOIN tenant_memberships m ON m.user_id=u.id WHERE u.auth_subject=$1 AND m.tenant_id=$2 AND m.status='active' AND m.role IN ('owner','admin','reviewer')",[req.identity.subject,tenant]);
   if(!actor.rowCount)throw Object.assign(new Error("Active reviewer membership required"),{status:403});
   const userId=actor.rows[0].id,k=plan.buckets;
+  const source=await c.query("SELECT 1 FROM import_source_receipts WHERE tenant_id=$1 AND batch_id=$2",[tenant,batchId]);
+  const sourceIntegrity=source.rowCount?"byte_verified":"client_declared";
   const pool=await c.query("INSERT INTO payroll_pools(tenant_id,batch_id,period_start,period_end,total_amount,currency,source_ref) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id",[tenant,batchId,b.period_start,b.period_end,plan.total,currency,"reconciled:"+controlReference.trim()]);
   const poolId=pool.rows[0].id;
   const run=await c.query("INSERT INTO allocation_runs(tenant_id,payroll_pool_id,method_version,status,direct_amount,allocated_amount,non_site_amount,excluded_amount,residual_amount,reviewer_id) VALUES($1,$2,'payroll-source-row-0.2.0','draft',$3,$4,$5,$6,$7,$8) RETURNING id",[tenant,poolId,k.direct,k.approved_allocated,k.non_site,k.excluded,k.unallocated,userId]);
@@ -135,9 +181,9 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/reconcile-payroll",membership,r
   await c.query("INSERT INTO allocation_lines(tenant_id,allocation_run_id,site_id,bucket_type,amount,source_ref,source_record_id) SELECT $1,$2,x.site_id,x.bucket,x.amount,x.source_ref,x.source_record_id FROM jsonb_to_recordset($3::jsonb) AS x(site_id uuid,bucket text,amount numeric,source_ref text,source_record_id uuid)",[tenant,runId,JSON.stringify(entries.map(e=>({site_id:e.siteId,bucket:e.bucket,amount:e.amount,source_ref:e.sourceRef,source_record_id:sourceIds.get(e.rawRowId)})))]);
   const confirmed=await c.query("UPDATE allocation_runs SET status='confirmed' WHERE tenant_id=$1 AND id=$2 AND status='draft' RETURNING id",[tenant,runId]);
   if(confirmed.rowCount!==1)throw new Error("Payroll confirmation failed");
-  await c.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'payroll_reconciled','allocation_run',$3,$4,$5)",[tenant,userId,runId,reason.trim(),JSON.stringify({batchId,poolId,controlReference:controlReference.trim(),currency,total:plan.total,buckets:k,assignments:entries.map(e=>({rowNumber:e.rowNumber,bucket:e.bucket,siteId:e.siteId,amount:e.amount,reason:e.reason}))})]);
+  await c.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'payroll_reconciled','allocation_run',$3,$4,$5)",[tenant,userId,runId,reason.trim(),JSON.stringify({batchId,poolId,controlReference:controlReference.trim(),sourceIntegrity,currency,total:plan.total,buckets:k,assignments:entries.map(e=>({rowNumber:e.rowNumber,bucket:e.bucket,siteId:e.siteId,amount:e.amount,reason:e.reason}))})]);
   await c.query("UPDATE import_batches SET status='accepted' WHERE tenant_id=$1 AND id=$2",[tenant,batchId]);
-  return {status:201,poolId,runId,total:plan.total,currency,buckets:k,sourceRows:rows.rowCount,allocationLines:entries.length};
+  return {status:201,poolId,runId,total:plan.total,currency,sourceIntegrity,buckets:k,sourceRows:rows.rowCount,allocationLines:entries.length};
  });
  const {status,...body}=result;res.status(status).json(body);
  }catch(e){next(e);}});
@@ -192,7 +238,7 @@ app.get("/v1/tenants/:tenantId/calculations/:runId",membership,async(req,res,nex
  }catch(e){next(e);}});
  
 
-app.use((err,req,res,next)=>{const id=randomUUID();process.stderr.write(JSON.stringify({event:"request_error",id,message:err.message})+"\n");const status=["23505","40001","40P01"].includes(err.code)?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);res.status(status).json({error:status===409?"Conflicting record; refresh and review the current state":status<500?err.message:"Internal server error",reference:id});});
+app.use((err,req,res,next)=>{const id=randomUUID();process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"&&/^[A-Z0-9_]{1,30}$/.test(err.code)?err.code:"REQUEST_ERROR"})+"\n");const status=["23505","40001","40P01"].includes(err.code)?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);res.status(status).json({error:status===409?"Conflicting record; refresh and review the current state":status===413?"Request body exceeds size limit":status===415?"Unsupported request encoding or media type":status<500?"Request rejected":"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
 if(process.env.NODE_ENV!=="test")app.listen(port,()=>process.stdout.write("ProfitPilot API listening on "+port+"\n"));
 export default app;

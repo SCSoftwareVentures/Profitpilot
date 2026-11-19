@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createServer} from "node:http";
-import {createHmac,randomBytes} from "node:crypto";
+import {createHash,createHmac,randomBytes} from "node:crypto";
 import {generateKeyPair,exportJWK,SignJWT} from "jose";
 import pg from "pg";
 
@@ -84,6 +84,12 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const runB=await insertB("INSERT INTO calculation_runs(tenant_id,contract_id,site_id,period_start,period_end,formula_version,inputs,outputs,completeness,created_by) VALUES ($1,$2,$3,'2026-02-01','2026-02-28','ci','{}','{}','incomplete',$4)",[tenantB,contractB,siteB,userC]);
     await insertB("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type) VALUES ($1,$2,'ci','fixture')",[tenantB,userC]);
 
+    const fixtureBytes=Buffer.from("invoice_id,site,date,amount\nCI-B,Site B,2026-02-01,10.00\n");
+    const fixtureHash=createHash("sha256").update(fixtureBytes).digest("hex");
+    const verifiedB=await insertB("INSERT INTO import_batches(tenant_id,source_type,source_period_start,source_period_end,permission_ref,status,file_sha256,file_name,created_by) VALUES ($1,'customer_invoice','2026-02-01','2026-02-28','CI','uploaded',$2,'verified-b.csv',$3)",[tenantB,fixtureHash,userC]);
+    await admin.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,$3)",[tenantB,verifiedB,JSON.stringify({invoice_id:"CI-B",site:"Site B",date:"2026-02-01",amount:"10.00"})]);
+    await admin.query("INSERT INTO import_source_receipts(tenant_id,batch_id,sha256,byte_count,row_count,parser_version,original_bytes,received_by) VALUES($1,$2,$3,$4,1,'strict-csv-0.1.0',$5,$6)",[tenantB,verifiedB,fixtureHash,fixtureBytes.length,fixtureBytes,userC]);
+
     // Automatically include every current public tenant-owned table (plus tenants)
     // and require its fixture, forced RLS, and both positive and negative visibility.
     const catalog=await admin.query("SELECT c.relname AS name,c.relrowsecurity AS rls,c.relforcerowsecurity AS forced FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND (c.relname='tenants' OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attname='tenant_id' AND NOT a.attisdropped)) ORDER BY c.relname");
@@ -121,6 +127,9 @@ test("authenticated API enforces tenant membership, role permissions and import 
       "UPDATE audit_events SET reason='tampered'",
       "DELETE FROM audit_events",
       "TRUNCATE audit_events",
+      "SELECT original_bytes FROM import_source_receipts",
+      "UPDATE import_source_receipts SET sha256='tampered'",
+      "DELETE FROM import_source_receipts",
       "DELETE FROM payroll_source_records",
       "UPDATE payroll_pools SET total_amount=0",
       "UPDATE allocation_lines SET amount=0",
@@ -360,6 +369,46 @@ test("authenticated API enforces tenant membership, role permissions and import 
       assert.equal((await admin.query("SELECT count(*)::int AS n FROM payroll_pools WHERE batch_id=$1",[p2.id])).rows[0].n,0);
       assert.equal((await admin.query("SELECT status FROM import_batches WHERE id=$1",[p2.id])).rows[0].status,"review");
     }finally{await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);}
+
+
+    const sourceBytes=Buffer.from("invoice_id,site,date,amount\r\nCI-verified,CI site,2026-02-01,12.34\r\n");
+    const sourceHash=createHash("sha256").update(sourceBytes).digest("hex");
+    const sourceBatch=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-analyst",method:"POST",body:{...importBody,sourceType:"customer_invoice",fileName:"verified.csv",sha256:sourceHash}});
+    assert.equal(sourceBatch.status,201);
+    const sourceBatchId=(await sourceBatch.json()).batch.id;
+    const sourcePath=`/v1/tenants/${tenantA}/imports/${sourceBatchId}`;
+    async function upload(path,bytes,subject="ci-api-analyst",type="text/csv",extra={}){
+      return fetch(base+path+"/file",{method:"POST",headers:{authorization:"Bearer "+await token(subject),"content-type":type,...extra},body:bytes});
+    }
+    assert.equal((await upload(sourcePath,sourceBytes,"ci-api-reader")).status,403);
+    assert.equal((await upload(sourcePath,sourceBytes,"ci-api-analyst","application/zip")).status,415);
+    assert.equal((await upload(sourcePath,sourceBytes,"ci-api-analyst","text/csv",{"content-encoding":"gzip"})).status,415);
+    assert.equal((await upload(sourcePath,Buffer.alloc(524289,65))).status,413);
+    assert.equal((await upload(sourcePath,Buffer.from("invoice_id,site,date,amount\nCI-other,CI site,2026-02-01,12.34\n"))).status,422);
+    assert.equal((await admin.query("SELECT count(*)::int AS n FROM raw_import_rows WHERE batch_id=$1",[sourceBatchId])).rows[0].n,0);
+    const beforeSource=await request(sourcePath+"/source",{subject:"ci-api-analyst"});
+    assert.equal((await beforeSource.json()).sourceIntegrity,"client_declared");
+    const sourceConcurrent=await Promise.all([upload(sourcePath,sourceBytes),upload(sourcePath,sourceBytes)]);
+    assert.deepEqual(sourceConcurrent.map(x=>x.status).sort(),[200,201]);
+    const storedSource=await admin.query("SELECT sha256,original_bytes,row_count FROM import_source_receipts WHERE batch_id=$1",[sourceBatchId]);
+    assert.equal(storedSource.rows[0].sha256,sourceHash);
+    assert.deepEqual(storedSource.rows[0].original_bytes,sourceBytes);
+    const sourceInfo=await request(sourcePath+"/source",{subject:"ci-api-reader"});
+    const sourceInfoBody=await sourceInfo.json();
+    assert.equal(sourceInfoBody.sourceIntegrity,"byte_verified");
+    assert.equal(sourceInfoBody.issuerAuthenticated,false);
+    assert.ok(!JSON.stringify(sourceInfoBody).includes("original_bytes"));
+    assert.equal((await request(`/v1/tenants/${tenantA}/imports/${verifiedB}/source`,{subject:"ci-api-analyst"})).status,404);
+    assert.equal((await upload(`/v1/tenants/${tenantA}/imports/${verifiedB}`,fixtureBytes)).status,404);
+    assert.equal((await request(sourcePath+"/rows",{subject:"ci-api-analyst",method:"POST",body:{startRow:2,rows:[row1]}})).status,409);
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,2,'{}')",[tenantA,sourceBatchId])),e=>e.code==="23514");
+    const validateSource=await request(sourcePath+"/validate",{subject:"ci-api-analyst",method:"POST",body:{}});
+    assert.equal(validateSource.status,200);
+    assert.equal((await validateSource.json()).sourceIntegrity,"byte_verified");
+    const wrongReceipt=await admin.query("INSERT INTO import_batches(tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by) VALUES($1,'customer_invoice','CI','uploaded',$2,'wrong.csv',$3) RETURNING id",[tenantA,"9".repeat(64),userA]);
+    const wrongId=wrongReceipt.rows[0].id;
+    await admin.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,'{}')",[tenantA,wrongId]);
+    await assert.rejects(()=>admin.query("INSERT INTO import_source_receipts(tenant_id,batch_id,sha256,byte_count,row_count,parser_version,original_bytes,received_by) VALUES($1,$2,$3,$4,1,'strict-csv-0.1.0',$5,$6)",[tenantA,wrongId,"9".repeat(64),sourceBytes.length,sourceBytes,userA]),e=>e.code==="23514");
 
     const readerWrite=await request(`/v1/tenants/${tenantA}/imports`,{
       subject:"ci-api-reader",method:"POST",

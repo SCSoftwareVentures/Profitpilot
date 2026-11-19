@@ -49,6 +49,36 @@ paths:
         "400": { description: Invalid metadata }
         "403": { description: Permission or role not sufficient }
         "409": { description: Conflicting duplicate or period }
+  /tenants/{tenantId}/imports/{batchId}/file:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    post:
+      summary: Verify and ingest original CSV bytes atomically
+      description: Uncompressed UTF-8 CSV only, 512 KiB and 2000 rows maximum, exact allowlisted headers. Requires empty uploaded batch and SHA-256 match. Original bytes retained with runtime metadata-only read access. Digest is not proof of issuer identity.
+      requestBody:
+        required: true
+        content:
+          text/csv:
+            schema: { type: string, format: binary }
+      responses:
+        "201": { description: Verified source receipt created }
+        "200": { description: Identical file replay }
+        "403": { description: Not authorised }
+        "404": { description: Batch unavailable }
+        "409": { description: Existing rows or closed batch }
+        "413": { description: File too large }
+        "415": { description: Unsupported format or encoding }
+        "422": { description: Malformed CSV or checksum mismatch }
+  /tenants/{tenantId}/imports/{batchId}/source:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    get:
+      summary: Read source integrity receipt without original file contents
+      responses:
+        "200": { description: Byte-verified or client-declared status, issuer not authenticated }
+        "404": { description: Batch unavailable }
   /tenants/{tenantId}/imports/{batchId}/rows:
     parameters:
       - $ref: '#/components/parameters/TenantId'

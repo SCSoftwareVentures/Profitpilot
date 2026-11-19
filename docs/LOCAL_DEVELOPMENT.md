@@ -25,6 +25,6 @@ The Compose database initialization scripts run only when the named database vol
 - The API is not deployed by this repository.
 - The placeholder API URL in OpenAPI is not a real service.
 - Browser prototype imports are local-only and do not call the API.
-- JSON row ingestion is implemented; raw file upload and secure object storage are not.
-- Invoice row validation is implemented; payroll import validation is not.
+- JSON ingestion is client-declared. Original CSV ingestion supports bounded uncompressed UTF-8 files, checksum checks and metadata receipts. Original bytes stored in PostgreSQL; production encryption, retention and malware scanning are not established.
+- Invoice and payroll structural validation and reviewed payroll reconciliation are implemented.
 - Do not use real personal, payroll or customer information in this prototype.
