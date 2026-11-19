@@ -84,7 +84,7 @@ CREATE OR REPLACE FUNCTION securepay_private.dispute_action(e uuid,t uuid,m uuid
 BEGIN
  IF op IN ('decide','finalize') THEN RETURN false; END IF;
  IF op='ack' THEN
-  IF securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-dispute-v1',e,t,m,d,a,op,encode(convert_to(details,'UTF8'),'hex'),coalesce(digest,'-'),coalesce(payout::text,'-'),coalesce(refund::text,'-'),expires),expires,sig) NOT IN ('customer','owner') THEN RETURN false; END IF;
+  IF coalesce(securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-dispute-v1',e,t,m,d,a,op,encode(convert_to(details,'UTF8'),'hex'),coalesce(digest,'-'),coalesce(payout::text,'-'),coalesce(refund::text,'-'),expires),expires,sig),'') NOT IN ('customer','owner') THEN RETURN false; END IF;
   PERFORM 1 FROM public.securepay_milestones WHERE tenant_id=t AND id=m FOR UPDATE;
   IF EXISTS(SELECT 1 FROM securepay_private.case_reassessments WHERE case_id=d AND status='approved') AND (digest IS NULL OR digest IS DISTINCT FROM (SELECT evidence_digest FROM securepay_private.dispute_events WHERE case_id=d AND action='decide' ORDER BY occurred_at DESC,event_id DESC LIMIT 1)) THEN RETURN false; END IF;
  END IF;
@@ -152,7 +152,9 @@ CREATE FUNCTION securepay_private.reassessment_snapshot(t uuid,d uuid) RETURNS j
  SELECT jsonb_build_object('case',to_jsonb(c),'funding',to_jsonb(f),'assignments',
  (SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.actor_id),'[]'::jsonb) FROM securepay_private.case_governance_assignments x WHERE x.case_id=d),
  'conflicts',(SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.actor_id),'[]'::jsonb) FROM securepay_private.case_conflicts x WHERE x.case_id=d),
- 'events',(SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.occurred_at,x.event_id),'[]'::jsonb) FROM securepay_private.dispute_events x WHERE x.case_id=d))
+ 'events',(SELECT coalesce(jsonb_agg(to_jsonb(x) ORDER BY x.occurred_at,x.event_id),'[]'::jsonb) FROM securepay_private.dispute_events x WHERE x.case_id=d),
+ 'photos',(SELECT coalesce(jsonb_agg(jsonb_build_array(x.photo_id,x.digest,x.purged_at) ORDER BY x.photo_id),'[]'::jsonb) FROM securepay_private.dispute_photos x WHERE x.case_id=d),
+ 'linkedPhotos',(SELECT coalesce(jsonb_agg(jsonb_build_array(x.photo_id,x.digest,x.purged_at) ORDER BY x.photo_id),'[]'::jsonb) FROM securepay_private.work_dispute_links l JOIN securepay_private.work_photos x ON x.completion_id=l.completion_id WHERE l.case_id=d AND l.tenant_id=t))
  FROM securepay_private.dispute_cases c JOIN securepay_private.provider_funding f ON f.tenant_id=c.tenant_id AND f.milestone_id=c.milestone_id
  WHERE c.tenant_id=t AND c.case_id=d AND c.status IN ('decided','appealed','final')
  AND NOT EXISTS(SELECT 1 FROM securepay_private.dispute_settlements WHERE case_id=d)
