@@ -58,7 +58,7 @@ ALTER TABLE securepay_private.provider_receipts OWNER TO securepay_context_owner
 REVOKE ALL ON securepay_private.provider_receipts FROM PUBLIC,securepay_payer_runtime,securepay_provider_runtime,securepay_notification_runtime,securepay_dispute_runtime,securepay_settlement_runtime;
 INSERT INTO securepay_private.provider_receipts(receipt) SELECT transaction_ref FROM securepay_private.provider_events WHERE transaction_ref IS NOT NULL;
 CREATE FUNCTION securepay_private.register_provider_receipt() RETURNS trigger
- LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 BEGIN
  IF TG_TABLE_NAME='provider_events' THEN
   IF NEW.transaction_ref IS NOT NULL THEN INSERT INTO securepay_private.provider_receipts VALUES(NEW.transaction_ref); END IF;
@@ -66,7 +66,7 @@ BEGIN
   INSERT INTO securepay_private.provider_receipts VALUES(NEW.provider_receipt);
  END IF;
  RETURN NEW;
-END $;
+END $$;
 ALTER FUNCTION securepay_private.register_provider_receipt() OWNER TO securepay_context_owner;
 REVOKE ALL ON FUNCTION securepay_private.register_provider_receipt() FROM PUBLIC;
 CREATE TRIGGER sp_unique_ordinary_receipt BEFORE INSERT ON securepay_private.provider_events FOR EACH ROW EXECUTE FUNCTION securepay_private.register_provider_receipt();
@@ -158,7 +158,7 @@ BEGIN
 EXCEPTION WHEN unique_violation THEN RETURN false;
 END $$;
 CREATE FUNCTION securepay_private.begin_settlement_dispatch(s uuid,t uuid,m uuid,d uuid) RETURNS boolean
- LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE amount bigint;
 BEGIN
  SELECT amount_cents INTO amount FROM public.securepay_milestones WHERE tenant_id=t AND id=m AND status='disputed' FOR UPDATE;
@@ -169,7 +169,7 @@ BEGIN
  IF NOT FOUND THEN RETURN false; END IF;
  UPDATE securepay_private.dispute_settlements SET status='submitted' WHERE settlement_id=s AND case_id=d AND status='authorized' AND payout_cents::numeric+refund_cents::numeric=amount;
  RETURN FOUND;
-END $;
+END $$;
 ALTER FUNCTION securepay_private.begin_settlement_dispatch(uuid,uuid,uuid,uuid) OWNER TO securepay_context_owner;
 REVOKE ALL ON FUNCTION securepay_private.begin_settlement_dispatch(uuid,uuid,uuid,uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION securepay_private.begin_settlement_dispatch(uuid,uuid,uuid,uuid) TO securepay_provider_runtime;
