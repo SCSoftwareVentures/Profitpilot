@@ -3,10 +3,13 @@ import express from "express";
 import helmet from "helmet";
 import cors from "cors";
 import rateLimit from "express-rate-limit";
-import {randomUUID,createHash} from "node:crypto";
+import {randomUUID} from "node:crypto";
 import {withTenant,health} from "./db.js";
 import {authRequired,requireRole} from "./auth.js";
-import {parseCsv,validateInvoiceRows,isIsoDate} from "../src/engine.js";
+import {validateInvoiceRows,isIsoDate} from "../src/engine.js";
+
+const MAX_IMPORT_ROWS=2000;
+const isUuid=value=>typeof value==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
 const app=express();
 app.disable("x-powered-by");
@@ -31,48 +34,62 @@ app.get("/v1/tenants/:tenantId/contracts",membership,async(req,res,next)=>{try{c
 app.post("/v1/tenants/:tenantId/imports",membership,requireRole("owner","admin","analyst"),async(req,res,next)=>{
  try{
   const {sourceType,fileName,sha256,permissionReference,periodStart,periodEnd}=req.body||{};
-  if(!["payroll","customer_invoice","supplier_invoice"].includes(sourceType)||typeof fileName!=="string"||fileName.length>255||!/^[a-f0-9]{64}$/i.test(sha256||"")||typeof permissionReference!=="string"||!permissionReference.trim()||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodEnd<periodStart)return res.status(400).json({error:"Invalid import metadata"});
-  const id=randomUUID();
-  const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>c.query("INSERT INTO import_batches(id,tenant_id,source_type,source_period_start,source_period_end,permission_ref,status,file_sha256,file_name,created_by) SELECT $1,$2,$3,$4,$5,$6,'uploaded',$7,$8,u.id FROM users u WHERE u.auth_subject=$9 ON CONFLICT(tenant_id,file_sha256) DO NOTHING RETURNING id,status",[id,req.membership.tenantId,sourceType,periodStart,periodEnd,permissionReference.trim(),sha256.toLowerCase(),fileName,req.identity.subject]));
-  if(!result.rowCount){const old=await withTenant(req.membership.tenantId,req.identity.subject,async c=>c.query("SELECT id,status FROM import_batches WHERE tenant_id=$1 AND file_sha256=$2",[req.membership.tenantId,sha256.toLowerCase()]));return res.status(200).json({batch:old.rows[0],idempotent:true});}
-  res.status(201).json({batch:result.rows[0]});
+  if(!["payroll","customer_invoice","supplier_invoice"].includes(sourceType)||typeof fileName!=="string"||!fileName.trim()||fileName.length>255||typeof sha256!=="string"||!/^[a-f0-9]{64}$/i.test(sha256)||typeof permissionReference!=="string"||!permissionReference.trim()||permissionReference.length>2000||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodEnd<periodStart)return res.status(400).json({error:"Invalid import metadata"});
+  const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
+   const args=[req.membership.tenantId,sourceType,periodStart,periodEnd,permissionReference.trim(),sha256.toLowerCase(),fileName.trim(),req.identity.subject];
+   const inserted=await c.query("INSERT INTO import_batches(tenant_id,source_type,source_period_start,source_period_end,permission_ref,status,file_sha256,file_name,created_by) SELECT $1,$2,$3,$4,$5,'uploaded',$6,$7,u.id FROM users u WHERE u.auth_subject=$8 ON CONFLICT(tenant_id,file_sha256) DO NOTHING RETURNING id,status",args);
+   if(inserted.rowCount)return {status:201,batch:inserted.rows[0]};
+   const old=await c.query("SELECT id,status,(source_type=$2 AND source_period_start=$3::date AND source_period_end=$4::date AND permission_ref=$5 AND file_name=$7) AS identical FROM import_batches WHERE tenant_id=$1 AND file_sha256=$6",args.slice(0,7));
+   if(!old.rowCount)throw Object.assign(new Error("Import identity or membership is unavailable"),{status:403});
+   if(!old.rows[0].identical)return {status:409,error:"Source hash already exists with different import metadata"};
+   return {status:200,batch:{id:old.rows[0].id,status:old.rows[0].status},idempotent:true};
+  });
+  const {status,...body}=result;res.status(status).json(body);
  }catch(e){next(e);}
 });
+
 app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requireRole("owner","admin","analyst"),async(req,res,next)=>{try{
- const rows=req.body?.rows;
- if(!Array.isArray(rows)||rows.length<1||rows.length>200||rows.some(x=>!x||typeof x!=="object"||Array.isArray(x)))return res.status(400).json({error:"Provide 1–200 row objects"});
+ const {rows,startRow=1}=req.body||{};
+ if(!isUuid(req.params.batchId)||!Array.isArray(rows)||rows.length<1||rows.length>200||rows.some(x=>!x||typeof x!=="object"||Array.isArray(x))||!Number.isSafeInteger(startRow)||startRow<1||startRow+rows.length-1>MAX_IMPORT_ROWS)return res.status(400).json({error:"Provide 1–200 row objects and a valid one-based startRow (maximum 2000 rows per batch)"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const batch=await client.query("SELECT id,status FROM import_batches WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
+  const tenant=req.membership.tenantId,batchId=req.params.batchId,payload=JSON.stringify(rows);
+  // Serialise all ingestion and validation operations for the same batch.
+  const batch=await client.query("SELECT id,status FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[batchId,tenant]);
   if(!batch.rowCount)return {status:404,error:"Import batch not found"};
-  if(!["uploaded","review","validating"].includes(batch.rows[0].status))return {status:409,error:"Import batch is not open for row ingestion"};
-  let inserted=0;
-  for(let i=0;i<rows.length;i++){
-   const row=await client.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,$3,$4) ON CONFLICT(batch_id,row_number) DO NOTHING RETURNING id",[req.membership.tenantId,req.params.batchId,i+1,JSON.stringify(rows[i])]);
-   inserted+=row.rowCount;
-  }
-  await client.query("UPDATE import_batches SET status='review' WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
-  return {status:201,inserted,received:rows.length,duplicates:rows.length-inserted};
+  const state=await client.query("SELECT COUNT(*)::int AS n,COALESCE(MAX(row_number),0)::int AS last FROM raw_import_rows WHERE batch_id=$1 AND tenant_id=$2",[batchId,tenant]);
+  const {n,last}=state.rows[0];
+  if(n!==last)return {status:409,error:"Source row numbering is inconsistent; administrator review required"};
+  if(startRow>last+1)return {status:409,error:"Row chunk would create a gap"};
+  const overlap=await client.query("SELECT COUNT(*)::int AS n,COUNT(*) FILTER(WHERE r.payload IS DISTINCT FROM p.value)::int AS conflicts FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY AS p(value,ordinality) JOIN raw_import_rows r ON r.batch_id=$1 AND r.tenant_id=$2 AND r.row_number=$4::int+p.ordinality-1",[batchId,tenant,payload,startRow]);
+  if(overlap.rows[0].conflicts)return {status:409,error:"Existing row number has different source content; no rows written"};
+  if(overlap.rows[0].n===rows.length)return {status:200,inserted:0,received:rows.length,duplicates:rows.length};
+  if(!["uploaded","review"].includes(batch.rows[0].status))return {status:409,error:"Import batch is not open for row ingestion"};
+  const reviewed=await client.query("SELECT 1 FROM mapping_decisions m JOIN raw_import_rows r ON r.id=m.raw_row_id AND r.tenant_id=m.tenant_id WHERE r.batch_id=$1 AND r.tenant_id=$2 LIMIT 1",[batchId,tenant]);
+  if(reviewed.rowCount)return {status:409,error:"Validation has started; source rows are sealed"};
+  const inserted=await client.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) SELECT $2,$1,($4::int+p.ordinality-1)::int,p.value FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY AS p(value,ordinality) WHERE $4::int+p.ordinality-1>$5::int",[batchId,tenant,payload,startRow,last]);
+  return {status:201,inserted:inserted.rowCount,received:rows.length,duplicates:overlap.rows[0].n};
  });
  if(result.error)return res.status(result.status).json({error:result.error});
  res.status(result.status).json({batchId:req.params.batchId,inserted:result.inserted,received:result.received,duplicates:result.duplicates});
  }catch(e){next(e);}});
 
 app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
+ if(!isUuid(req.params.batchId))return res.status(400).json({error:"Invalid batch ID"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const batch=await client.query("SELECT id,status,source_type FROM import_batches WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
+  const batch=await client.query("SELECT id,status,source_type FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.batchId,req.membership.tenantId]);
   if(!batch.rowCount)return {status:404,error:"Import batch not found"};
+  if(!["uploaded","review"].includes(batch.rows[0].status))return {status:409,error:"Import batch is not open for validation"};
   if(!["customer_invoice","supplier_invoice"].includes(batch.rows[0].source_type))return {status:422,error:"This validator currently supports invoice CSV rows only; payroll validation is not implemented."};
-  const raw=await client.query("SELECT id,row_number,payload FROM raw_import_rows WHERE batch_id=$1 AND tenant_id=$2 ORDER BY row_number",[req.params.batchId,req.membership.tenantId]);
+  const raw=await client.query("SELECT id,row_number,payload FROM raw_import_rows WHERE batch_id=$1 AND tenant_id=$2 ORDER BY row_number LIMIT $3",[req.params.batchId,req.membership.tenantId,MAX_IMPORT_ROWS+1]);
   if(!raw.rowCount)return {status:422,error:"No persisted import rows found. Ingest rows before validation."};
+  if(raw.rowCount>MAX_IMPORT_ROWS||raw.rows.some((r,i)=>r.row_number!==i+1))return {status:409,error:"Source row numbering or batch size requires administrator review"};
   const checked=validateInvoiceRows(raw.rows.map(r=>({...r.payload,__rowNumber:String(r.row_number)})));
-  let valid=0,held=0;
-  for(let i=0;i<raw.rows.length;i++){
-   const item=checked[i],row=raw.rows[i],decision=item.errors.length?"held":"candidate";
-   if(decision==="held")held++;else valid++;
-   await client.query("INSERT INTO mapping_decisions(tenant_id,raw_row_id,target_type,target_id,decision,confidence,method_version,reason) VALUES($1,$2,'invoice_row',NULL,$3,'LOW','invoice-validator-0.1.0',$4) ON CONFLICT(tenant_id,raw_row_id,method_version) DO UPDATE SET decision=EXCLUDED.decision,reason=EXCLUDED.reason",[req.membership.tenantId,row.id,decision,item.errors.join("; ")||"Structural validation passed; requires mapping and human review"]);
-  }
+  const records=checked.map((item,i)=>({id:raw.rows[i].id,decision:item.errors.length?"held":"candidate",reason:item.errors.join("; ")||"Structural validation passed; requires mapping and human review"}));
+  const held=records.filter(r=>r.decision==="held").length;
+  // A repeat validation must never overwrite a human review or its recorded reason.
+  await client.query("INSERT INTO mapping_decisions(tenant_id,raw_row_id,target_type,target_id,decision,confidence,method_version,reason) SELECT $1,p.id,'invoice_row',NULL,p.decision,'LOW','invoice-validator-0.1.0',p.reason FROM jsonb_to_recordset($2::jsonb) AS p(id uuid,decision text,reason text) ON CONFLICT(tenant_id,raw_row_id,method_version) DO NOTHING",[req.membership.tenantId,JSON.stringify(records)]);
   await client.query("UPDATE import_batches SET status='review' WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
-  return {status:200,batchId:req.params.batchId,total:raw.rowCount,validCandidateRows:valid,heldRows:held,automaticallyAccepted:0};
+  return {status:200,batchId:req.params.batchId,total:raw.rowCount,validCandidateRows:raw.rowCount-held,heldRows:held,automaticallyAccepted:0};
  });
  if(result.error)return res.status(result.status).json({error:result.error});
  const {status,...body}=result;res.status(status).json(body);
@@ -80,6 +97,7 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requireRol
 
 app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requireRole("owner","admin","reviewer"),async(req,res,next)=>{try{
  const {decision,reason}=req.body||{};
+ if(!isUuid(req.params.matchId))return res.status(400).json({error:"Invalid match ID"});
  if(!["confirmed","rejected","held"].includes(decision)||typeof reason!=="string"||reason.trim().length<3||reason.length>2000)return res.status(400).json({error:"Decision and reason are required"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const user=await client.query("SELECT id FROM users WHERE auth_subject=$1",[req.identity.subject]);
@@ -95,36 +113,38 @@ app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requireRol
 
 app.post("/v1/tenants/:tenantId/calculations",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
  const {contractId,siteId,periodStart,periodEnd}=req.body||{};
- if(!/^[0-9a-f-]{36}$/i.test(contractId||"")||!/^[0-9a-f-]{36}$/i.test(siteId||"")||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodEnd<periodStart)return res.status(400).json({error:"Valid contract, site and period are required"});
+ if(!isUuid(contractId)||!isUuid(siteId)||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodEnd<periodStart)return res.status(400).json({error:"Valid contract, site and period are required"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const base=await client.query("SELECT c.id,cv.version_no,cv.currency FROM contracts c JOIN contract_versions cv ON cv.contract_id=c.id AND cv.tenant_id=c.tenant_id JOIN sites s ON s.id=$2 AND s.tenant_id=c.tenant_id AND s.business_id=c.business_id WHERE c.id=$1 AND c.tenant_id=$3 AND cv.approved_at IS NOT NULL AND cv.approved_by IS NOT NULL AND cv.effective_from <= $5::date AND (cv.effective_to IS NULL OR cv.effective_to >= $4::date)",[contractId,siteId,req.membership.tenantId,periodStart,periodEnd]);
+  const base=await client.query("SELECT c.id,cv.version_no,cv.currency FROM contracts c JOIN contract_versions cv ON cv.contract_id=c.id AND cv.tenant_id=c.tenant_id JOIN sites s ON s.id=$2 AND s.tenant_id=c.tenant_id AND s.business_id=c.business_id WHERE c.id=$1 AND c.tenant_id=$3 AND cv.approved_at IS NOT NULL AND cv.approved_by IS NOT NULL AND cv.effective_from <= $4::date AND (cv.effective_to IS NULL OR cv.effective_to >= $5::date)",[contractId,siteId,req.membership.tenantId,periodStart,periodEnd]);
   if(!base.rowCount)return {error:"No matching contract/site and effective contract version for this period"};
   if(base.rowCount!==1)return {error:"Overlapping contract versions make this period ambiguous. Correct the contract baseline before calculating."};
   const revenue=await client.query("SELECT COALESCE(SUM(il.amount),0)::numeric(14,2) AS amount,COUNT(*)::int AS line_count,COUNT(DISTINCT i.tax_basis)::int AS tax_basis_count,COUNT(DISTINCT i.currency)::int AS currency_count, BOOL_OR(i.tax_basis='unknown') AS unknown_tax_basis, MIN(i.currency) AS invoice_currency FROM match_reviews mr JOIN invoice_lines il ON il.id=mr.invoice_line_id AND il.tenant_id=mr.tenant_id JOIN invoices i ON i.id=il.invoice_id AND i.tenant_id=il.tenant_id WHERE mr.tenant_id=$1 AND mr.contract_id=$2 AND mr.site_id=$3 AND mr.decision='confirmed' AND i.direction='customer' AND i.invoice_date BETWEEN $4::date AND $5::date",[req.membership.tenantId,contractId,siteId,periodStart,periodEnd]);
   const partialPeriods=await client.query("SELECT COUNT(*)::int AS count FROM allocation_runs ar JOIN payroll_pools pp ON pp.id=ar.payroll_pool_id AND pp.tenant_id=ar.tenant_id JOIN allocation_lines al ON al.allocation_run_id=ar.id AND al.tenant_id=ar.tenant_id WHERE ar.tenant_id=$1 AND al.site_id=$4 AND ar.status='confirmed' AND pp.period_start <= $3::date AND pp.period_end >= $2::date AND NOT (pp.period_start >= $2::date AND pp.period_end <= $3::date)",[req.membership.tenantId,periodStart,periodEnd,siteId]);
   if(Number(partialPeriods.rows[0].count)>0)return {error:"A confirmed payroll period overlaps only part of the requested service period. Align periods before calculating; no pro-rata estimate is applied."};
-  const costs=await client.query("SELECT COALESCE(SUM(al.amount),0)::numeric(14,2) AS amount,COUNT(*)::int AS line_count FROM allocation_lines al JOIN allocation_runs ar ON ar.id=al.allocation_run_id AND ar.tenant_id=al.tenant_id JOIN payroll_pools pp ON pp.id=ar.payroll_pool_id AND pp.tenant_id=ar.tenant_id WHERE al.tenant_id=$1 AND al.site_id=$2 AND al.bucket_type IN ('direct','approved_allocated') AND ar.status='confirmed' AND pp.period_start >= $3::date AND pp.period_end <= $4::date",[req.membership.tenantId,siteId,periodStart,periodEnd]);
+  const costs=await client.query("SELECT COALESCE(SUM(al.amount),0)::numeric(14,2) AS amount,COUNT(*)::int AS line_count,COUNT(DISTINCT pp.currency)::int AS currency_count,MIN(pp.currency) AS payroll_currency FROM allocation_lines al JOIN allocation_runs ar ON ar.id=al.allocation_run_id AND ar.tenant_id=al.tenant_id JOIN payroll_pools pp ON pp.id=ar.payroll_pool_id AND pp.tenant_id=ar.tenant_id WHERE al.tenant_id=$1 AND al.site_id=$2 AND al.bucket_type IN ('direct','approved_allocated') AND ar.status='confirmed' AND pp.period_start >= $3::date AND pp.period_end <= $4::date",[req.membership.tenantId,siteId,periodStart,periodEnd]);
   if(!Number(revenue.rows[0].line_count)||!Number(costs.rows[0].line_count))return {error:"Insufficient evidence: confirmed invoice lines and confirmed site allocation lines are both required"};
   if(Number(revenue.rows[0].tax_basis_count)!==1||Number(revenue.rows[0].currency_count)!==1||revenue.rows[0].unknown_tax_basis||revenue.rows[0].invoice_currency!==base.rows[0].currency)return {error:"Mixed, unknown or mismatched invoice tax/currency basis. Resolve source basis before calculating."};
+  if(Number(costs.rows[0].currency_count)!==1||costs.rows[0].payroll_currency!==base.rows[0].currency)return {error:"Payroll currency does not match the contract currency"};
   const rev=Number(revenue.rows[0].amount),cost=Number(costs.rows[0].amount);
   const outputs={revenue:rev,deliveryCost:cost,contribution:Number((rev-cost).toFixed(2)),marginPercent:rev?Number(((rev-cost)/rev*100).toFixed(2)):null,currency:base.rows[0].currency,taxBasis:"consistent source invoice basis; no tax conversion applied",invoiceLineCount:Number(revenue.rows[0].line_count),allocationLineCount:Number(costs.rows[0].line_count),taxBasisCount:1,limitations:["Management contribution only; not statutory or audited profit.","Only confirmed invoice matches and confirmed direct/approved site allocation lines are included.","Other delivery costs, non-site costs and unallocated payroll are excluded unless separately included in source records."]};
   const user=await client.query("SELECT id FROM users WHERE auth_subject=$1",[req.identity.subject]);if(!user.rowCount)throw Object.assign(new Error("User identity is not provisioned in this tenant database"),{status:403});
   const saved=await client.query("INSERT INTO calculation_runs(tenant_id,contract_id,site_id,period_start,period_end,formula_version,inputs,outputs,completeness,created_by) VALUES($1,$2,$3,$4,$5,'0.1.0',$6,$7,'incomplete',$8) RETURNING id,created_at",[req.membership.tenantId,contractId,siteId,periodStart,periodEnd,JSON.stringify({contractVersion:base.rows[0].version_no,invoiceLineCount:outputs.invoiceLineCount,allocationLineCount:outputs.allocationLineCount}),JSON.stringify(outputs),user.rows[0].id]);
   await client.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'calculation_created','calculation_run',$3,'Versioned management contribution calculation',$4)",[req.membership.tenantId,user.rows[0].id,saved.rows[0].id,JSON.stringify({formulaVersion:"0.1.0",periodStart,periodEnd})]);
   return {id:saved.rows[0].id,createdAt:saved.rows[0].created_at,outputs};
- });
+ },{repeatableRead:true});
  if(result.error)return res.status(422).json({error:result.error});
  res.status(201).json(result);
  }catch(e){next(e);}});
  
 app.get("/v1/tenants/:tenantId/calculations/:runId",membership,async(req,res,next)=>{try{
+ if(!isUuid(req.params.runId))return res.status(400).json({error:"Invalid calculation ID"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,client=>client.query("SELECT id,contract_id,site_id,period_start,period_end,formula_version,inputs,outputs,completeness,created_at FROM calculation_runs WHERE id=$1 AND tenant_id=$2",[req.params.runId,req.membership.tenantId]));
  if(!result.rowCount)return res.status(404).json({error:"Calculation run not found"});
  res.json(result.rows[0]);
  }catch(e){next(e);}});
  
 
-app.use((err,req,res,next)=>{const id=randomUUID();process.stderr.write(JSON.stringify({event:"request_error",id,message:err.message})+"\n");const status=err.code==="23505"?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);res.status(status).json({error:status===409?"Conflicting record; refresh and review the current state":status<500?err.message:"Internal server error",reference:id});});
+app.use((err,req,res,next)=>{const id=randomUUID();process.stderr.write(JSON.stringify({event:"request_error",id,message:err.message})+"\n");const status=["23505","40001","40P01"].includes(err.code)?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);res.status(status).json({error:status===409?"Conflicting record; refresh and review the current state":status<500?err.message:"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
 if(process.env.NODE_ENV!=="test")app.listen(port,()=>process.stdout.write("ProfitPilot API listening on "+port+"\n"));
 export default app;

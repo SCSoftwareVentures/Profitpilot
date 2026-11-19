@@ -25,7 +25,9 @@ The first delivery mode is a concierge validation service using secure, authoris
 - Authenticated HTTP API tests for membership, role restrictions, date validation and import idempotency
 - Cross-tenant contract read/write negative tests, raw-GUC spoof rejection, HMAC signature/expiry/membership negative tests, private-key access denial, same-tenant actor foreign-key enforcement and pooled tenant-context cleanup test
 - Production Docker image build and running-container database health smoke test
-- Migration 008 narrows runtime writes to current endpoint operations, removes automatic grants on future tables and prevents runtime modification/deletion of raw evidence, calculation snapshots and audit events. Expanded tenant-table and foreign-object regression tests are implemented; CI validation is pending at this revision.
+- Migration 008 narrows runtime writes to current endpoint operations, removes automatic grants on future tables and prevents runtime modification/deletion of raw evidence, calculation snapshots and audit events. Expanded tenant-table and foreign-object regression tests passed CI #2944 (commit bad8319).
+
+- Import integrity: contiguous chunks, atomic conflict rejection, exact replay, serialized ingestion/validation and preserved review decisions; calculations use a consistent snapshot, full-period contract coverage and payroll currency checks. New regression tests await CI confirmation. Source file hashes remain client-declared; original-byte verification and payroll validation are still outstanding.
 
 ## What is not established
 

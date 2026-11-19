@@ -235,6 +235,43 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(duplicate.status,200);
     assert.equal((await duplicate.json()).idempotent,true);
 
+
+    const differentMetadata=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-analyst",method:"POST",body:{...importBody,permissionReference:"different"}});
+    assert.equal(differentMetadata.status,409,"source hash must not silently accept different metadata");
+    const inv=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-analyst",method:"POST",body:{...importBody,sourceType:"customer_invoice",fileName:"invoice.csv",sha256:"1".repeat(64)}});
+    assert.equal(inv.status,201);
+    const batchId=(await inv.json()).batch.id;
+    const path=`/v1/tenants/${tenantA}/imports/${batchId}`;
+    const row1={invoice_id:"CI-1",site:"CI site",date:"2026-02-01",amount:"100.00"};
+    const row2={...row1,invoice_id:"CI-2"};
+    const row3={...row1,invoice_id:"CI-3"};
+    const post=(suffix,body)=>request(path+suffix,{subject:"ci-api-analyst",method:"POST",body});
+    assert.equal((await post("/rows",{startRow:2,rows:[row2]})).status,409,"gaps rejected");
+    const first=await post("/rows",{rows:[row1]});
+    assert.equal(first.status,201);
+    assert.equal((await first.json()).inserted,1);
+    const retry=await post("/rows",{rows:[row1]});
+    assert.equal(retry.status,200);
+    assert.equal((await retry.json()).duplicates,1);
+    assert.equal((await post("/rows",{rows:[{...row1,amount:"999"},row2]})).status,409,"conflicting overlap rolls back entire chunk");
+    assert.equal((await admin.query("SELECT count(*)::int AS n FROM raw_import_rows WHERE batch_id=$1",[batchId])).rows[0].n,1);
+    const concurrent=await Promise.all([post("/rows",{startRow:2,rows:[row2,row3]}),post("/rows",{startRow:2,rows:[row2,row3]})]);
+    assert.deepEqual(concurrent.map(r=>r.status).sort(),[200,201],"only one concurrent append creates rows");
+    const persisted=await admin.query("SELECT row_number,payload FROM raw_import_rows WHERE batch_id=$1 ORDER BY row_number",[batchId]);
+    assert.deepEqual(persisted.rows.map(r=>r.row_number),[1,2,3]);
+    assert.deepEqual(persisted.rows.map(r=>r.payload),[row1,row2,row3]);
+    const validation=await post("/validate",{});
+    assert.equal(validation.status,200);
+    assert.equal((await validation.json()).validCandidateRows,3);
+    await admin.query("UPDATE mapping_decisions SET decision='accepted',reason='CI human review' WHERE raw_row_id=(SELECT id FROM raw_import_rows WHERE batch_id=$1 AND row_number=1)",[batchId]);
+    assert.equal((await post("/validate",{})).status,200);
+    const decisions=await admin.query("SELECT m.decision,m.reason FROM mapping_decisions m JOIN raw_import_rows r ON r.id=m.raw_row_id WHERE r.batch_id=$1 ORDER BY r.row_number",[batchId]);
+    assert.equal(decisions.rowCount,3);
+    assert.deepEqual(decisions.rows[0],{decision:"accepted",reason:"CI human review"});
+    assert.equal((await post("/rows",{startRow:4,rows:[row3]})).status,409,"validation seals rows");
+    assert.equal((await post("/rows",{startRow:1,rows:[row1]})).status,200,"exact retry remains safe after sealing");
+    assert.equal((await request(`/v1/tenants/${tenantA}/imports/not-a-uuid/rows`,{subject:"ci-api-analyst",method:"POST",body:{rows:[row1]}})).status,400);
+
     const readerWrite=await request(`/v1/tenants/${tenantA}/imports`,{
       subject:"ci-api-reader",method:"POST",
       body:{...importBody,sha256:"c".repeat(64)}
