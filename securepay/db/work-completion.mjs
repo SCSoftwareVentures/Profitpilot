@@ -7,6 +7,25 @@ export function makeWorkCompletionOwner({pool,actorId,key,scanner}){
  if(!pool?.query||!Buffer.isBuffer(key)||key.length!==32||typeof scanner?.attest!=="function")throw Error("Completion authority unavailable");
  const mac=args=>createHmac("sha256",key).update(args.join(":")).digest("hex");
  return Object.freeze({
+  async contractStatus({tenantId,planId}){
+   ids(tenantId,planId);const exp=expiry(),args=[tenantId,planId,actorId,exp];
+   const {rows:[r]}=await pool.query("SELECT securepay_private.owner_contract_view($1,$2,$3,$4,$5) AS view",[...args,mac(["sp-contract-view-v1",...args])]);
+   return r?.view?{ok:true,view:r.view}:{ok:false};
+  },
+  async offerChange({changeId=randomUUID(),tenantId,planId,kind,milestoneId=null,newAmountCents=null,newDescription=null,reason}){
+   ids(changeId,tenantId,planId);if(!["variation","cancel_remaining"].includes(kind)||typeof reason!=="string"||reason.trim().length<10||reason.length>2000||reason.includes("\0"))throw Error("Invalid change");
+   if(kind==="variation"){ids(milestoneId);if(!Number.isSafeInteger(newAmountCents)||newAmountCents<=0||typeof newDescription!=="string"||!newDescription.trim()||newDescription.length>500||newDescription.includes("\0"))throw Error("Invalid variation");}
+   else if(milestoneId!==null||newAmountCents!==null||newDescription!==null)throw Error("Invalid cancellation");
+   const exp=expiry(),args=[changeId,tenantId,planId,actorId,kind,milestoneId,newAmountCents,newDescription,reason,exp];
+   const signature=mac(["sp-change-offer-v1",changeId,tenantId,planId,actorId,kind,milestoneId??"-",newAmountCents??"-",newDescription===null?"-":Buffer.from(newDescription).toString("hex"),Buffer.from(reason).toString("hex"),exp]);
+   const {rows:[r]}=await pool.query("SELECT securepay_private.offer_contract_change($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) AS change",[...args,signature]);
+   return r?.change?{ok:true,change:r.change}:{ok:false};
+  },
+  async withdrawChange({tenantId,planId,changeId}){
+   ids(tenantId,planId,changeId);const exp=expiry(),args=[tenantId,planId,changeId,actorId,exp];
+   const {rows:[r]}=await pool.query("SELECT securepay_private.withdraw_contract_change($1,$2,$3,$4,$5,$6) AS ok",[...args,mac(["sp-change-withdraw-v1",...args])]);
+   return {ok:r?.ok===true,moneyMoved:false};
+  },
   async publishQuote({quoteId=randomUUID(),tenantId,jobId,previousDigest=null,description,totalCents}){
    ids(quoteId,tenantId,jobId);
    if((previousDigest!==null&&(typeof previousDigest!=="string"||!/^[a-f0-9]{64}$/.test(previousDigest)))||typeof description!=="string"||!description.trim()||description.length>4000||description.includes("\0")||!Number.isSafeInteger(totalCents)||totalCents<=0)throw Error("Invalid quote");
