@@ -2382,3 +2382,26 @@ test("succession transfers authority but preserves pending financial review and 
  assert.equal((await n.service.reassess({caseId,action:"request",reason:"Successor requests fresh independent reassessment"})).ok,true);
  assert.equal((await balanceFor(d.s)).remaining_cents,"5000");
 });
+
+test("administrator succession HTTP route is restricted to independent administrators and exact current requests",async()=>{
+ const {createGovernanceRouter}=await import("../../server/securepay-governance.js"),{createServer}=await import("node:http"),{default:express}=await import("express");
+ const f=await governedFixture();await governedFinal(f);const {t,caseId,adminId}=f;
+ const r=await anotherGovernanceActor(f,"administrator"),a=await anotherGovernanceActor(f,"administrator"),n=await anotherGovernanceActor(f,"administrator");
+ await pool.query("UPDATE securepay_private.dispute_actors SET active=false WHERE tenant_id=$1 AND actor_id=$2",[t,adminId]);
+ const app=express(),verifyToken=async token=>({subject:token});
+ for(const [name,actor,role] of [["requester",r.service,"administrator"],["approver",a.service,"administrator"],["nominee",n.service,"administrator"],["settlement",f.authorizer,"settlement"]])app.use("/"+name,createGovernanceRouter({enabled:true,role,subject:name,verifyToken,actor}));
+ const s=createServer(app);await new Promise(r=>s.listen(0,"127.0.0.1",r));try{
+  const url="http://127.0.0.1:"+s.address().port;
+  const post=(role,action,body,token=role)=>fetch(url+"/"+role+"/"+action,{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+token},body:JSON.stringify(body)});
+  assert.equal((await fetch(url+"/requester/succession")).status,200);assert.equal((await fetch(url+"/settlement/succession")).status,404);
+  const q={caseId,nominee:n.actorId,requestId:randomUUID(),action:"request",reason:"Emergency continuity for disabled administrator",stateDigest:null};
+  assert.equal((await post("settlement","succession",q)).status,404);assert.equal((await post("requester","succession",q,"approver")).status,403);
+  const req=await post("requester","succession",q);assert.equal(req.status,200);const x=(await req.json()).succession;
+  const cmd={...q,action:"approve",reason:"Independent second review of succession",stateDigest:x.stateDigest};
+  assert.equal((await post("nominee","succession",cmd)).status,403);
+  assert.equal((await post("approver","succession",{...cmd,stateDigest:"0".repeat(64)})).status,403);
+  const result=await post("approver","succession",cmd);assert.equal(result.status,200);assert.equal((await result.json()).moneyMoved,false);
+  assert.equal((await post("approver","succession",cmd)).status,403);
+  assert.equal((await balanceFor(f.d.s)).remaining_cents,"5000");
+ }finally{await new Promise(r=>s.close(r));}
+});
