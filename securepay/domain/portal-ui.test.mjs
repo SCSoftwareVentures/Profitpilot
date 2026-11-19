@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {Script,createContext} from "node:vm";
 import {createHash,randomUUID} from "node:crypto";
-import {customerPortalPage,ownerDashboardPage,customerQuotePage,ownerQuotePage,customerContractPage,ownerContractPage,customerCancellationPage,reviewerPage,disputeAdminPage,settlementAuthorizationPage,postAuthorizationPage,administratorSuccessionPage} from "../../server/securepay-portal-page.js";
+import {customerPortalPage,ownerDashboardPage,customerQuotePage,ownerQuotePage,customerContractPage,ownerContractPage,customerCancellationPage,reviewerPage,disputeAdminPage,settlementAuthorizationPage,postAuthorizationPage,administratorSuccessionPage,participantPage} from "../../server/securepay-portal-page.js";
 import {createPayerTokenVerifier} from "../../server/securepay-router.js";
 import {generateKeyPair,SignJWT} from "jose";
 function ui(page,responses){
@@ -187,4 +187,23 @@ test("succession dashboard refuses its own approval and requires current exact r
  h.get("confirm").checked=true;await h.fire("confirm","change");await h.fire("submit");
  assert.deepEqual(JSON.parse(h.calls[2].opts.body),{caseId,requestId,nominee,stateDigest,action:"approve",reason:"Independent verification of the replacement administrator"});
  assert.match(h.get("message").textContent,/No payment moved/);
+});
+
+test("customer dispute screen requires exact repair image inspection and explicit current case consent",async()=>{
+ const t=randomUUID(),m=randomUUID(),caseId=randomUUID(),photoId=randomUUID(),digest="a".repeat(64),stateDigest="b".repeat(64);
+ const c={caseId,milestoneId:m,role:"customer",status:"open",severity:"moderate",repairPhase:"submitted",repairPhotoId:photoId,amountCents:"5000",confirmedPayoutCents:"0",confirmedRefundCents:"0",remainingCents:"5000",decision:null,events:[],photos:[{photoId,digest,source:"dispute",mine:false,purged:false}],linkedPhotos:[]};
+ const view={case:c,stateDigest},reply=x=>({code:200,data:{mode:"sandbox",moneyMoved:false,participant:x}});
+ const h=ui(participantPage("customer"),[reply(view),reply({photoId,digest,content:"aGVsbG8="}),reply({recorded:true}),reply({...view,case:{...c,repairPhase:"accepted"}})]);
+ h.get("tenant").value=t;h.get("milestone").value=m;h.get("token").value="fixture";await h.fire("load");
+ h.get("action").value="accept_repair";await h.fire("action","change");h.get("confirm").checked=true;await h.fire("confirm","change");assert.equal(h.get("submit").disabled,true);
+ h.get("photo-ref").value=photoId;await h.fire("photo-ref","input");await h.fire("read-photo");assert.equal(h.get("confirm").checked,false);
+ h.get("reason").value="Inspected the new repair evidence";await h.fire("reason","input");h.get("confirm").checked=true;await h.fire("confirm","change");assert.equal(h.get("submit").disabled,false);
+ await h.fire("submit");assert.deepEqual(JSON.parse(h.calls[2].opts.body),{caseId,stateDigest,reason:"Inspected the new repair evidence",action:"accept_repair",dueEpoch:null,photoId});assert.match(h.get("message").textContent,/No payment moved/);
+});
+test("owner dispute screen binds proposed decision to exact amounts and clears case on uncertain submission",async()=>{
+ const m=randomUUID(),caseId=randomUUID(),decisionId=randomUUID(),stateDigest="b".repeat(64),view={stateDigest,case:{caseId,milestoneId:m,role:"owner",status:"decided",severity:"moderate",repairPhase:"none",amountCents:"5000",confirmedPayoutCents:"0",confirmedRefundCents:"0",remainingCents:"5000",payoutCents:"3000",refundCents:"2000",decision:{eventId:decisionId,reason:"Independent assessment"},events:[],photos:[],linkedPhotos:[],ownerAck:false}};
+ const h=ui(participantPage("owner"),[{code:200,data:{mode:"sandbox",moneyMoved:false,participant:view}},new Error("timeout")]);
+ h.get("milestone").value=m;h.get("token").value="fixture";await h.fire("load");h.get("action").value="ack";await h.fire("action","change");h.get("reason").value="Consent to exact provisional decision";h.get("confirm").checked=true;await h.fire("confirm","change");await h.fire("submit");
+ assert.deepEqual(JSON.parse(h.calls[1].opts.body),{caseId,stateDigest,reason:"Consent to exact provisional decision",decisionId,payoutCents:3000,refundCents:2000});
+ assert.equal(h.get("details").hidden,true);assert.equal(h.get("submit").disabled,true);
 });
