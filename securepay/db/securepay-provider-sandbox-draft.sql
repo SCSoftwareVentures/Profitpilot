@@ -19,6 +19,14 @@ CREATE TABLE securepay_private.provider_events(
  funding_ref uuid NOT NULL, request_id uuid, amount_cents bigint NOT NULL CHECK(amount_cents>0),
  transaction_ref uuid UNIQUE, recorded_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
+CREATE TABLE securepay_private.provider_reconciliation(
+ event_id uuid PRIMARY KEY REFERENCES securepay_private.provider_events(event_id),
+ tenant_id uuid NOT NULL, milestone_id uuid NOT NULL,
+ reason text NOT NULL CHECK(reason IN ('hold_after_dispatch','provider_failure')),
+ opened_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+ALTER TABLE securepay_private.provider_reconciliation OWNER TO securepay_context_owner;
+REVOKE ALL ON securepay_private.provider_reconciliation FROM PUBLIC,securepay_payer_runtime,securepay_notification_runtime,securepay_provider_runtime;
 ALTER TABLE securepay_private.provider_key OWNER TO securepay_context_owner;
 ALTER TABLE securepay_private.provider_funding OWNER TO securepay_context_owner;
 ALTER TABLE securepay_private.provider_events OWNER TO securepay_context_owner;
@@ -99,11 +107,17 @@ BEGIN
   IF FOUND OR milestone.status NOT IN ('planned','submitted','approved') THEN RETURN 'denied'; END IF;
   INSERT INTO securepay_private.provider_funding(tenant_id,milestone_id,funding_ref,amount_cents,status) VALUES(t,m,f,a,'funded');
  ELSE
-  IF NOT FOUND OR funding.status<>'funded' OR funding.funding_ref<>f OR funding.amount_cents<>a THEN RETURN 'denied'; END IF;
+  IF NOT FOUND OR funding.funding_ref<>f OR funding.amount_cents<>a THEN RETURN 'denied'; END IF;
   IF k='held' THEN
-   IF EXISTS(SELECT 1 FROM public.securepay_release_requests WHERE tenant_id=t AND milestone_id=m AND status IN ('submitted','confirmed')) THEN RETURN 'reconcile'; END IF;
+   IF EXISTS(SELECT 1 FROM public.securepay_release_requests WHERE tenant_id=t AND milestone_id=m AND status IN ('submitted','confirmed')) THEN
+    INSERT INTO securepay_private.provider_events(event_id,tenant_id,milestone_id,kind,funding_ref,amount_cents) VALUES(e,t,m,k,f,a);
+    INSERT INTO securepay_private.provider_reconciliation(event_id,tenant_id,milestone_id,reason) VALUES(e,t,m,'hold_after_dispatch');
+    RETURN 'reconcile';
+   END IF;
+   IF funding.status<>'funded' THEN RETURN 'denied'; END IF;
    UPDATE securepay_private.provider_funding SET status='held' WHERE tenant_id=t AND milestone_id=m;
   ELSE
+   IF funding.status<>'funded' THEN RETURN 'denied'; END IF;
    SELECT * INTO req FROM public.securepay_release_requests WHERE tenant_id=t AND milestone_id=m AND id=r FOR UPDATE;
    IF NOT FOUND OR req.status<>'submitted' OR milestone.status<>'release_pending' OR req.amount_cents<>a THEN RETURN 'denied'; END IF;
    IF k='released' THEN
@@ -119,6 +133,7 @@ BEGIN
  END IF;
  INSERT INTO securepay_private.provider_events(event_id,tenant_id,milestone_id,kind,funding_ref,request_id,amount_cents,transaction_ref)
  VALUES(e,t,m,k,f,r,a,x);
+ IF k='failed' THEN INSERT INTO securepay_private.provider_reconciliation(event_id,tenant_id,milestone_id,reason) VALUES(e,t,m,'provider_failure'); END IF;
  RETURN 'applied';
 EXCEPTION WHEN unique_violation THEN RETURN 'denied';
 END $$;
