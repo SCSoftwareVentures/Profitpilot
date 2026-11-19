@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {createServer} from "node:http";
+import {createServer,request} from "node:http";
 import {once} from "node:events";
 import {dashboardHandler} from "../scripts/security-dashboard.js";
 const token="0123456789abcdef".repeat(4);
@@ -9,8 +9,12 @@ test("dashboard denies unauthorized, cross-origin, malformed and mutation reques
  let calls=0,page;
  const authority="localhost:8443",server=createServer(dashboardHandler({token,authority,snapshot:async p=>{calls++;page=p;return drift;}}));
  server.listen(0,"127.0.0.1");await once(server,"listening");
- const base="http://127.0.0.1:"+server.address().port;
- const req=(path,headers={},method="GET")=>fetch(base+path,{method,headers:{Host:authority,...headers}});
+ const req=(path,headers={},method="GET")=>new Promise((resolve,reject)=>{
+  const q=request({hostname:"127.0.0.1",port:server.address().port,path,method,headers:{Host:authority,...headers}},res=>{
+   let body="";res.on("data",chunk=>body+=chunk);res.on("end",()=>resolve({status:res.statusCode,headers:{get:key=>res.headers[key.toLowerCase()]??null},text:async()=>body,json:async()=>JSON.parse(body)}));
+   res.on("error",reject);
+  });q.on("error",reject);q.end();
+ });
  try{
   const ui=await req("/");assert.equal(ui.status,200);assert.match(ui.headers.get("content-security-policy"),/frame-ancestors 'none'/);assert.equal(ui.headers.get("cache-control"),"no-store");
   assert.match(await ui.text(),/Security command centre/);
