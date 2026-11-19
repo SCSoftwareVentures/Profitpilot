@@ -40,7 +40,7 @@ let payerPool, notificationPool, providerPool, provider, disputePool, settlement
 const scanKey=randomBytes(32);
 const scanner=makeEvidenceScanner({key:scanKey,scan:async()=>"clean"});
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql","securepay-reporting-draft.sql","securepay-portal-draft.sql","securepay-work-completion-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql","securepay-reporting-draft.sql","securepay-portal-draft.sql","securepay-work-completion-draft.sql","securepay-work-revision-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(key_id,secret) VALUES('primary',$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(key_id,secret) VALUES('primary',$1)",[deriveCommandKey(pepper)]);
@@ -1456,4 +1456,90 @@ test("approved milestone status alone cannot bypass photo manifest or approval, 
  await pool.query("UPDATE securepay_milestones SET version=version+1 WHERE id=$1",[s.milestoneId]);
  assert.equal((await provider.beginDispatch({...s,requestId:r.releaseRequestId})).ok,false);
  assert.equal((await state(s)).status,"release_pending");
+});
+
+async function submittedWork(d,scope=d.scope){
+ assert.equal((await d.owner.start(scope)).ok,true);
+ const bytes=pngFixture(),p=await d.owner.upload({...scope,mediaType:"image/png",content:bytes});assert.equal(p.ok,true);
+ assert.equal((await d.owner.submit(scope)).ok,true);
+ const w=(await d.svc.completion({...d.payer,body:{}})).completion;
+ assert.equal((await d.svc.photo({...d.payer,body:{photoId:p.photoId}})).ok,true);
+ return {w,p,bytes};
+}
+test("rejected completion preserves original manifest and requires a new screened revision and fresh customer approval",async()=>{
+ const d=await completionFixture(),first=await submittedWork(d);
+ const action={completionId:first.w.completionId,manifestDigest:first.w.manifestDigest,version:first.w.version,reason:"Required finish was not completed"};
+ assert.equal((await d.svc.reject({...d.payer,body:action})).ok,true);
+ assert.equal((await d.svc.reject({...d.payer,body:action})).ok,false);
+ const state1=await d.owner.status(d.scope);assert.equal(state1.view.current,null);assert.equal(state1.view.rejections[0].reason,action.reason);
+ const second=await submittedWork(d,{...d.scope,completionId:randomUUID()});
+ assert.notEqual(second.w.manifestDigest,first.w.manifestDigest);
+ assert.equal((await d.svc.approve({...d.payer,body:{completionId:first.w.completionId,manifestDigest:first.w.manifestDigest,version:first.w.version,expectedAmountCents:5000}})).ok,false);
+ assert.equal((await d.svc.approve({...d.payer,body:{completionId:second.w.completionId,manifestDigest:second.w.manifestDigest,version:second.w.version,expectedAmountCents:5000}})).ok,true);
+ const r=await pool.query("SELECT status,manifest_digest FROM securepay_private.work_completion WHERE tenant_id=$1 ORDER BY status",[d.s.tenantId]);
+ assert.deepEqual(r.rows,[{status:"approved",manifest_digest:second.w.manifestDigest},{status:"rejected",manifest_digest:first.w.manifestDigest}]);
+});
+test("formal work dispute attaches immutable revisions and restricts linked photo access to assigned case reviewers",async()=>{
+ const d=await completionFixture(),first=await submittedWork(d);
+ const caseId=randomUUID(),body={caseId,severity:"serious",manifestDigest:first.w.manifestDigest,version:first.w.version,reason:"Unsafe work requires independent review"};
+ assert.equal((await d.svc.dispute({...d.payer,body})).ok,true);
+ assert.equal((await d.svc.dispute({...d.payer,body})).ok,false);
+ assert.equal((await state(d.s)).status,"disputed");
+ const scope={...d.scope,caseId};
+ const actorId=randomUUID(),key=randomBytes(32);
+ await pool.query("INSERT INTO securepay_private.dispute_actors(tenant_id,actor_id,role,secret) VALUES($1,$2,'reviewer',$3)",[d.s.tenantId,actorId,key]);
+ const reviewer=makeDisputeActor({pool:disputePool,actorId,key});
+ assert.equal(await reviewer.linkedEvidence(scope),null);
+ await pool.query("INSERT INTO securepay_private.dispute_photo_reviewers(case_id,tenant_id,reviewer_id) VALUES($1,$2,$3)",[caseId,d.s.tenantId,actorId]);
+ const linked=await reviewer.linkedEvidence(scope);assert.equal(linked.completions[0].manifestDigest,first.w.manifestDigest);
+ const photo=await reviewer.linkedEvidence({...scope,photoId:first.p.photoId});assert.deepEqual(Buffer.from(photo.content,"base64"),first.bytes);
+ const foreign=await completionFixture();assert.equal(await reviewer.linkedEvidence({...scope,tenantId:foreign.s.tenantId}),null);
+ await pool.query("INSERT INTO securepay_private.work_retention_policy(tenant_id,milestone_id,retain_until,legal_hold,reason) VALUES($1,$2,clock_timestamp()-interval '1 day',false,'Synthetic test retention policy')",[d.s.tenantId,d.s.milestoneId]);
+ assert.equal((await retentionPool.query("SELECT securepay_private.purge_work_evidence(100) AS n")).rows[0].n,0);
+});
+test("work evidence retention preserves open cases and legal holds and only purges closed approved policies",async()=>{
+ const d=await completionFixture(),{w,p}=await submittedWork(d);
+ assert.equal((await d.svc.approve({...d.payer,body:{completionId:w.completionId,manifestDigest:w.manifestDigest,version:w.version,expectedAmountCents:5000}})).ok,true);
+ const g=await changeGrant(d.s);assert.equal((await asPayer(d.s,c=>changePin(c,g,pepper))).ok,true);
+ const r=await d.svc.reserve({...d.payer,body:{pin:d.s.pin,expectedAmountCents:5000,idempotencyKey:randomUUID()}});assert.equal(r.ok,true);
+ assert.equal((await provider.beginDispatch({...d.s,requestId:r.releaseRequestId})).ok,true);
+ assert.equal((await providerEvent(d.s,"released",{requestId:r.releaseRequestId,transactionRef:randomUUID()})).status,"applied");
+ const purge=async()=>(await retentionPool.query("SELECT securepay_private.purge_work_evidence(100) AS n")).rows[0].n;
+ assert.equal(await purge(),0);
+ await pool.query("INSERT INTO securepay_private.work_retention_policy(tenant_id,milestone_id,retain_until,legal_hold,reason) VALUES($1,$2,clock_timestamp()-interval '1 day',true,'Synthetic approved retention policy')",[d.s.tenantId,d.s.milestoneId]);
+ assert.equal(await purge(),0);
+ await pool.query("UPDATE securepay_private.work_retention_policy SET legal_hold=false WHERE tenant_id=$1 AND milestone_id=$2",[d.s.tenantId,d.s.milestoneId]);
+ const results=await Promise.all([purge(),purge()]);assert.equal(results[0]+results[1],1);
+ const row=(await pool.query("SELECT content,digest,purged_at FROM securepay_private.work_photos WHERE photo_id=$1",[p.photoId])).rows[0];assert.equal(row.content,null);assert.equal(row.digest,p.digest);assert.ok(row.purged_at);
+ assert.equal((await d.svc.photo({...d.payer,body:{photoId:p.photoId}})).ok,false);
+ assert.equal((await verifyAuditChain(auditPool,d.s.tenantId)).ok,true);
+});
+test("dedicated completion HTTP service verifies owner audience, tenant assignment and upload limits",async()=>{
+ const {startCompletionService}=await import("../../server/securepay-completion.js");
+ const {generateKeyPair,exportJWK,SignJWT}=await import("jose");
+ const {createServer}=await import("node:http");
+ const d=await completionFixture(),other=await completionFixture();
+ const {privateKey,publicKey}=await generateKeyPair("ES256"),jwk=await exportJWK(publicKey);jwk.kid="completion";jwk.alg="ES256";
+ const jwks=createServer((req,res)=>{res.setHeader("content-type","application/json");res.end(JSON.stringify({keys:[jwk]}));});await new Promise(r=>jwks.listen(0,"127.0.0.1",r));
+ const issuer="https://completion-fixture.invalid",audience="securepay-completion",subject="owner-upload",acr="owner-mfa";
+ const env={NODE_ENV:"test",SECUREPAY_COMPLETION_SANDBOX_ENABLED:"true",SECUREPAY_COMPLETION_PORT:"0",SECUREPAY_COMPLETION_ISSUER:issuer,SECUREPAY_COMPLETION_AUDIENCE:audience,SECUREPAY_COMPLETION_REQUIRED_ACR:acr,SECUREPAY_COMPLETION_SUBJECT:subject,SECUREPAY_AUTH_AUDIENCE:"securepay-customer",SECUREPAY_OWNER_AUDIENCE:"securepay-owner",SECUREPAY_COMPLETION_JWKS_URL:"http://127.0.0.1:"+jwks.address().port+"/jwks",SECUREPAY_COMPLETION_DATABASE_URL:completionPool.options.connectionString,SECUREPAY_COMPLETION_TENANT_ID:d.s.tenantId,SECUREPAY_COMPLETION_ACTOR_ID:d.actorId,SECUREPAY_COMPLETION_ACTOR_KEY:d.key.toString("hex")};
+ let service;
+ try{
+  await assert.rejects(startCompletionService({...env,SECUREPAY_PIN_PEPPER:"forbidden"},{scanner:d.scanner}),/secrets forbidden/);
+  service=await startCompletionService(env,{scanner:d.scanner});
+  const base="http://127.0.0.1:"+service.server.address().port+"/v1/securepay-completion";
+  const token=(aud=audience,sub=subject)=>new SignJWT({acr,auth_time:Math.floor(Date.now()/1000)}).setProtectedHeader({alg:"ES256",kid:"completion"}).setIssuer(issuer).setAudience(aud).setSubject(sub).setIssuedAt().setExpirationTime("5m").sign(privateKey);
+  const post=async(action,body={},bearer=null,id=d.s.milestoneId)=>fetch(base+"/"+id+"/"+action,{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+(bearer??await token())},body:JSON.stringify(body)});
+  const page=await fetch(base+"/upload");assert.equal(page.status,200);assert.match(await page.text(),/Screen and upload photo/);
+  assert.equal((await post("start",{},await token("securepay-customer"))).status,401);
+  assert.equal((await post("start",{},await token(audience,"other"))).status,403);
+  assert.equal((await post("start",{},null,other.s.milestoneId)).status,403);
+  assert.equal((await post("start",{tenantId:other.s.tenantId})).status,400);
+  const started=await post("start");assert.equal(started.status,201);const {completionId}=await started.json();
+  assert.equal((await post("submit",{completionId,comments:""})).status,403);
+  assert.equal((await post("upload",{completionId,mediaType:"image/png",content:"invalid!"})).status,400);
+  const uploaded=await post("upload",{completionId,mediaType:"image/png",content:pngFixture().toString("base64")});assert.equal(uploaded.status,201);
+  assert.equal((await post("submit",{completionId,comments:"Completed"})).status,200);
+  const v=await post("status");assert.equal(v.status,200);assert.equal((await v.json()).view.current.status,"submitted");
+ }finally{if(service)await service.close();await new Promise(r=>jwks.close(r));}
 });
