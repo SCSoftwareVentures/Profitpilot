@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import {randomUUID,randomBytes} from "node:crypto";
 import {createPinCredential} from "../domain/pin-credential.mjs";
 import {authorizeWithPin} from "./authorize-with-pin.mjs";
+import {changePin,resolvePayer} from "./change-pin.mjs";
+import {verifyPinCredential} from "../domain/pin-credential.mjs";
 import {readFile} from "node:fs/promises";
 import pg from "pg";
 import {reserveAuthorizedRelease} from "./reserve-authorized-release.mjs";
@@ -17,12 +19,12 @@ if(url.pathname!=="/securepay_ci"||!["localhost","127.0.0.1"].includes(url.hostn
 const pool=new pg.Pool({connectionString:url.href,max:8,connectionTimeoutMillis:5000,
   statement_timeout:10000});
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   // Fixture admin bypasses RLS solely to exercise transaction semantics.
   // No permissive policies are installed; restricted role tested below.
   await pool.query("CREATE ROLE securepay_ci_restricted NOLOGIN NOBYPASSRLS");
-  await pool.query("GRANT SELECT, INSERT, UPDATE ON securepay_milestones, securepay_release_requests, securepay_release_proofs, securepay_customer_pins TO securepay_ci_restricted");
+  await pool.query("GRANT SELECT, INSERT, UPDATE ON securepay_milestones, securepay_release_requests, securepay_release_proofs, securepay_customer_pins, securepay_payer_identities, securepay_pin_change_grants TO securepay_ci_restricted");
 });
 after(async()=>pool.end());
 async function fixture(status="approved",tenantId=randomUUID()) {
@@ -102,7 +104,7 @@ test("draft RLS denies restricted role reads and mutations",async()=>{
   try {
     await c.query("BEGIN");
     await c.query("SET LOCAL ROLE securepay_ci_restricted");
-    for(const table of ["securepay_milestones","securepay_release_requests","securepay_release_proofs","securepay_customer_pins"]){
+    for(const table of ["securepay_milestones","securepay_release_requests","securepay_release_proofs","securepay_customer_pins","securepay_payer_identities","securepay_pin_change_grants"]){
       const {rows}=await c.query("SELECT * FROM "+table);
       assert.equal(rows.length,0);
     }
@@ -176,4 +178,52 @@ test("concurrent correct PIN requests reserve a single release",async()=>{
  const results=await Promise.all([attempt(s),attempt(s)]);
  assert.equal(results.filter(x=>x.ok).length,1);
  assert.equal((await state(s)).requests,1);
+});
+
+async function tx(fn){
+ const c=await pool.connect();
+ try{await c.query("BEGIN");const r=await fn(c);await c.query("COMMIT");return r;}
+ catch(e){await c.query("ROLLBACK");throw e;}
+ finally{c.release();}
+}
+async function identityFixture(){
+ const s=await fixture(), subject=randomUUID();
+ await pool.query("INSERT INTO securepay_payer_identities(tenant_id,customer_id,auth_subject) VALUES($1,$2,$3)",[s.tenantId,s.customerId,subject]);
+ return {...s,subject,pin:"012345"};
+}
+async function changeGrant(s,purpose="enroll",expired=false){
+ const grantRef=randomUUID();
+ await pool.query("INSERT INTO securepay_pin_change_grants(grant_ref,tenant_id,customer_id,purpose,expires_at) VALUES($1,$2,$3,$4,clock_timestamp()+$5::interval)",[grantRef,s.tenantId,s.customerId,purpose,expired?"-1 minute":"5 minutes"]);
+ return {...s,purpose,grantRef};
+}
+const change=(s)=>tx(c=>changePin(c,s,pepper));
+test("payer identity is scoped to active verified subject and tenant",async()=>{
+ const s=await identityFixture();
+ assert.equal(await tx(c=>resolvePayer(c,s)),s.customerId);
+ assert.equal(await tx(c=>resolvePayer(c,{...s,subject:"other"})),null);
+ assert.equal(await tx(c=>resolvePayer(c,{...s,tenantId:randomUUID()})),null);
+ await pool.query("UPDATE securepay_payer_identities SET active=false WHERE tenant_id=$1 AND customer_id=$2",[s.tenantId,s.customerId]);
+ assert.equal(await tx(c=>resolvePayer(c,s)),null);
+});
+test("PIN enrollment requires matching current grant and is single-use even under concurrency",async()=>{
+ const s=await identityFixture(),g=await changeGrant(s);
+ assert.equal((await change({...g,subject:"admin"})).ok,false);
+ assert.equal((await change({...g,tenantId:randomUUID()})).ok,false);
+ assert.equal((await change({...g,purpose:"recover"})).ok,false);
+ assert.equal((await change(await changeGrant(s,"enroll",true))).ok,false);
+ const results=await Promise.all([change(g),change(g)]);
+ assert.equal(results.filter(x=>x.ok).length,1);
+ assert.equal((await change(await changeGrant(s))).ok,false);
+});
+test("PIN recovery requires separate grant, invalidates unused approvals, and replaces credential",async()=>{
+ const s=await identityFixture();assert.equal((await change(await changeGrant(s))).ok,true);
+ const p=await proof(s),g=await changeGrant(s,"recover");
+ const next={...g,pin:"654321"};
+ assert.equal((await change(next)).ok,true);
+ assert.equal((await change(next)).ok,false);
+ const {rows:[k]}=await pool.query("SELECT salt,pin_hash,failed_attempts,locked_until FROM securepay_customer_pins WHERE tenant_id=$1 AND customer_id=$2",[s.tenantId,s.customerId]);
+ assert.equal(await verifyPinCredential({...s,pepper},{salt:k.salt,pinHash:k.pin_hash}),false);
+ assert.equal(await verifyPinCredential({...s,pin:next.pin,pepper},{salt:k.salt,pinHash:k.pin_hash}),true);
+ assert.equal((await pool.query("SELECT 1 FROM securepay_release_proofs WHERE proof_ref=$1",[p.authorizationRef])).rowCount,0);
+ assert.equal(k.failed_attempts,0);assert.equal(k.locked_until,null);
 });
