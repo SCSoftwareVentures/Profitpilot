@@ -1143,3 +1143,15 @@ test("full refund omits zero payout; legacy aggregate endpoints and direct leg m
  const rows=await pool.query("SELECT kind,amount_cents,status FROM securepay_private.settlement_legs WHERE settlement_id=$1",[scope.settlementId]);
  assert.deepEqual(rows.rows,[{kind:"refund",amount_cents:"5000",status:"confirmed"}]);
 });
+
+test("late provider hold preserves already-dispatched receipt and blocks outstanding leg",async()=>{
+ const d=await authorizedDispute(),scope=d.settlement;
+ const payout=await d.confirm.dispatch({...scope,kind:"payout"});assert.equal(payout.ok,true);
+ assert.equal((await d.confirm.record({...scope,...payout,outcome:"unknown"})).status,"applied");
+ assert.equal((await providerEvent(d.s,"held")).status,"applied");
+ assert.equal((await d.confirm.record({...scope,...payout,outcome:"confirmed",receipt:randomUUID()})).status,"applied");
+ assert.equal((await d.confirm.dispatch({...scope,kind:"refund"})).ok,false);
+ assert.equal((await state(d.s)).status,"disputed");
+ const r=await pool.query("SELECT reason FROM securepay_private.provider_reconciliation WHERE tenant_id=$1 AND milestone_id=$2",[scope.tenantId,scope.milestoneId]);
+ assert.deepEqual(r.rows,[{reason:"hold_after_dispatch"}]);
+});
