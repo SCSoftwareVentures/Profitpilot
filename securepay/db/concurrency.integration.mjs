@@ -1188,6 +1188,12 @@ test("financial journal reconciles exact funding and individual receipts, no dup
  assert.equal((await provider.beginDispatch({...ordinary,requestId:r.releaseRequestId})).ok,true);
  assert.equal((await providerEvent(ordinary,"released",{requestId:r.releaseRequestId,transactionRef:randomUUID()})).status,"applied");
  assert.deepEqual(await balanceFor(ordinary),{funded_cents:"5000",payout_cents:"5000",refund_cents:"0",remaining_cents:"0"});
+ const verify=async s=>(await auditPool.query("SELECT securepay_private.verify_financial_journal($1,$2) AS ok",[s.tenantId,s.milestoneId])).rows[0].ok;
+ assert.equal(await verify(ordinary),true);assert.equal(await verify(d.s),true);
+ await pool.query("UPDATE securepay_private.financial_journal SET amount_cents=amount_cents-1 WHERE tenant_id=$1 AND milestone_id=$2 AND kind='settlement_refund'",[d.s.tenantId,d.s.milestoneId]);
+ assert.equal(await verify(d.s),false);assert.equal(await verify(ordinary),true);
+ await pool.query("UPDATE securepay_private.financial_journal SET amount_cents=amount_cents+1 WHERE tenant_id=$1 AND milestone_id=$2 AND kind='settlement_refund'",[d.s.tenantId,d.s.milestoneId]);
+ assert.equal(await verify(d.s),true);
 });
 test("exhausted leg requires current provider statement and distinct independent approvals for one final retry",async()=>{
  const d=await authorizedDispute({payoutCents:0,refundCents:5000});
