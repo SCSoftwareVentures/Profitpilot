@@ -1,6 +1,7 @@
 // Sandbox strict PNG subset: RGB/RGBA, 8-bit, non-interlaced, no metadata.
 import {inflateSync} from "node:zlib";
 import {spawn} from "node:child_process";
+import {fileURLToPath} from "node:url";
 import {createHash} from "node:crypto";
 import {signEnvelope,validKeyId} from "./key-envelope.mjs";
 const signature=Buffer.from("89504e470d0a1a0a","hex");
@@ -55,14 +56,44 @@ export function clamavScanner({executable="/usr/bin/clamscan",timeoutMs=15000}={
   child.stdin.on("error",()=>finish("unavailable"));child.stdin.end(bytes);
  });
 }
-export function makeEvidenceScanner({key,keyId="primary",scan}){
+// Fixed decoder script and bounded subprocess. No caller-controlled file names.
+// The service must additionally run in a restricted OS/container identity.
+export function jpegNormalizer({executable="/usr/bin/python3",timeoutMs=8000}={}){
+ if(!executable.startsWith("/")||!Number.isInteger(timeoutMs)||timeoutMs<100||timeoutMs>15000)throw Error("Invalid decoder configuration");
+ const script=fileURLToPath(new URL("./normalize-evidence.py",import.meta.url));
+ return bytes=>new Promise(resolve=>{
+  if(!Buffer.isBuffer(bytes)||bytes.length>2097152)return resolve(null);
+  let child,done=false,timer,total=0;const chunks=[];
+  const finish=result=>{if(done)return;done=true;clearTimeout(timer);resolve(result);};
+  try{child=spawn(executable,["-I",script],{stdio:["pipe","pipe","ignore"],shell:false});}
+  catch{return finish(null);}
+  timer=setTimeout(()=>{child.kill("SIGKILL");finish(null);},timeoutMs);
+  child.on("error",()=>finish(null));
+  child.stdout.on("data",b=>{total+=b.length;if(total>2097152){child.kill("SIGKILL");finish(null);}else if(!done)chunks.push(b);});
+  child.on("close",code=>{if(done)return;const result=Buffer.concat(chunks);finish(code===0&&validEvidencePNG(result)?result:null);});
+  child.stdin.on("error",()=>{child.kill("SIGKILL");finish(null);});child.stdin.end(bytes);
+ });
+}
+
+export function makeEvidenceScanner({key,keyId="primary",scan,normalizeJPEG}){
  if(!Buffer.isBuffer(key)||key.length!==32||!validKeyId(keyId)||typeof scan!=="function")throw Error("Evidence scanner unavailable");
  return Object.freeze({async attest({photoId,tenantId,milestoneId,caseId,actorId,mediaType,content}){
-  if(mediaType!=="image/png"||!validEvidencePNG(content))return null;
-  const snapshot=Buffer.from(content);
-  let result;try{result=await scan(snapshot);}catch{return null;}
-  if(result!=="clean"||!snapshot.equals(content)||!validEvidencePNG(snapshot))return null;
-  const digest=createHash("sha256").update(snapshot).digest("hex"),exp=Math.floor(Date.now()/1000)+30;
-  return {digest,exp,signature:signEnvelope(key,keyId,["sp-evidence-scan-v1",photoId,tenantId,milestoneId,caseId,actorId,mediaType,digest,exp].join(":"))};
+  if(!Buffer.isBuffer(content)||content.length<8||content.length>2097152||!["image/png","image/jpeg"].includes(mediaType))return null;
+  const original=Buffer.from(content),originalDigest=createHash("sha256").update(original).digest("hex");
+  let result,normalized;
+  try{
+   result=await scan(Buffer.from(original));
+   if(result!=="clean")return null;
+   if(mediaType==="image/png"){if(!validEvidencePNG(original))return null;normalized=original;}
+   else{
+    if(typeof normalizeJPEG!=="function")return null;
+    normalized=await normalizeJPEG(Buffer.from(original));
+    if(!validEvidencePNG(normalized))return null;
+    if(await scan(Buffer.from(normalized))!=="clean")return null;
+   }
+  }catch{return null;}
+  const digest=createHash("sha256").update(normalized).digest("hex"),exp=Math.floor(Date.now()/1000)+30;
+  return {digest,originalDigest,originalMediaType:mediaType,content:Buffer.from(normalized),exp,
+   signature:signEnvelope(key,keyId,["sp-evidence-scan-v2",photoId,tenantId,milestoneId,caseId,actorId,"image/png",digest,mediaType,originalDigest,exp].join(":"))};
  }});
 }
