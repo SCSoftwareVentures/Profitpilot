@@ -59,6 +59,7 @@ BEGIN
  -- Lock actor status and fingerprint rows so concurrent deactivation or reprovisioning cannot change approval validity.
  PERFORM 1 FROM securepay_private.dispute_actors WHERE tenant_id=t AND actor_id IN(a,n,g.administrator_id) ORDER BY actor_id FOR UPDATE;
  PERFORM 1 FROM securepay_private.actor_person_registry WHERE tenant_id=t AND actor_id IN(a,n,g.administrator_id) ORDER BY actor_id FOR UPDATE;
+ IF NOT securepay_private.succession_actor_valid(t,d,a,g.administrator_id) THEN RETURN NULL; END IF;
  IF op='request' THEN
   IF NOT securepay_private.succession_actor_valid(t,d,n,g.administrator_id) OR NOT securepay_private.person_distinct(t,a,n)
   OR (SELECT count(*) FROM securepay_private.case_admin_successions WHERE case_id=d)>=10 THEN RETURN NULL; END IF;
@@ -80,7 +81,7 @@ BEGIN
  OR NOT securepay_private.succession_actor_valid(t,d,q.requested_by,g.administrator_id)
  OR NOT securepay_private.person_distinct(t,a,n) OR NOT securepay_private.person_distinct(t,a,q.requested_by) OR NOT securepay_private.person_distinct(t,n,q.requested_by)
  OR securepay_private.succession_snapshot(t,d,n,q.requested_by) IS DISTINCT FROM h THEN RETURN NULL; END IF;
- UPDATE securepay_private.case_admin_successions SET status='approved',approved_by=a,approval_reason=reason,resolved_at=clock_timestamp() WHERE request_id=r;
+ UPDATE securepay_private.case_admin_successions SET status='approved',approved_by=a,approval_reason=$7,resolved_at=clock_timestamp() WHERE request_id=r;
  UPDATE securepay_private.governed_cases SET administrator_id=n WHERE case_id=d AND tenant_id=t;
  -- Pending prior-admin reassessments must be reissued by the successor.
  UPDATE securepay_private.case_reassessments SET status='withdrawn',resolved_at=clock_timestamp() WHERE case_id=d AND status='pending';
