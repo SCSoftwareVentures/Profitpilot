@@ -9,7 +9,7 @@ function validate(r){
  if(!r||r.schema!=="securepay-report-v1"||r.mode!=="sandbox"||r.moneyMoved!==false||!isId(r.tenantId)||!isId(r.reportId)||!Number.isFinite(Date.parse(r.generatedAt))||!Array.isArray(r.milestones)||r.milestones.length>250||r.checkpoint?.tenantId!==r.tenantId||!cents(r.checkpoint.last_seq)||BigInt(r.checkpoint.last_seq)<0n||!hex.test(r.checkpoint.last_hash))throw Error("Invalid sandbox report");
  const seen=new Set();
  for(const m of r.milestones){
-  if(!isId(m.milestoneId)||seen.has(m.milestoneId)||!["planned","submitted","disputed","approved","release_pending","released","settled"].includes(m.status)||!["unfunded","funded","held","released","settled"].includes(m.fundingStatus)||
+  if(!isId(m.milestoneId)||seen.has(m.milestoneId)||!["planned","submitted","disputed","approved","release_pending","released","settled","cancelled"].includes(m.status)||!["unfunded","funded","held","released","settled"].includes(m.fundingStatus)||
    ![m.caseId,m.settlementId].every(v=>v===null||isId(v))||![null,"open","decided","appealed","final","authorized","settled"].includes(m.caseStatus)||
    ![m.fundedCents,m.payoutCents,m.refundCents,m.remainingCents,m.unresolvedIssues].every(cents)||typeof m.journalVerified!=="boolean"||!Array.isArray(m.legs)||m.legs.length>2)throw Error("Invalid milestone report");
   seen.add(m.milestoneId);
