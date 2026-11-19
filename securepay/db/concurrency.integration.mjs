@@ -5,6 +5,7 @@ import {randomUUID,randomBytes} from "node:crypto";
 import {createPinCredential} from "../domain/pin-credential.mjs";
 import {authorizeWithPin,authorizePayerInTransaction} from "./authorize-with-pin.mjs";
 import {changePin,resolvePayer} from "./change-pin.mjs";
+import {withPayer} from "./with-payer.mjs";
 import {verifyPinCredential} from "../domain/pin-credential.mjs";
 import {readFile} from "node:fs/promises";
 import pg from "pg";
@@ -18,15 +19,23 @@ if(url.pathname!=="/securepay_ci"||!["localhost","127.0.0.1"].includes(url.hostn
   throw new Error("Refusing non-local or non-CI database");
 const pool=new pg.Pool({connectionString:url.href,max:8,connectionTimeoutMillis:5000,
   statement_timeout:10000});
+const payerSigningKey=randomBytes(32);
+let payerPool;
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
+  await pool.query("INSERT INTO securepay_private.context_key(singleton,secret) VALUES(true,$1)",[payerSigningKey]);
+  const password=randomBytes(32).toString("hex");
+  await pool.query("ALTER ROLE securepay_payer_runtime LOGIN PASSWORD '"+password+"'");
+  const payerUrl=new URL(url);payerUrl.username="securepay_payer_runtime";payerUrl.password=password;
+  payerPool=new pg.Pool({connectionString:payerUrl.href,max:4,connectionTimeoutMillis:5000,statement_timeout:10000});
+  await pool.query("CREATE TABLE securepay_ci_staff_only(secret text); INSERT INTO securepay_ci_staff_only VALUES ('fixture')");
   // Fixture admin bypasses RLS solely to exercise transaction semantics.
   // No permissive policies are installed; restricted role tested below.
   await pool.query("CREATE ROLE securepay_ci_restricted NOLOGIN NOBYPASSRLS");
   await pool.query("GRANT SELECT, INSERT, UPDATE ON securepay_milestones, securepay_release_requests, securepay_release_proofs, securepay_customer_pins, securepay_payer_identities, securepay_pin_change_grants TO securepay_ci_restricted");
 });
-after(async()=>pool.end());
+after(async()=>{if(payerPool)await payerPool.end();await pool.end();});
 async function fixture(status="approved",tenantId=randomUUID()) {
   const milestoneId=randomUUID(), customerId=randomUUID();
   await pool.query("INSERT INTO securepay_milestones(id,tenant_id,job_id,amount_cents,status) VALUES($1,$2,$3,5000,$4)",
@@ -239,4 +248,36 @@ test("verified-subject release ignores supplied customer ID and denies inactive 
  await pool.query("UPDATE securepay_payer_identities SET active=true WHERE tenant_id=$1 AND customer_id=$2",[s.tenantId,s.customerId]);
  assert.equal((await release({customerId:randomUUID()})).ok,true);
  assert.equal((await state(s)).requests,1);
+});
+
+const asPayer=(s,fn)=>withPayer(payerPool,{tenantId:s.tenantId,subject:s.subject,signingKey:payerSigningKey},fn);
+test("restricted payer cannot read without signature, forge context, or access staff data",async()=>{
+ assert.equal((await payerPool.query("SELECT * FROM securepay_milestones")).rowCount,0);
+ const s=await identityFixture();
+ await assert.rejects(withPayer(pool,{...s,signingKey:payerSigningKey},async()=>true),/Incorrect payer runtime role/);
+ await assert.rejects(withPayer(payerPool,{...s,signingKey:randomBytes(32)},async()=>true),/Payer context denied/);
+ await assert.rejects(asPayer({...s,subject:"not-the-payer"},async()=>true),/Payer context denied/);
+ await assert.rejects(asPayer(s,c=>c.query("SELECT * FROM securepay_ci_staff_only")),e=>e.code==="42501");
+ await assert.rejects(asPayer(s,c=>c.query("SELECT secret FROM securepay_private.context_key")),e=>e.code==="42501");
+});
+test("signed payer runtime isolates same-tenant and cross-tenant customers and executes genuine PIN reservation",async()=>{
+ const s=await identityFixture();
+ const other=await fixture("approved",s.tenantId);
+ await pool.query("INSERT INTO securepay_payer_identities(tenant_id,customer_id,auth_subject) VALUES($1,$2,$3)",[other.tenantId,other.customerId,randomUUID()]);
+ const foreign=await identityFixture();
+ await pool.query("UPDATE securepay_milestones SET payer_customer_id=CASE WHEN id=$1 THEN $2::uuid WHEN id=$3 THEN $4::uuid ELSE $6::uuid END WHERE id IN ($1,$3,$5)",[s.milestoneId,s.customerId,other.milestoneId,other.customerId,foreign.milestoneId,foreign.customerId]);
+ await asPayer(s,async c=>{
+  const x=await c.query("SELECT id FROM securepay_milestones");
+  assert.deepEqual(x.rows,[{id:s.milestoneId}]);
+  assert.equal((await c.query("UPDATE securepay_milestones SET status='release_pending' WHERE id=$1",[other.milestoneId])).rowCount,0);
+ });
+ await assert.rejects(asPayer(s,c=>c.query("UPDATE securepay_milestones SET amount_cents=1 WHERE id=$1",[s.milestoneId])),e=>e.code==="42501");
+ await assert.rejects(asPayer(s,c=>c.query("UPDATE securepay_milestones SET status='released' WHERE id=$1",[s.milestoneId])),e=>e.code==="42501");
+ const grant=await changeGrant(s);
+ assert.equal((await asPayer(s,c=>changePin(c,grant,pepper))).ok,true);
+ const result=await asPayer(s,c=>authorizePayerInTransaction(c,{...s,expectedAmountCents:5000,requestId:randomUUID(),idempotencyKey:randomUUID()},pepper));
+ assert.equal(result.ok,true);
+ assert.equal((await state(s)).requests,1);
+ assert.equal((await state(other)).status,"approved");
+ assert.equal((await state(foreign)).status,"approved");
 });
