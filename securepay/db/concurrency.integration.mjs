@@ -1682,6 +1682,16 @@ test("owner quote and customer agreement HTTP APIs enforce scoped persisted quot
   assert.equal((await post(url+"/accept",{planDigest:v.planDigest,expectedTotalCents:4999},d.s.subject)).status,403);
   assert.equal((await post(url+"/accept",{planDigest:v.planDigest,expectedTotalCents:5000},d.s.subject)).status,200);
   assert.equal((await own("publish-quote",{previousDigest:q.quote.quoteDigest,description:"Amended",totalCents:6000})).status,403);
+  const ownerContract=await fetch(o+"/contracts");assert.equal(ownerContract.status,200);assert.match(await ownerContract.text(),/contract changes/);
+  const customerContract=await fetch(base+"/contract");assert.equal(customerContract.status,200);
+  const contractRead=await own("contract-status",{},"assigned-owner",v.planId);assert.equal(contractRead.status,200);
+  const cv=(await contractRead.json()).contract;
+  const proposed=await own("offer-change",{kind:"variation",milestoneId:items[0].milestoneId,newAmountCents:2500,newDescription:"Extra completed work",reason:"Mutual scope expansion requested",stateDigest:cv.stateDigest},"assigned-owner",v.planId);
+  assert.equal(proposed.status,201);const {change}=await proposed.json();
+  const contractView=await post(url+"/contract",{},d.s.subject);assert.equal(contractView.status,200);assert.equal((await contractView.json()).contract.changes[0].current,true);
+  assert.equal((await post(url+"/accept-change",{changeId:change.changeId,changeDigest:change.changeDigest,expectedTotalCents:5499},d.s.subject)).status,403);
+  assert.equal((await post(url+"/accept-change",{changeId:change.changeId,changeDigest:change.changeDigest,expectedTotalCents:5500},d.s.subject)).status,200);
+  const changed=await post(url+"/contract",{},d.s.subject);assert.equal(changed.status,200);assert.equal((await changed.json()).contract.state.effectiveTotalCents,"5500");
  }finally{await Promise.all([new Promise(r=>ownerServer.close(r)),new Promise(r=>payerServer.close(r)),new Promise(r=>gatewayServer.close(r))]);await rm(dir,{recursive:true,force:true});}
 });
 
