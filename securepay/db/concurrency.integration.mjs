@@ -2492,7 +2492,7 @@ test("customer and owner dispute portals route screened uploads and exact scope 
 
 test("verified customer can enter the dispute portal from a completion dispute without having a preprovisioned signing actor",async()=>{
  const d=await completionFixture(),{s,scope,owner,svc,payer}=d;
- assert.equal((await provider.event({...s,kind:"funded",amountCents:5000})).status,"applied");
+ assert.equal((await balanceFor(s)).remaining_cents,"5000");
  assert.equal((await owner.start(scope)).ok,true);assert.equal((await owner.upload({...scope,mediaType:"image/png",content:pngFixture()})).ok,true);assert.equal((await owner.submit(scope)).ok,true);
  const v=(await svc.completion({...payer,body:{}})).completion,caseId=randomUUID();
  assert.equal((await pool.query("SELECT count(*)::int AS n FROM securepay_private.dispute_actors WHERE tenant_id=$1 AND actor_id=$2",[s.tenantId,s.customerId])).rows[0].n,0);
