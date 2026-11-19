@@ -5,7 +5,7 @@ const cents=x=>typeof x==="string"&&/^(0|[1-9][0-9]{0,15})$/.test(x)&&BigInt(x)<
 const text=(x,n)=>typeof x==="string"&&x.length<=n;
 export function projectContract(view,planId){
  const s=view?.state,changes=view?.changes;
- if(!s||s.planId!==planId||!id(planId)||!cents(s.originalTotalCents)||!cents(s.effectiveTotalCents)||!Array.isArray(s.stages)||s.stages.length<1||s.stages.length>20||!Array.isArray(changes)||changes.length>20)throw Error("Invalid contract view");
+ if(typeof view?.stateDigest!=="string"||!/^[a-f0-9]{64}$/.test(view.stateDigest)||!s||s.planId!==planId||!id(planId)||!cents(s.originalTotalCents)||!cents(s.effectiveTotalCents)||!Array.isArray(s.stages)||s.stages.length<1||s.stages.length>20||!Array.isArray(changes)||changes.length>20)throw Error("Invalid contract view");
  const stage=x=>{
   if(!x||!id(x.milestoneId)||!cents(x.amountCents)||x.amountCents==="0"||!text(x.description,500))throw Error("Invalid stage");
   return {milestoneId:x.milestoneId,amountCents:x.amountCents,description:x.description};
@@ -24,5 +24,5 @@ export function projectContract(view,planId){
   if(expected!==BigInt(x.newTotalCents)||new Set(affectedStages.map(a=>a.milestoneId)).size!==affectedStages.length)throw Error("Invalid change total");
   return {changeId:x.changeId,kind:x.kind,milestoneId:x.milestoneId,oldTotalCents:x.oldTotalCents,newTotalCents:x.newTotalCents,newAmountCents:x.newAmountCents,newDescription:x.newDescription,reason:x.reason,status:x.status,changeDigest:x.changeDigest,current:x.current,affectedStages};
  });
- return {state:{planId,originalTotalCents:s.originalTotalCents,effectiveTotalCents:s.effectiveTotalCents,stages},changes:history};
+ return {stateDigest:view.stateDigest,state:{planId,originalTotalCents:s.originalTotalCents,effectiveTotalCents:s.effectiveTotalCents,stages},changes:history};
 }
