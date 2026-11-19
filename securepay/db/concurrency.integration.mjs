@@ -860,6 +860,7 @@ test("provider hold cannot be overridden by dispute finality; cross-tenant and r
  const d=await disputeFixture(),eventId=randomUUID();
  assert.equal((await d.call(d.customer,"open","serious",{evidenceDigest:d.digest,eventId,tenantId:randomUUID()})).ok,false);
  assert.equal((await d.call(d.customer,"open","serious",{evidenceDigest:d.digest,eventId})).ok,true);
+ await assignFixtureReviewers(d);
  assert.equal((await d.call(d.customer,"open","serious",{evidenceDigest:d.digest,eventId})).ok,false);
  assert.equal((await evidence(d)).ok,true);assert.equal((await decide(d)).ok,true);
  assert.equal((await d.call(d.customer,"ack","Accepted")).ok,true);
