@@ -10,7 +10,7 @@ test("consumes only exact scoped proof using conditional update",async()=>{
  let sql,params;const client={query:async(s,p)=>{sql=s;params=p;return {rowCount:1};}};
  assert.equal(await consumeReleaseProof(client,scope),true);
  assert.match(sql,/consumed_at IS NULL/);
- assert.match(sql,/expires_at>now\(\)/);
+ assert.match(sql,/expires_at>clock_timestamp\(\)/);
  assert.deepEqual(params,["t1","m1","c1","p1","5000","r1"]);
 });
 test("rejects expired, mismatched or already consumed proofs",async()=>{
