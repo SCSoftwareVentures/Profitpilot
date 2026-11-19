@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {Script,createContext} from "node:vm";
 import {createHash,randomUUID} from "node:crypto";
-import {customerPortalPage,ownerDashboardPage,customerQuotePage,ownerQuotePage} from "../../server/securepay-portal-page.js";
+import {customerPortalPage,ownerDashboardPage,customerQuotePage,ownerQuotePage,customerContractPage,ownerContractPage} from "../../server/securepay-portal-page.js";
 import {createPayerTokenVerifier} from "../../server/securepay-router.js";
 import {generateKeyPair,SignJWT} from "jose";
 function ui(page,responses){
@@ -78,4 +78,30 @@ test("owner quote screen refuses mismatched stage totals and locks accepted quot
  h.get("stage-description").value="Last stage";h.get("stage-amount").value="30";await h.fire("add");await h.fire("offer");assert.equal(h.calls.length,3);
  const sent=JSON.parse(h.calls[1].opts.body);assert.equal(sent.quoteDigest,digest);assert.deepEqual(sent.items.map(x=>[x.amountCents,x.final]),[[2000,false],[3000,true]]);
  assert.equal(h.get("publish").disabled,true);assert.equal(h.get("withdraw").disabled,true);
+});
+
+test("contract change customer screen only accepts current proposal after explicit consent",async()=>{
+ const t=randomUUID(),p=randomUUID(),m=randomUUID(),v=randomUUID(),digest="a".repeat(64);
+ const stage={milestoneId:m,amountCents:"5000",description:"Original scope",status:"planned",version:"0",final:true,eligible:true,terminalVerified:false};
+ const change={changeId:v,kind:"variation",milestoneId:m,oldTotalCents:"5000",newTotalCents:"5500",newAmountCents:"5500",newDescription:"New scope",reason:"Mutually agreed new work",status:"offered",changeDigest:digest,current:true,affectedStages:[stage]};
+ const contract={stateDigest:"b".repeat(64),state:{planId:p,originalTotalCents:"5000",effectiveTotalCents:"5000",stages:[stage]},changes:[change]};
+ const response=x=>({code:200,data:{mode:"sandbox",moneyMoved:false,contract:x}});
+ const h=ui(customerContractPage(),[response({...contract,changes:[{...change,current:false}]}),response(contract),{code:200,data:{mode:"sandbox",moneyMoved:false,status:"change_accepted",changeId:v}},response({...contract,changes:[{...change,status:"accepted",current:false}],state:{...contract.state,effectiveTotalCents:"5500",stages:[{...stage,amountCents:"5500",description:"New scope"}]}})]);
+ h.get("tenant").value=t;h.get("plan").value=p;h.get("token").value="fixture";await h.fire("load");
+ h.get("agree").checked=true;await h.fire("agree","change");assert.equal(h.get("accept").disabled,true);
+ await h.fire("load");assert.equal(h.get("accept").disabled,true);
+ h.get("agree").checked=true;await h.fire("agree","change");assert.equal(h.get("accept").disabled,false);
+ await h.fire("accept");assert.deepEqual(JSON.parse(h.calls[2].opts.body),{changeId:v,changeDigest:digest,expectedTotalCents:5500});assert.equal(h.get("effective").textContent,"AUD $55.00");assert.equal(h.get("accept").disabled,true);
+});
+test("owner variation binds the loaded contract state digest and rejects ineligible stage",async()=>{
+ const p=randomUUID(),m=randomUUID(),v=randomUUID(),stateDigest="c".repeat(64);
+ const stage={milestoneId:m,amountCents:"5000",description:"Original scope",status:"planned",version:"0",final:true,eligible:true,terminalVerified:false};
+ const contract={stateDigest,state:{planId:p,originalTotalCents:"5000",effectiveTotalCents:"5000",stages:[stage]},changes:[]};
+ const reply=x=>({code:200,data:{mode:"sandbox",moneyMoved:false,contract:x}});
+ const h=ui(ownerContractPage(),[reply(contract),{code:201,data:{mode:"sandbox",moneyMoved:false,change:{changeId:v}}},reply(contract)]);
+ h.get("plan").value=p;h.get("token").value="fixture";await h.fire("load");
+ h.get("kind").value="variation";h.get("reason").value="New negotiated scope";h.get("target").value=randomUUID();h.get("new-description").value="New scope";h.get("new-amount").value="60";
+ await h.fire("offer");assert.equal(h.calls.length,1);
+ h.get("target").value=m;await h.fire("offer");assert.equal(h.calls.length,3);
+ assert.deepEqual(JSON.parse(h.calls[1].opts.body),{kind:"variation",reason:"New negotiated scope",stateDigest,milestoneId:m,newAmountCents:6000,newDescription:"New scope"});
 });
