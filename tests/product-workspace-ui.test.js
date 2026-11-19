@@ -24,5 +24,6 @@ test("candidate frontend action and element wiring; no persistent credential sto
  assert.match(app,/credentials:"omit",cache:"no-store",redirect:"error"/);
  assert.doesNotMatch(app,/\b(?:localStorage|sessionStorage|innerHTML|document\.cookie|eval)\b/);
  assert.doesNotMatch(html,/\b(?:src|href)="https?:/i);
+ assert.match(html,/role="tablist"/);assert.equal((html.match(/role="tab" /g)||[]).length,6);assert.equal((html.match(/role="tabpanel" /g)||[]).length,6);assert.match(app,/e.key==="ArrowRight"/);assert.match(app,/e.key==="End"/);
  assert.match(html,/Synthetic candidate/);assert.match(html,/Customer invoices must be scanned/);
 });

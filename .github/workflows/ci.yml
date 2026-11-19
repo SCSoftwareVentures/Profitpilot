@@ -80,7 +80,7 @@ jobs:
   database:
     name: PostgreSQL migrations and tenant RLS
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -198,6 +198,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/066_workspace_commercial_baselines.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/067_workspace_job_readiness.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/068_reviewed_invoice_intake.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/069_calculation_source_receipts.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
@@ -311,8 +312,33 @@ jobs:
         env:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
-          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/invoice-intake-api.integration.test.js
+          CHROME="$(command -v google-chrome || command -v chromium || command -v chromium-browser)"
+          test -n "$CHROME"
+          "$CHROME" --version
+          PROFITPILOT_CI_CHROME="$CHROME" TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/invoice-intake-api.integration.test.js
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/quarantine-promotion.integration.test.js
+
+      - name: Verify real Firefox report workflow
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
+        run: |
+          set -eu
+          FIREFOX_DRIVER="$(command -v geckodriver)"
+          test -n "$FIREFOX_DRIVER"
+          firefox --version
+          "$FIREFOX_DRIVER" --version
+          PROFITPILOT_CI_WEBDRIVER="$FIREFOX_DRIVER" PROFITPILOT_CI_BROWSER=firefox TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/invoice-intake-api.integration.test.js
+
+      - name: Verify real WebKitGTK report workflow
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
+        run: |
+          set -eu
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends webkitgtk-webdriver xvfb xauth
+          WEBKIT_DRIVER="$(command -v WebKitWebDriver)"
+          test -n "$WEBKIT_DRIVER"
+          xvfb-run -a --server-args="-screen 0 1280x960x24" env PROFITPILOT_CI_WEBDRIVER="$WEBKIT_DRIVER" PROFITPILOT_CI_BROWSER=webkit TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/invoice-intake-api.integration.test.js
 
       - name: Verify encrypted private file quarantine and database authorization
         env:

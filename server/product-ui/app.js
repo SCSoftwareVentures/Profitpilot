@@ -1,8 +1,9 @@
 import {uuid,amount,date,range,cents,decimal,parseMinimizedRows,mappingLine,mappingKey,assignedSites,checksum,isDigest,tenantPath} from "./core.js";
+import {reportFiles} from "./report-download.js";
 const el=id=>document.getElementById(id),value=id=>el(id).value,uid=id=>uuid(value(id)),set=(id,v)=>{el(id).value=v??"";};
 const kinds=["business","customer","site","contract","contract_site"];
 const names={business:"Businesses",customer:"Customers",site:"Sites",contract:"Contracts",contract_site:"Site assignments"};
-let records=Object.fromEntries(kinds.map(k=>[k,[]])),jobs=[],cursors={},mappings=[],currentJob=null,session=null,busy=false,epoch=0,controller=null;
+let records=Object.fromEntries(kinds.map(k=>[k,[]])),jobs=[],cursors={},mappings=[],currentJob=null,acceptedInvoice=null,session=null,busy=false,epoch=0,controller=null;
 const required=(id,label)=>{const v=value(id).trim();if(!v)throw Error(label+" is required.");return v;};
 const evidence=id=>{const v=value(id).trim();if(!isDigest(v))throw Error("Supply the exact nonzero SHA-256 evidence reference.");return v;};
 const confirmed=id=>{if(!el(id).checked)throw Error("Explicit confirmation required.");el(id).checked=false;};
@@ -13,14 +14,37 @@ function make(tag,text,css){const n=document.createElement(tag);if(text!==undefi
 function card(title,detail,buttonText,handler){const n=make("div",undefined,"item");n.append(make("strong",title),make("small",detail));if(handler){const b=make("button",buttonText);b.type="button";b.addEventListener("click",handler);n.append(b);}return n;}
 function options(id,items,placeholder){const node=el(id),previous=node.value;node.replaceChildren(new Option(placeholder,""),...items.map(x=>new Option(x.label||x.id,x.id)));if(items.some(x=>x.id===previous))node.value=previous;}
 function credentials(){const tenant=uid("tenant"),token=value("token").trim();if(!token||token.length>8192||/\s/.test(token))throw Error("Supply a current synthetic access token.");return {tenant,token};}
+let reportUrls=[];
+function clearReportDownloads(){for(const url of reportUrls)URL.revokeObjectURL(url);reportUrls=[];el("report-downloads").replaceChildren();}
+function publishReportDownloads(data,run){const {report,files}=reportFiles(data,run);clearReportDownloads();try{for(const file of files){const url=URL.createObjectURL(new Blob([file.content],{type:file.type}));reportUrls.push(url);const a=make("a",file.name.endsWith(".json")?"Download audited JSON":"Download readable report");a.href=url;a.download=file.name;a.rel="noopener";el("report-downloads").append(a);}show("report-result",report);}catch(e){clearReportDownloads();throw e;}}
+function clearReportSelection(){clearReportDownloads();el("report-result").replaceChildren();el("report-confirm").checked=false;}
+el("report-purpose").addEventListener("change",clearReportDownloads);
+el("report-id").addEventListener("input",clearReportSelection);
+el("report-id").addEventListener("change",clearReportSelection);
 function reset(keepCredentials=false){
- epoch++;controller?.abort();controller=null;session=null;records=Object.fromEntries(kinds.map(k=>[k,[]]));jobs=[];cursors={};mappings=[];currentJob=null;
+ clearReportDownloads();
+ epoch++;controller?.abort();controller=null;session=null;records=Object.fromEntries(kinds.map(k=>[k,[]]));jobs=[];cursors={};mappings=[];currentJob=null;acceptedInvoice=null;
  for(const n of document.querySelectorAll("input,textarea")){if(keepCredentials&&["tenant","token"].includes(n.id))continue;if(n.type==="checkbox")n.checked=false;else n.value="";}
  for(const n of document.querySelectorAll(".result,.stack,#metrics,#page-note"))n.replaceChildren();
  el("workspace").hidden=true;el("session-note").textContent="Not connected.";status("Session cleared. Verify a synthetic session.");
 }
-function switchTab(tab){for(const n of document.querySelectorAll("[data-panel]"))n.hidden=n.dataset.panel!==tab;for(const n of document.querySelectorAll("[data-tab]"))n.setAttribute("aria-selected",String(n.dataset.tab===tab));}
-document.querySelectorAll("[data-tab]").forEach(n=>n.addEventListener("click",()=>switchTab(n.dataset.tab)));
+const workspaceTabs=Array.from(document.querySelectorAll("[data-tab]"));
+function switchTab(tab,focus=false){
+ const selected=workspaceTabs.find(n=>n.dataset.tab===tab);if(!selected)return;
+ for(const n of document.querySelectorAll("[data-panel]"))n.hidden=n.dataset.panel!==tab;
+ for(const n of workspaceTabs){const active=n===selected;n.setAttribute("aria-selected",String(active));n.tabIndex=active?0:-1;}
+ if(focus)selected.focus();
+}
+workspaceTabs.forEach((n,i)=>{
+ n.addEventListener("click",()=>switchTab(n.dataset.tab));
+ n.addEventListener("keydown",e=>{
+  let index;
+  if(e.key==="ArrowRight")index=(i+1)%workspaceTabs.length;
+  else if(e.key==="ArrowLeft")index=(i+workspaceTabs.length-1)%workspaceTabs.length;
+  else if(e.key==="Home")index=0;else if(e.key==="End")index=workspaceTabs.length-1;else return;
+  e.preventDefault();switchTab(workspaceTabs[index].dataset.tab,true);
+ });
+});
 for(const id of ["tenant","token"])el(id).addEventListener("input",()=>{if(session||busy)reset(true);});
 window.addEventListener("pagehide",()=>reset());
 window.addEventListener("pageshow",e=>{if(e.persisted)reset();});
@@ -79,7 +103,7 @@ function saveJob(job){currentJob=job;set("job-selected",job.jobId);jobs=[job,...
 function renderMappings(){el("mapping-list").replaceChildren(...mappings.map((m,i)=>card(m.amount+" AUD · "+m.bucket,(m.siteId?nameOf(m.siteId)+" · ":"")+m.sourceRowKey,"Remove mapping",()=>{if(!busy){mappings=mappings.filter((_,j)=>j!==i);renderMappings();}})));if(mappings.length)el("mapping-list").append(make("p","Mapped instructions: "+mappings.length+" · "+decimal(mappings.reduce((n,m)=>n+cents(m.amount),0n))+" AUD","muted"));}
 function updateBaseline(data){for(const [id,k] of [["baseline-version","versionId"],["baseline-start","periodStart"],["baseline-end","periodEnd"],["baseline-price","price"],["baseline-tax","taxBasis"],["baseline-billing","billingBasis"],["baseline-evidence","evidenceDigest"]])if(typeof data[k]==="string")set(id,data[k]);show("baseline-result",data);}
 function updateAllocation(data){show("allocation-result",data);if(data.proposalId&&data.evidenceDigest){set("proposal-id",data.proposalId);set("proposal-digest",data.evidenceDigest);}}
-function report(data){const result=el("report-result");result.replaceChildren();const out=data.outputs||data.summary?.outputs||data;result.append(make("strong","Management calculation · "+(out.completeness||data.completeness||"not stated")));for(const [title,k] of [["Revenue","revenue"],["Confirmed site payroll cost","deliveryCost"],["Indicative contribution","indicativeContribution"],["Definitive contribution","contribution"],["Margin percentage","marginPercent"]])result.append(make("p",title+": "+(out[k]===null||out[k]===undefined?"Not available":String(out[k])+(k==="marginPercent"?"%":" "+(out.currency||"")))));for(const note of out.limitations||[])result.append(make("p",note,"muted"));result.append(make("details",""));const d=result.lastElementChild;d.append(make("summary","View exact API response"),make("pre",JSON.stringify(data,null,2)));if(data.id)set("report-id",data.id);}
+function report(data){clearReportDownloads();const result=el("report-result");result.replaceChildren();const out=data.outputs||data.summary?.outputs||data;result.append(make("strong","Management calculation · "+(out.completeness||data.completeness||"not stated")));for(const [title,k] of [["Revenue","revenue"],["Confirmed site payroll cost","deliveryCost"],["Indicative contribution","indicativeContribution"],["Definitive contribution","contribution"],["Margin percentage","marginPercent"]])result.append(make("p",title+": "+(out[k]===null||out[k]===undefined?"Not available":String(out[k])+(k==="marginPercent"?"%":" "+(out.currency||"")))));for(const note of out.limitations||[])result.append(make("p",note,"muted"));if(data.sourceTrace?.digest){result.append(make("p","Source receipt SHA-256: "+data.sourceTrace.digest),make("p","Reviewed invoice lines: "+data.sourceTrace.reviewedInvoiceLineCount+" / "+data.sourceTrace.invoiceLineCount+" · Site allocation lines: "+data.sourceTrace.allocationLineCount));}else if(data.sourceTrace?.status==="captured")result.append(make("p","Read the saved calculation to view its source receipt.","muted"));else result.append(make("p","Historical source receipt unavailable.","muted"));result.append(make("details",""));const d=result.lastElementChild;d.append(make("summary","View exact API response"),make("pre",JSON.stringify(data,null,2)));if(data.id)set("report-id",data.id);}
 const recordBody=()=>{const kind=value("record-kind");return {confirm:true,kind,parentId:kind==="business"?null:uid("record-parent"),relatedId:["contract","contract_site"].includes(kind)?uid("record-related"):null,label:kind==="contract_site"?null:required("record-label","Record alias")};};
 const baselinePath=()=>"/workspace/contracts/"+uid("baseline-contract")+"/versions/"+uid("baseline-order");
 const intakePath=()=>"/payroll/intakes/"+uid("intake-batch")+"/orders/"+uid("intake-order");
@@ -124,8 +148,8 @@ async function action(name){
    case "proposal-read":{const d=await read("/payroll/proposals/"+uid("proposal-id"));set("proposal-digest",d.evidenceDigest);show("proposal-result",d);break;}
    case "proposal-confirm":confirmed("proposal-confirm");show("proposal-result",await read("/payroll/proposals/"+uid("proposal-id")+"/confirm",{confirm:true,evidenceDigest:evidence("proposal-digest")}));break;
    case "report-build":{const [periodStart,periodEnd]=range(value("report-start"),value("report-end"));report(await read("/calculations",{contractId:uid("report-contract"),siteId:uid("report-site"),periodStart,periodEnd}));break;}
-   case "report-read":report(await read("/calculations/"+uid("report-id")));break;
-   case "report-export":confirmed("report-confirm");show("report-result",await read("/calculations/"+uid("report-id")+"/export",{purpose:value("report-purpose")}));break;
+   case "report-read":{clearReportSelection();const run=uid("report-id"),data=await read("/calculations/"+run);if(uid("report-id")!==run||data.id!==run)throw Error("Report selection changed.");report(data);break;}
+   case "report-export":{clearReportDownloads();confirmed("report-confirm");const run=uid("report-id"),purpose=value("report-purpose"),exported=await read("/calculations/"+run+"/export",{purpose});if(uid("report-id")!==run||value("report-purpose")!==purpose)throw Error("Report selection changed; export was not retained.");publishReportDownloads(exported,run);break;}
    case "invoice-register":{
     confirmed("invoice-register-confirm");const f=el("invoice-file").files[0];if(!f||f.size<1||f.size>65536)throw Error("Choose 1–65536 byte synthetic CSV.");
     const [periodStart,periodEnd]=range(value("invoice-start"),value("invoice-end")),bytes=await f.arrayBuffer();
@@ -143,12 +167,13 @@ async function action(name){
     show("invoice-source-result",d);el("invoice-file").value="";break;
    }
    case "invoice-promote":confirmed("invoice-promote-confirm");show("invoice-source-result",await read("/imports/"+uid("invoice-batch")+"/file/approve",{}));break;
-   case "invoice-new":newId("invoice-order");set("invoice-scope","");break;
+   case "invoice-new":acceptedInvoice=null;newId("invoice-order");set("invoice-scope","");break;
+   case "invoice-report-scope":{if(!acceptedInvoice||acceptedInvoice.batchId!==uid("invoice-batch")||acceptedInvoice.orderId!==uid("invoice-order"))throw Error("Read an accepted invoice review first.");const selected=el("invoice-report-line").value;const scope=acceptedInvoice.lines.find(x=>x.rawRowId===selected);if(!scope)throw Error("Choose a reviewed invoice row.");if(!records.contract.some(x=>x.id===scope.contractId)||!assignedSites(records,scope.contractId).some(x=>x.id===scope.siteId))throw Error("Load the relevant workspace records and site assignments before continuing.");set("report-contract",scope.contractId);options("report-site",assignedSites(records,scope.contractId),"Choose assigned site");set("report-site",scope.siteId);set("report-start",date(scope.periodStart));set("report-end",date(scope.periodEnd));clearReportDownloads();el("report-result").replaceChildren();set("report-id","");switchTab("reports");status("Reviewed scope selected. Confirm payroll evidence and build a new calculation; no calculation has been run.");return;}
    case "invoice-preview":
    case "invoice-status":
    case "invoice-step":{
     const path="/invoice-intakes/"+uid("invoice-batch")+"/orders/"+uid("invoice-order");
-    let d;
+    acceptedInvoice=null;options("invoice-report-line",[],"Choose accepted source line");let d;
     if(name==="invoice-status")d=await read(path);
     else{
      const count=Number(value("invoice-count"));
@@ -158,6 +183,7 @@ async function action(name){
      else{confirmed("invoice-review-confirm");d=await read(path,{...body,scopeDigest:evidence("invoice-scope"),step:value("invoice-step"),confirm:true});}
     }
     set("invoice-total",d.controlTotal);set("invoice-count",d.rowCount);set("invoice-evidence",d.evidenceDigest);set("invoice-scope",d.scopeDigest);
+    if(d.status==="accepted"&&Array.isArray(d.lines)&&d.lines.length>0){acceptedInvoice={batchId:uid("invoice-batch"),orderId:uid("invoice-order"),lines:d.lines};options("invoice-report-line",d.lines.map(x=>({id:x.rawRowId,label:"Row "+x.rowNumber+" · "+x.amount+" AUD"})),"Choose accepted source line");}
     show("invoice-review-result",d);break;
    }
    default:throw Error("Unsupported action.");
@@ -167,3 +193,4 @@ async function action(name){
  finally{busy=false;controller=null;document.querySelectorAll("[data-action]").forEach(n=>n.disabled=false);}
 }
 document.querySelectorAll("[data-action]").forEach(n=>n.addEventListener("click",()=>action(n.dataset.action)));
+document.documentElement.dataset.workspaceReady="true";
