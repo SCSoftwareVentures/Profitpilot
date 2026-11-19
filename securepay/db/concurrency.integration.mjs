@@ -2292,3 +2292,42 @@ test("post-authorization dissent stops all new transfers and cannot rewrite orig
  assert.deepEqual(await balanceFor(d.s),{funded_cents:"5000",payout_cents:"0",refund_cents:"0",remaining_cents:"5000"});
  await assert.rejects(reviewerPool.query("UPDATE securepay_private.post_auth_votes SET outcome='reaffirm'"),e=>e.code==="42501");
 });
+
+test("financial recovery requires distinct registered humans and cannot enable new payment during a governance freeze",async()=>{
+ const f=await governedFixture();await governedFinal(f);const {d,t,caseId,authorizer,first}=f;
+ const v=await authorizer.read(caseId),a=await authorizer.authorize({caseId,payoutCents:3000,refundCents:2000,stateDigest:v.stateDigest});assert.equal(a.ok,true);
+ const s={...d.settlement,settlementId:a.settlementId},p=await d.confirm.dispatch({...s,kind:"payout"});assert.equal(p.ok,true);
+ assert.equal((await d.confirm.record({...s,...p,outcome:"unknown"})).ok,true);
+ assert.equal((await first.reportConflict({caseId,reason:"Conflict discovered during provider reconciliation"})).ok,true);
+ const packet=await recoveryFixture({...d,settlement:s},{legId:p.legId,action:"confirm",receipt:randomUUID()});
+ assert.equal((await packet.apply()).ok,false);
+ const oneDigest=randomBytes(32).toString("hex");
+ for(const x of [packet.one,packet.two])await pool.query("INSERT INTO securepay_private.actor_person_registry VALUES($1,$2,$3)",[t,x.actorId,oneDigest]);
+ assert.equal((await packet.apply()).ok,false);
+ await pool.query("UPDATE securepay_private.actor_person_registry SET person_digest=$1 WHERE tenant_id=$2 AND actor_id=$3",[randomBytes(32).toString("hex"),t,packet.two.actorId]);
+ assert.equal((await packet.apply()).ok,true);
+ assert.equal((await balanceFor(d.s)).remaining_cents,"2000");
+ assert.equal((await d.confirm.dispatch({...s,kind:"refund"})).ok,false);
+ assert.equal((await state(d.s)).status,"disputed");
+});
+test("only new cleared authorizer can approve definitive nonexecution retry after post-authorization reaffirmation",async()=>{
+ const f=await governedFixture();await governedFinal(f);const {d,caseId,authorizer,admin,first,declare}=f;
+ const v=await authorizer.read(caseId),a=await authorizer.authorize({caseId,payoutCents:3000,refundCents:2000,stateDigest:v.stateDigest});assert.equal(a.ok,true);
+ const s={...d.settlement,settlementId:a.settlementId},p=await d.confirm.dispatch({...s,kind:"payout"});assert.equal(p.ok,true);
+ assert.equal((await d.confirm.record({...s,...p,outcome:"not_executed"})).ok,true);
+ assert.equal((await first.reportConflict({caseId,reason:"Disclosed relationship during financial review"})).ok,true);
+ assert.equal((await d.approval.retry({...s,...p})).ok,false);
+ const r1=await anotherGovernanceActor(f,"reviewer"),r2=await anotherGovernanceActor(f,"reviewer"),auth=await anotherGovernanceActor(f,"settlement");
+ const q=await admin.startPostAuth({caseId,reviewerOne:r1.actorId,reviewerTwo:r2.actorId,authorizerId:auth.actorId,reason:"Fresh panel for definitive nonexecution review"});assert.equal(q.ok,true);
+ for(const x of [r1,r2,auth])assert.equal((await declare(x.service)).ok,true);
+ const v2=await r1.service.postAuthRead(caseId);assert.equal(v2.review.safeToReaffirm,true);
+ const vote=x=>x.service.postAuthVote({caseId,reviewId:q.reviewId,outcome:"reaffirm",reason:"Independent reaffirmation of exact original allocation",stateDigest:v2.stateDigest});
+ for(const x of [r1,r2]){for(const photo of [...v2.review.photos,...v2.review.linkedPhotos])if(!photo.purged)assert.ok(await x.review.photo({caseId,photoId:photo.photoId,source:photo.source}));assert.equal((await vote(x)).ok,true);}
+ assert.equal((await vote(auth)).ok,true);
+ assert.equal((await d.approval.retry({...s,...p})).ok,false);
+ const newApproval=makeSettlementAuthorizer({pool:settlementDashboardPool,actorId:auth.actorId,key:auth.key});
+ assert.equal((await newApproval.retry({...s,...p})).ok,true);
+ const next=await d.confirm.dispatch({...s,kind:"payout"});assert.equal(next.ok,true);assert.equal(next.legId,p.legId);assert.equal(next.attempt,2);
+ assert.equal((await d.confirm.record({...s,...next,outcome:"confirmed",receipt:randomUUID()})).ok,true);
+ assert.equal((await balanceFor(d.s)).remaining_cents,"2000");
+});
