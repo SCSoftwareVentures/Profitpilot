@@ -20,3 +20,12 @@ test("payroll source uses allowlisted schema",()=>{
  const result=parseSourceFile(Buffer.from("source_ref,amount,currency,period_start,period_end\npay:1,5.01,AUD,2026-02-01,2026-02-28"),"payroll");
  assert.equal(result.rows[0].amount,"5.01");
 });
+
+test("invoice source rejects blank and repeated IDs without conflating distinct IDs",()=>{
+ for(const type of ["customer_invoice","supplier_invoice"]){
+  assert.throws(()=>parseSourceFile(Buffer.from(header+"X,A,2026-02-01,12.00\\nX,B,2026-02-02,13.00\\n"),type),/Duplicate invoice ID/);
+  assert.throws(()=>parseSourceFile(Buffer.from(header+" ,A,2026-02-01,12.00\\n"),type),/Invoice ID is required/);
+  const distinct=parseSourceFile(Buffer.from(header+"X,A,2026-02-01,12.00\\nY,B,2026-02-02,13.00\\n"),type);
+  assert.equal(distinct.rows.length,2);
+ }
+});
