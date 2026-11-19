@@ -65,7 +65,8 @@ export function createSecurePayRouterFromEnv(env=process.env){
  const hex=/^[a-f0-9]{64}$/i;
  if(!issuer||!audience||audience===env.AUTH_AUDIENCE||!jwks||!requiredAcr||!databaseUrl||
     !hex.test(env.SECUREPAY_CONTEXT_HMAC_SECRET??"")||!hex.test(env.SECUREPAY_PIN_PEPPER??"")||
-    env.SECUREPAY_CONTEXT_HMAC_SECRET.toLowerCase()===env.SECUREPAY_PIN_PEPPER.toLowerCase())
+    env.SECUREPAY_CONTEXT_HMAC_SECRET.toLowerCase()===env.SECUREPAY_PIN_PEPPER.toLowerCase()||
+    [env.SECUREPAY_CONTEXT_HMAC_SECRET,env.SECUREPAY_PIN_PEPPER].some(k=>k.toLowerCase()===(env.TENANT_CONTEXT_HMAC_SECRET??"").toLowerCase())||databaseUrl===env.DATABASE_URL)
   throw new Error("SecurePay sandbox configuration incomplete");
  const jwksUrl=new URL(jwks);
  if(jwksUrl.protocol!=="https:"&&!(env.NODE_ENV==="test"&&jwksUrl.protocol==="http:"&&["127.0.0.1","localhost"].includes(jwksUrl.hostname)))
