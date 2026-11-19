@@ -9,6 +9,8 @@ const expected=new Map([
   ["GET /health","public-health"],
   ["GET /v1/me","authenticated"],
   ["GET /v1/tenants/:tenantId/contracts","member"],
+  ["POST /v1/tenants/:tenantId/workspaces","role"],
+  ["GET /v1/tenants/:tenantId/workspaces/:setupId","member"],
   ["POST /v1/tenants/:tenantId/imports","role"],
   ["POST /v1/tenants/:tenantId/imports/:batchId/rows","role"],
   ["POST /v1/tenants/:tenantId/imports/:batchId/validate","role"],
@@ -25,6 +27,8 @@ test("every registered API endpoint has an explicit reviewed authorization class
     "all /v1 routes must remain behind the authentication middleware");
   assert.ok(source.includes('app.use("/v1",sessionRequired(checkIdentitySession))'),"all authenticated routes must check active session state");
   assert.ok(source.indexOf('app.use("/v1",sessionRequired(checkIdentitySession))')<source.indexOf('app.use("/v1",express.json({limit:"100kb",inflate:false}))'),"authenticate and authorize sessions before parsing request bodies");
+  const workspaceGate=source.indexOf('app.use("/v1/tenants/:tenantId/workspaces",coreWorkspaceGate())');
+  assert.ok(workspaceGate>=0&&workspaceGate<source.indexOf('app.post("/v1/tenants/:tenantId/workspaces"')&&workspaceGate<source.indexOf('app.get("/v1/tenants/:tenantId/workspaces/:setupId"'),"production workspace gate must precede both routes");
   assert.equal(routes.length,expected.size,"route inventory changed: review and classify every new endpoint");
   for(const route of routes){
     const key=`${route.method} ${route.path}`;
@@ -34,6 +38,8 @@ test("every registered API endpoint has an explicit reviewed authorization class
       assert.match(route.middleware,/\bmembership\b/,`missing tenant membership middleware: ${key}`);
     if(classification==="role"||classification==="step-up")
       assert.match(route.middleware,/\brequireRole\s*\(/,`missing role middleware: ${key}`);
+    if(key==="POST /v1/tenants/:tenantId/workspaces")
+      assert.match(route.middleware,/\brequireRole\("owner","admin"\)/,"workspace creation must be owner/admin only");
     if(classification==="step-up")assert.match(route.middleware,/\brequireRecentMfa\b/,`missing MFA middleware: ${key}`);
     if(route.path.startsWith("/v1/tenants/"))
       assert.match(route.path,/^\/v1\/tenants\/:tenantId(?:\/|$)/,`tenant route must carry explicit tenant ID: ${key}`);
