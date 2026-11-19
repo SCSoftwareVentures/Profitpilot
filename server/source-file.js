@@ -49,5 +49,15 @@ export function parseSourceFile(bytes,sourceType){
   const trimmed=value.trimStart();
   if(/^[=+@]/.test(trimmed)||(/^-/.test(trimmed)&&!/^-\d+(?:\.\d{1,2})?$/.test(trimmed)))throw new Error("Potential spreadsheet formula rejected");
  }
- return {sha256:createHash("sha256").update(bytes).digest("hex"),rows:records.map(c=>Object.fromEntries(header.map((h,i)=>[h,c[i]])))};
+ const rows=records.map(c=>Object.fromEntries(header.map((h,i)=>[h,c[i]])));
+ if(sourceType==="customer_invoice"||sourceType==="supplier_invoice"){
+  const seen=new Set();
+  for(const invoice of rows){
+   const id=invoice.invoice_id.trim();
+   if(!id)throw new Error("Invoice ID is required");
+   if(seen.has(id))throw new Error("Duplicate invoice ID within source file");
+   seen.add(id);
+  }
+ }
+ return {sha256:createHash("sha256").update(bytes).digest("hex"),rows};
 }
