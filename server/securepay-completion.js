@@ -56,11 +56,11 @@ export function createCompletionRouter({enabled=false,tenantId,subject,verifyTok
      if(!exact(body,["previousDigest","description","totalCents"])||(body.previousDigest!==null&&!/^[a-f0-9]{64}$/.test(body.previousDigest))||typeof body.description!=="string"||!body.description.trim()||body.description.length>4000||body.description.includes("\0")||!Number.isSafeInteger(body.totalCents)||body.totalCents<=0)return res.status(400).json({error:"Invalid request"});
      result=await owner.publishQuote({tenantId,jobId,...body});
     }else if(action==="offer-plan"){
-     if(!exact(body,["items"])||!Array.isArray(body.items)||body.items.length<1||body.items.length>20||body.items.some(x=>!exact(x,["milestoneId","amountCents","description","final"])||!uuid.test(x.milestoneId)||!Number.isSafeInteger(x.amountCents)||x.amountCents<=0||typeof x.description!=="string"||!x.description.trim()||x.description.length>500||x.description.includes("\0")||typeof x.final!=="boolean"))return res.status(400).json({error:"Invalid request"});
+     if(!exact(body,["items","quoteDigest"])||typeof body.quoteDigest!=="string"||!/^[a-f0-9]{64}$/.test(body.quoteDigest)||!Array.isArray(body.items)||body.items.length<1||body.items.length>20||body.items.some(x=>!exact(x,["milestoneId","amountCents","description","final"])||!uuid.test(x.milestoneId)||!Number.isSafeInteger(x.amountCents)||x.amountCents<=0||typeof x.description!=="string"||!x.description.trim()||x.description.length>500||x.description.includes("\0")||typeof x.final!=="boolean"))return res.status(400).json({error:"Invalid request"});
      // Only published customer-facing quotes can be offered through this interface.
      const current=await owner.quoteStatus({tenantId,jobId});
-     if(!current.ok||!current.view.quote)return res.status(403).json({error:"Authorization denied"});
-     result=await owner.offerPlan({tenantId,jobId,items:body.items});
+     if(!current.ok||!current.view.quote||current.view.quote.quoteDigest!==body.quoteDigest)return res.status(403).json({error:"Authorization denied"});
+     result=await owner.offerPlan({tenantId,jobId,items:body.items,quoteDigest:body.quoteDigest});
     }else{
      if(!exact(body,["planId"])||!uuid.test(body.planId))return res.status(400).json({error:"Invalid request"});
      const current=await owner.quoteStatus({tenantId,jobId});
