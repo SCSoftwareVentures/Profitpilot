@@ -12,13 +12,13 @@ export function makeWorkCompletionOwner({pool,actorId,key,scanner}){
    const {rows:[r]}=await pool.query("SELECT securepay_private.owner_contract_view($1,$2,$3,$4,$5) AS view",[...args,mac(["sp-contract-view-v1",...args])]);
    return r?.view?{ok:true,view:r.view}:{ok:false};
   },
-  async offerChange({changeId=randomUUID(),tenantId,planId,kind,milestoneId=null,newAmountCents=null,newDescription=null,reason}){
-   ids(changeId,tenantId,planId);if(!["variation","cancel_remaining"].includes(kind)||typeof reason!=="string"||reason.trim().length<10||reason.length>2000||reason.includes("\0"))throw Error("Invalid change");
+  async offerChange({changeId=randomUUID(),tenantId,planId,kind,milestoneId=null,newAmountCents=null,newDescription=null,reason,stateDigest}){
+   ids(changeId,tenantId,planId);if(typeof stateDigest!=="string"||!/^[a-f0-9]{64}$/.test(stateDigest)||!["variation","cancel_remaining"].includes(kind)||typeof reason!=="string"||reason.trim().length<10||reason.length>2000||reason.includes("\0"))throw Error("Invalid change");
    if(kind==="variation"){ids(milestoneId);if(!Number.isSafeInteger(newAmountCents)||newAmountCents<=0||typeof newDescription!=="string"||!newDescription.trim()||newDescription.length>500||newDescription.includes("\0"))throw Error("Invalid variation");}
    else if(milestoneId!==null||newAmountCents!==null||newDescription!==null)throw Error("Invalid cancellation");
-   const exp=expiry(),args=[changeId,tenantId,planId,actorId,kind,milestoneId,newAmountCents,newDescription,reason,exp];
-   const signature=mac(["sp-change-offer-v1",changeId,tenantId,planId,actorId,kind,milestoneId??"-",newAmountCents??"-",newDescription===null?"-":Buffer.from(newDescription).toString("hex"),Buffer.from(reason).toString("hex"),exp]);
-   const {rows:[r]}=await pool.query("SELECT securepay_private.offer_contract_change($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) AS change",[...args,signature]);
+   const exp=expiry(),args=[changeId,tenantId,planId,actorId,kind,milestoneId,newAmountCents,newDescription,reason,stateDigest,exp];
+   const signature=mac(["sp-change-offer-v2",changeId,tenantId,planId,actorId,kind,milestoneId??"-",newAmountCents??"-",newDescription===null?"-":Buffer.from(newDescription).toString("hex"),Buffer.from(reason).toString("hex"),stateDigest,exp]);
+   const {rows:[r]}=await pool.query("SELECT securepay_private.offer_contract_change($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS change",[...args,signature]);
    return r?.change?{ok:true,change:r.change}:{ok:false};
   },
   async withdrawChange({tenantId,planId,changeId}){
