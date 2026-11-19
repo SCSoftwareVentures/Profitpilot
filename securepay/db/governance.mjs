@@ -1,0 +1,15 @@
+import {createHmac,randomUUID} from "node:crypto";
+const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
+const ids=(...xs)=>{if(!xs.every(x=>typeof x==="string"&&uuid.test(x)))throw Error("Invalid governance scope");};
+export const independenceAttestation="No known personal, financial or professional conflict; I will disclose any change";
+export function makeGovernanceActor({pool,tenantId,actorId,key,role}){
+ ids(tenantId,actorId);if(!pool?.query||!Buffer.isBuffer(key)||key.length!==32||!["administrator","reviewer","settlement"].includes(role))throw Error("Invalid governance authority");
+ const mac=x=>createHmac("sha256",key).update(x.join(":")).digest("hex"),expiry=()=>Math.floor(Date.now()/1000)+15;
+ const query=async(fn,args,parts)=>{const values=[...args,mac(parts)];return (await pool.query("SELECT securepay_private."+fn+"("+values.map((_,i)=>"$"+(i+1)).join(",")+") AS result",values)).rows[0]?.result??null;};
+ const queue=async()=>{const args=[tenantId,actorId,expiry()];return query(role==="administrator"?"admin_queue":"governance_my_cases",args,[role==="administrator"?"sp-admin-queue-v1":"sp-governance-my-v1",...args]);};
+ const declare=async({caseId,attestation})=>{ids(caseId);if(attestation!==independenceAttestation)throw Error("Explicit independence declaration required");const exp=expiry(),args=[tenantId,caseId,actorId,attestation,exp];return {ok:await query("declare_independence",args,["sp-independence-v1",tenantId,caseId,actorId,Buffer.from(attestation).toString("hex"),exp])===true,moneyMoved:false};};
+ if(role==="administrator")return Object.freeze({queue,async action({caseId,target=null,action,reason}){ids(caseId);if(target!==null)ids(target);if(!["enroll","assign","revoke","conflict"].includes(action)||(action==="enroll")!==(target===null)||typeof reason!=="string"||reason.trim().length<10||reason.length>1000||reason.includes("\0"))throw Error("Invalid administration action");const exp=expiry(),args=[tenantId,caseId,actorId,target,action,reason,exp];return {ok:await query("admin_case_action",args,["sp-admin-case-v1",tenantId,caseId,actorId,target??"-",action,Buffer.from(reason).toString("hex"),exp])===true,moneyMoved:false};}});
+ if(role==="reviewer")return Object.freeze({queue,declare});
+ return Object.freeze({queue,declare,async read(caseId){ids(caseId);const args=[tenantId,caseId,actorId,expiry()];return query("settlement_dashboard_read",args,["sp-settlement-dashboard-v1",...args]);},
+ async authorize({caseId,payoutCents,refundCents,stateDigest,settlementId=randomUUID()}){ids(caseId,settlementId);if(![payoutCents,refundCents].every(x=>Number.isSafeInteger(x)&&x>=0)||typeof stateDigest!=="string"||!/^[a-f0-9]{64}$/.test(stateDigest))throw Error("Invalid authorization");const args=[settlementId,tenantId,caseId,actorId,payoutCents,refundCents,stateDigest,expiry()];const ok=await query("settlement_dashboard_authorize",args,["sp-settlement-dashboard-authorize-v1",...args]);return ok===true?{ok:true,moneyMoved:false,settlementId}:{ok:false,moneyMoved:false};}});
+}
