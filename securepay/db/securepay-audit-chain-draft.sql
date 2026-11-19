@@ -92,4 +92,26 @@ ALTER FUNCTION securepay_private.audit_checkpoint(uuid) OWNER TO securepay_conte
 ALTER FUNCTION securepay_private.audit_page(uuid,bigint,bigint,integer) OWNER TO securepay_context_owner;
 REVOKE ALL ON FUNCTION securepay_private.audit_checkpoint(uuid),securepay_private.audit_page(uuid,bigint,bigint,integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION securepay_private.audit_checkpoint(uuid),securepay_private.audit_page(uuid,bigint,bigint,integer) TO securepay_audit_runtime;
+CREATE OR REPLACE FUNCTION securepay_private.read_dispute_photo(p uuid,t uuid,m uuid,d uuid,a uuid,expires bigint,sig text)
+ RETURNS TABLE(media_type text,digest text,content bytea)
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE c securepay_private.dispute_cases%ROWTYPE; role_name text; record_photo securepay_private.dispute_photos%ROWTYPE; secret_key bytea; plain bytea;
+BEGIN
+ IF p IS NULL OR t IS NULL OR m IS NULL OR d IS NULL OR a IS NULL THEN RETURN; END IF;
+ role_name:=securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-photo-read-v1',p,t,m,d,a,expires),expires,sig);
+ IF role_name IS NULL OR role_name NOT IN ('owner','customer','reviewer') THEN RETURN; END IF;
+ SELECT * INTO c FROM securepay_private.dispute_cases WHERE case_id=d AND tenant_id=t AND milestone_id=m;
+ IF NOT FOUND OR (role_name='owner' AND a<>c.owner_id) OR (role_name='customer' AND a<>c.customer_id)
+ OR (role_name='reviewer' AND (a IN (c.owner_id,c.customer_id) OR NOT EXISTS(SELECT 1 FROM securepay_private.dispute_photo_reviewers v WHERE v.case_id=d AND v.tenant_id=t AND v.reviewer_id=a))) THEN RETURN; END IF;
+ SELECT q.* INTO record_photo FROM securepay_private.dispute_photos q WHERE q.photo_id=p AND q.case_id=d;
+ IF NOT FOUND THEN RETURN; END IF;
+ SELECT secret INTO secret_key FROM securepay_private.evidence_keys WHERE key_id=record_photo.key_id AND read_enabled;
+ IF secret_key IS NULL THEN RAISE EXCEPTION 'Evidence unavailable' USING ERRCODE='22000'; END IF;
+ plain:=public.pgp_sym_decrypt_bytea(record_photo.content,encode(secret_key,'hex'));
+ IF octet_length(plain)<>record_photo.plaintext_size OR encode(public.digest(plain,'sha256'),'hex')<>record_photo.digest THEN
+  RAISE EXCEPTION 'Evidence integrity failure' USING ERRCODE='22000';
+ END IF;
+ PERFORM securepay_private.append_audit_chain(t,'dispute_photos','READ',encode(public.digest(convert_to(concat_ws(':',p,d,a,record_photo.digest),'UTF8'),'sha256'),'hex'));
+ RETURN QUERY SELECT record_photo.media_type,record_photo.digest,plain;
+END $$;
 COMMIT;
