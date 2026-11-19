@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {Script,createContext} from "node:vm";
 import {createHash,randomUUID} from "node:crypto";
-import {customerPortalPage,ownerDashboardPage,customerQuotePage,ownerQuotePage,customerContractPage,ownerContractPage,customerCancellationPage,reviewerPage,disputeAdminPage,settlementAuthorizationPage,postAuthorizationPage,administratorSuccessionPage,participantPage} from "../../server/securepay-portal-page.js";
+import {customerPortalPage,ownerDashboardPage,customerQuotePage,ownerQuotePage,customerContractPage,ownerContractPage,customerCancellationPage,reviewerPage,disputeAdminPage,settlementAuthorizationPage,postAuthorizationPage,administratorSuccessionPage,participantPage,correctionAssessmentPage} from "../../server/securepay-portal-page.js";
 import {createPayerTokenVerifier} from "../../server/securepay-router.js";
 import {generateKeyPair,SignJWT} from "jose";
 function ui(page,responses){
@@ -206,4 +206,19 @@ test("owner dispute screen binds proposed decision to exact amounts and clears c
  h.get("milestone").value=m;h.get("token").value="fixture";await h.fire("load");h.get("action").value="ack";await h.fire("action","change");h.get("reason").value="Consent to exact provisional decision";h.get("confirm").checked=true;await h.fire("confirm","change");await h.fire("submit");
  assert.deepEqual(JSON.parse(h.calls[1].opts.body),{caseId,stateDigest,reason:"Consent to exact provisional decision",decisionId,payoutCents:3000,refundCents:2000});
  assert.equal(h.get("details").hidden,true);assert.equal(h.get("submit").disabled,true);
+});
+
+test("correction screen requires explicit freeze consent, exact proposed totals and no claim of recovered funds",async()=>{
+ const caseId=randomUUID(),one=randomUUID(),two=randomUUID(),correctionId=randomUUID();
+ const snapshot={originalPayoutCents:"3000",originalRefundCents:"2000",confirmedPayoutCents:"3000",confirmedRefundCents:"0",remainingCents:"2000",proposedPayoutCents:"1000",proposedRefundCents:"4000",possibleBusinessRecoveryCents:"2000",possibleCustomerRecoveryCents:"0",outstandingBusinessAllocationCents:"0",outstandingCustomerAllocationCents:"4000",safeToEndorse:true};
+ const reply=x=>({code:200,data:{mode:"sandbox",moneyMoved:false,correction:x}});
+ const h=ui(correctionAssessmentPage(),[reply({correctionId,status:"pending",snapshot}),reply({correctionId,status:"endorsed",snapshot,current:true})]);
+ for(const [k,v] of Object.entries({token:"fixture","case-ref":caseId,one,two,payout:"10",refund:"40.00",reason:"Independent proposed correction"}))h.get(k).value=v;
+ assert.equal(h.get("request").disabled,true);h.get("confirm").checked=true;await h.fire("confirm","change");assert.equal(h.get("request").disabled,false);
+ h.get("refund").value="40.001";await h.fire("request");assert.equal(h.calls.length,0);
+ h.get("refund").value="40.00";await h.fire("refund","input");assert.equal(h.get("request").disabled,true);
+ h.get("confirm").checked=true;await h.fire("confirm","change");await h.fire("request");
+ const body=JSON.parse(h.calls[0].opts.body);assert.equal(body.caseId,caseId);assert.equal(body.payoutCents,1000);assert.equal(body.refundCents,4000);
+ assert.match(h.get("message").textContent,/dispatch frozen. No money moved/);assert.equal(h.get("request").disabled,true);
+ await h.fire("read");assert.match(h.get("summary").children[4].textContent,/Possible external recovery: business AUD \$20.00/);assert.match(h.get("message").textContent,/No money moved/);
 });
