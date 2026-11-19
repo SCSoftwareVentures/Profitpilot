@@ -16,6 +16,7 @@ BEGIN
     'private.quarantine_invoice_file(uuid,uuid,text,text,bytea,bytea,bytea)',
     'private.quarantine_status(uuid,uuid)','private.session_authorized(text,bigint,bigint,text,bigint,text,text,text)',
     'private.approve_quarantine_promotion_attested(uuid,uuid,bigint,bigint,text,bigint,text,text,text)',
+    'private.site_supplier_cost_summary(uuid,uuid,uuid,date,date,uuid)',
     'private.site_payroll_summary(uuid,uuid,date,date)','private.read_calculation_summary(uuid,uuid)',
     'private.verify_security_catalog()','private.verify_startup_signing_key(text,bigint,text,text)','private.admit_actor_request(uuid)','private.lock_tenant_available(uuid)',
     'private.api_privacy_rights_case(uuid,uuid,text,text,bigint,bigint,text,bigint,text,text,text,text,text,text)',
