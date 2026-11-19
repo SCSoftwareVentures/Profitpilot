@@ -36,11 +36,11 @@ const pool=new pg.Pool({connectionString:url.href,max:8,connectionTimeoutMillis:
 const payerSigningKey=randomBytes(32);
 const recoveryKey=randomBytes(32);
 const providerKey=randomBytes(32);
-let payerPool, notificationPool, providerPool, provider, disputePool, settlementPool, escalationPool, auditPool, retentionPool, reconciliationPool, reportingPool, completionPool, reviewerPool;
+let payerPool, notificationPool, providerPool, provider, disputePool, settlementPool, escalationPool, auditPool, retentionPool, reconciliationPool, reportingPool, completionPool, reviewerPool, adminPool, settlementDashboardPool;
 const scanKey=randomBytes(32);
 const scanner=makeEvidenceScanner({key:scanKey,scan:async()=>"clean"});
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql","securepay-reporting-draft.sql","securepay-portal-draft.sql","securepay-work-completion-draft.sql","securepay-work-revision-draft.sql","securepay-payment-plan-draft.sql","securepay-quote-bridge-draft.sql","securepay-contract-changes-draft.sql","securepay-funded-cancellation-draft.sql","securepay-reviewer-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql","securepay-reporting-draft.sql","securepay-portal-draft.sql","securepay-work-completion-draft.sql","securepay-work-revision-draft.sql","securepay-payment-plan-draft.sql","securepay-quote-bridge-draft.sql","securepay-contract-changes-draft.sql","securepay-funded-cancellation-draft.sql","securepay-reviewer-draft.sql","securepay-governance-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(key_id,secret) VALUES('primary',$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(key_id,secret) VALUES('primary',$1)",[deriveCommandKey(pepper)]);
@@ -74,6 +74,8 @@ before(async()=>{
   reportingPool=await rolePool("securepay_reporting_runtime");
   completionPool=await rolePool("securepay_completion_runtime");
   reviewerPool=await rolePool("securepay_reviewer_runtime");
+  adminPool=await rolePool("securepay_dispute_admin_runtime");
+  settlementDashboardPool=await rolePool("securepay_settlement_dashboard_runtime");
   await pool.query("INSERT INTO securepay_private.evidence_scan_keys(key_id,secret) VALUES('primary',$1)",[scanKey]);
   await pool.query("INSERT INTO securepay_private.evidence_keys(key_id,secret,write_enabled) VALUES('primary',$1,true)",[randomBytes(32)]);
   await pool.query("CREATE TABLE securepay_ci_staff_only(secret text); INSERT INTO securepay_ci_staff_only VALUES ('fixture')");
@@ -82,7 +84,7 @@ before(async()=>{
   await pool.query("CREATE ROLE securepay_ci_restricted NOLOGIN NOBYPASSRLS");
   await pool.query("GRANT SELECT, INSERT, UPDATE ON securepay_milestones, securepay_release_requests, securepay_release_proofs, securepay_customer_pins, securepay_payer_identities, securepay_pin_change_grants TO securepay_ci_restricted");
 });
-after(async()=>{if(reviewerPool)await reviewerPool.end();if(completionPool)await completionPool.end();if(reportingPool)await reportingPool.end();if(reconciliationPool)await reconciliationPool.end();if(retentionPool)await retentionPool.end();if(auditPool)await auditPool.end();if(escalationPool)await escalationPool.end();if(disputePool)await disputePool.end();if(settlementPool)await settlementPool.end();if(providerPool)await providerPool.end();if(notificationPool)await notificationPool.end();if(payerPool)await payerPool.end();await pool.end();});
+after(async()=>{if(adminPool)await adminPool.end();if(settlementDashboardPool)await settlementDashboardPool.end();if(reviewerPool)await reviewerPool.end();if(completionPool)await completionPool.end();if(reportingPool)await reportingPool.end();if(reconciliationPool)await reconciliationPool.end();if(retentionPool)await retentionPool.end();if(auditPool)await auditPool.end();if(escalationPool)await escalationPool.end();if(disputePool)await disputePool.end();if(settlementPool)await settlementPool.end();if(providerPool)await providerPool.end();if(notificationPool)await notificationPool.end();if(payerPool)await payerPool.end();await pool.end();});
 async function fixture(status="approved",tenantId=randomUUID()) {
   const milestoneId=randomUUID(), customerId=randomUUID();
   await pool.query("INSERT INTO securepay_milestones(id,tenant_id,job_id,amount_cents,status) VALUES($1,$2,$3,5000,$4)",
@@ -2023,4 +2025,86 @@ test("separate reviewer HTTP service enforces distinct MFA audience, assigned ca
   assert.equal((await post("decision",cmd)).status,200);
   assert.equal((await post("authorize",{})).status,404);assert.equal((await d.approval.authorize(d.settlement)).ok,false);
  }finally{if(service)await service.close();await new Promise(r=>jwks.close(r));}
+});
+
+async function governedFixture(){
+ const {makeGovernanceActor,independenceAttestation}=await import("./governance.mjs"),{makeReviewer}=await import("./reviewer.mjs");
+ const d=await disputeFixture(),t=d.s.tenantId,caseId=d.scope.caseId;
+ const adminId=randomUUID(),key=randomBytes(32),duplicateId=randomUUID(),duplicateKey=randomBytes(32);
+ await pool.query("INSERT INTO securepay_private.dispute_actors(tenant_id,actor_id,role,secret) VALUES($1,$2,'administrator',$3),($1,$4,'reviewer',$5)",[t,adminId,key,duplicateId,duplicateKey]);
+ const roster=[d.customer,d.owner,d.reviewer,d.second,d.authorizer,{actorId:adminId}],digests=new Map();
+ for(const x of roster){const digest=randomBytes(32).toString("hex");digests.set(x.actorId,digest);await pool.query("INSERT INTO securepay_private.actor_person_registry VALUES($1,$2,$3)",[t,x.actorId,digest]);}
+ await pool.query("INSERT INTO securepay_private.actor_person_registry VALUES($1,$2,$3)",[t,duplicateId,digests.get(d.reviewer.actorId)]);
+ assert.equal((await d.call(d.customer,"open","moderate",{evidenceDigest:d.digest})).ok,true);
+ assert.equal((await evidence(d)).ok,true);
+ const admin=makeGovernanceActor({pool:adminPool,tenantId:t,actorId:adminId,key,role:"administrator"});
+ const actor=(x,role)=>makeGovernanceActor({pool:role==="reviewer"?reviewerPool:settlementDashboardPool,tenantId:t,actorId:x.actorId,key:x.key,role});
+ const first=actor(d.reviewer,"reviewer"),second=actor(d.second,"reviewer"),authorizer=actor(d.authorizer,"settlement");
+ const action=(action,target=null)=>admin.action({caseId,target,action,reason:"Documented independent case governance"});
+ const declare=actor=>actor.declare({caseId,attestation:independenceAttestation});
+ const firstReview=makeReviewer({pool:reviewerPool,tenantId:t,actorId:d.reviewer.actorId,key:d.reviewer.key});
+ const secondReview=makeReviewer({pool:reviewerPool,tenantId:t,actorId:d.second.actorId,key:d.second.key});
+ return {d,t,caseId,admin,adminId,key,duplicateId,first,second,authorizer,action,declare,firstReview,secondReview};
+}
+async function governedFinal(f){
+ const {d,caseId,action,declare,first,second,authorizer,firstReview,secondReview}=f;
+ assert.equal((await action("enroll")).ok,true);
+ for(const a of [d.reviewer,d.second,d.authorizer])assert.equal((await action("assign",a.actorId)).ok,true);
+ for(const a of [first,second,authorizer])assert.equal((await declare(a)).ok,true);
+ const decision=async(actor,action)=>{const v=await actor.read(caseId);for(const p of [...v.case.photos,...v.case.linkedPhotos])if(!p.purged)assert.ok(await actor.photo({caseId,photoId:p.photoId,source:p.source}));return actor.decide({caseId,action,reason:"Independent documented and proportionate resolution",payoutCents:3000,refundCents:2000,stateDigest:v.stateDigest});};
+ assert.equal((await decision(firstReview,"decide")).ok,true);
+ assert.equal((await d.call(d.customer,"ack","Customer accepted")).ok,true);
+ assert.equal((await d.call(d.owner,"ack","Owner accepted")).ok,true);
+ assert.equal((await decision(secondReview,"finalize")).ok,true);
+}
+test("case administration requires registered independent people, explicit declarations and immutable conflict exclusion",async()=>{
+ const f=await governedFixture(),{d,t,caseId,admin,duplicateId,first,action,declare,firstReview}=f;
+ assert.equal((await action("assign",d.reviewer.actorId)).ok,false);
+ assert.equal((await action("enroll")).ok,true);
+ assert.equal((await action("enroll")).ok,false);
+ assert.equal((await action("assign",d.customer.actorId)).ok,false);
+ assert.equal((await action("assign",d.reviewer.actorId)).ok,true);
+ assert.equal((await action("assign",duplicateId)).ok,false);
+ assert.equal((await action("assign",d.second.actorId)).ok,true);
+ assert.equal(await firstReview.read(caseId),null);
+ assert.equal((await first.queue())[0].declared,false);
+ assert.equal((await decide(d)).ok,false);
+ assert.equal((await declare(first)).ok,true);
+ assert.ok(await firstReview.read(caseId));
+ assert.equal((await action("conflict",d.reviewer.actorId)).ok,true);
+ assert.equal(await firstReview.read(caseId),null);
+ assert.equal((await decide(d)).ok,false);
+ assert.equal((await action("assign",duplicateId)).ok,false);
+ assert.equal((await declare(first)).ok,false);
+ const view=(await admin.queue()).find(x=>x.caseId===caseId);
+ assert.equal(view.assignments.find(x=>x.actorId===d.reviewer.actorId).conflict,true);
+ await assert.rejects(adminPool.query("SELECT * FROM securepay_private.actor_person_registry"),e=>e.code==="42501");
+ await assert.rejects(adminPool.query("SELECT securepay_private.authorize_settlement(NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)"),e=>e.code==="42501");
+ assert.equal((await verifyAuditChain(auditPool,t)).ok,true);
+});
+test("independent settlement dashboard uses exact final decision and freezes future dispatch on reported conflict",async()=>{
+ const f=await governedFixture(),{d,caseId,authorizer,action}=f;await governedFinal(f);
+ const v=await authorizer.read(caseId);assert.equal(v.case.independent,true);assert.equal(v.case.journalVerified,true);assert.equal(v.case.remainingCents,"5000");
+ const cmd={caseId,payoutCents:3000,refundCents:2000,stateDigest:v.stateDigest};
+ assert.equal((await authorizer.authorize({...cmd,refundCents:1999})).ok,false);
+ assert.equal((await authorizer.authorize({...cmd,stateDigest:"0".repeat(64)})).ok,false);
+ const results=await Promise.all([authorizer.authorize(cmd),authorizer.authorize(cmd)]);assert.equal(results.filter(x=>x.ok).length,1);
+ const s={...d.settlement,settlementId:results.find(x=>x.ok).settlementId};
+ assert.equal((await balanceFor(d.s)).remaining_cents,"5000");
+ const payment=await d.confirm.dispatch({...s,kind:"payout"});assert.equal(payment.ok,true);
+ assert.equal((await action("conflict",d.reviewer.actorId)).ok,true);
+ assert.equal((await d.confirm.dispatch({...s,kind:"refund"})).ok,false);
+ const receipt=await d.confirm.record({...s,...payment,outcome:"confirmed",receipt:randomUUID()});assert.equal(receipt.ok,true);
+ assert.equal((await balanceFor(d.s)).remaining_cents,"2000");
+ assert.equal((await authorizer.read(caseId)).case.independent,false);
+ await assert.rejects(settlementDashboardPool.query("SELECT * FROM securepay_private.dispute_actors"),e=>e.code==="42501");
+ await assert.rejects(settlementDashboardPool.query("SELECT * FROM securepay_private.dispatch_settlement_leg(NULL,NULL,NULL,NULL,NULL)"),e=>e.code==="42501");
+});
+test("reported reviewer conflict invalidates pending authorization and denies legacy settlement bypass",async()=>{
+ const f=await governedFixture(),{d,caseId,authorizer,action}=f;await governedFinal(f);
+ const v=await authorizer.read(caseId);
+ assert.equal((await action("conflict",d.second.actorId)).ok,true);
+ assert.equal((await authorizer.authorize({caseId,payoutCents:3000,refundCents:2000,stateDigest:v.stateDigest})).ok,false);
+ assert.equal((await d.approval.authorize(d.settlement)).ok,false);
+ assert.equal((await balanceFor(d.s)).remaining_cents,"5000");
 });
