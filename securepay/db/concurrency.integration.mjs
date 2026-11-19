@@ -13,6 +13,8 @@ import {makeSandboxProvider} from "./sandbox-provider.mjs";
 import {makeDisputeActor,makeSettlementAuthorizer,makeSettlementProvider} from "./dispute-settlement.mjs";
 import {makeRectificationActor,scanDisputeDeadlines,purgeExpiredEvidence} from "./rectification.mjs";
 import {makeEvidenceScanner,crc32,validEvidencePNG} from "./evidence-scanner.mjs";
+import {makeSharedCustomerBudget} from "./shared-budget.mjs";
+import {createHash} from "node:crypto";
 import {deflateSync} from "node:zlib";
 import {verifyAuditChain} from "./audit-chain.mjs";
 import {verifyPinCredential} from "../domain/pin-credential.mjs";
@@ -35,7 +37,7 @@ let payerPool, notificationPool, providerPool, provider, disputePool, settlement
 const scanKey=randomBytes(32);
 const scanner=makeEvidenceScanner({key:scanKey,scan:async()=>"clean"});
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(key_id,secret) VALUES('primary',$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(key_id,secret) VALUES('primary',$1)",[deriveCommandKey(pepper)]);
@@ -582,7 +584,7 @@ test("separate authority process verifies JWT and PIN; gateway has no signing ke
   PATH:process.env.PATH,NODE_ENV:"test",SECUREPAY_SANDBOX_ENABLED:"true",SECUREPAY_AUTHORITY_SOCKET:socket,
   SECUREPAY_AUTH_ISSUER:issuer,SECUREPAY_AUTH_AUDIENCE:audience,SECUREPAY_AUTH_REQUIRED_ACR:acr,
   SECUREPAY_AUTH_JWKS_URL:"http://127.0.0.1:"+jwks.address().port+"/jwks",
-  SECUREPAY_DATABASE_URL:payerPool.options.connectionString,SECUREPAY_CONTEXT_HMAC_SECRET:payerSigningKey.toString("hex"),SECUREPAY_PIN_PEPPER:pepper.toString("hex"),SECUREPAY_COMMAND_KEY:deriveCommandKey(pepper).toString("hex")
+  SECUREPAY_DATABASE_URL:payerPool.options.connectionString,SECUREPAY_CONTEXT_HMAC_SECRET:payerSigningKey.toString("hex"),SECUREPAY_PIN_PEPPER:pepper.toString("hex"),SECUREPAY_COMMAND_KEY:deriveCommandKey(pepper).toString("hex"),SECUREPAY_RATE_LIMIT_KEY:randomBytes(32).toString("hex")
  },stdio:["ignore","pipe","pipe"]});
  const stopped=new Promise(r=>child.once("exit",r));
  const app=express();app.use("/v1/securepay",createSecurePayGateway(gatewayEnv));
@@ -1025,4 +1027,53 @@ test("evidence retention requires explicit expired policy, settled case and lift
  assert.equal((await verifyAuditChain(auditPool,d.scope.tenantId)).ok,true);
  await assert.rejects(retentionPool.query("SELECT * FROM securepay_private.dispute_photos"),e=>e.code==="42501");
  await assert.rejects(disputePool.query("UPDATE securepay_private.evidence_retention_policy SET legal_hold=false"),e=>e.code==="42501");
+});
+
+test("normalized JPEG provenance is bound to original bytes and stored derivative",async()=>{
+ const d=await disputeFixture();assert.equal((await openCase(d)).ok,true);
+ // The real JPEG decoder is exercised separately against Pillow in CI.
+ const input=Buffer.from("ffd8ffe000104a4649460001010000010001ffd9","hex"),normalized=pngFixture(),scans=[];
+ const jpegScanner=makeEvidenceScanner({key:scanKey,scan:async bytes=>{scans.push(Buffer.from(bytes));return "clean";},normalizeJPEG:async()=>normalized});
+ const actor=makeRectificationActor({pool:disputePool,actorId:d.owner.actorId,key:d.owner.key,scanner:jpegScanner});
+ const scope={...d.scope,mediaType:"image/jpeg",content:input};
+ const p=await actor.storePhoto(scope);assert.equal(p.ok,true);
+ assert.deepEqual(scans,[input,normalized]);
+ const {rows:[r]}=await pool.query("SELECT media_type,digest,original_media_type,original_digest FROM securepay_private.dispute_photos WHERE photo_id=$1",[p.photoId]);
+ assert.deepEqual(r,{media_type:"image/png",digest:createHash("sha256").update(normalized).digest("hex"),original_media_type:"image/jpeg",original_digest:createHash("sha256").update(input).digest("hex")});
+ assert.deepEqual((await d.customer.repairService.readPhoto({...d.scope,photoId:p.photoId})).content,normalized);
+ const reject=makeRectificationActor({pool:disputePool,actorId:d.owner.actorId,key:d.owner.key,scanner:makeEvidenceScanner({key:scanKey,scan:async bytes=>bytes.equals(normalized)?"infected":"clean",normalizeJPEG:async()=>normalized})});
+ assert.equal((await reject.storePhoto(scope)).ok,false);
+ await assert.rejects(disputePool.query("SELECT securepay_private.store_screened_photo(NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)"),e=>e.code==="42501");
+});
+test("independent authority instances share a bounded authenticated account and global request budget",async()=>{
+ const key=randomBytes(32),issuer="https://sandbox-issuer.invalid",identity={subject:randomUUID()};
+ const a=makeSharedCustomerBudget({pool:payerPool,key,issuer}),b=makeSharedCustomerBudget({pool:payerPool,key,issuer});
+ const reset=()=>pool.query("UPDATE securepay_private.abuse_global SET window_id=0,used=0");
+ // A clock rollover is possible during CI. Repeat a boundary-crossing sample only.
+ let results;
+ for(let repeat=0;repeat<3;repeat++){
+  await reset();
+  const start=(await pool.query("SELECT floor(extract(epoch FROM clock_timestamp())/60)::bigint AS w")).rows[0].w;
+  results=await Promise.all(Array.from({length:24},(_,i)=>(i%2?a:b)(identity)));
+  const end=(await pool.query("SELECT floor(extract(epoch FROM clock_timestamp())/60)::bigint AS w")).rows[0].w;
+  if(start===end)break;
+  results=null;
+ }
+ assert.ok(results);assert.equal(results.filter(Boolean).length,20);
+ assert.equal((await pool.query("SELECT count(*)::int AS n FROM securepay_private.abuse_buckets")).rows[0].n,1);
+ assert.equal(await a({subject:""}),false);
+ // Controlled near-cap fixture demonstrates atomic global admission.
+ let globalResults;
+ for(let repeat=0;repeat<3;repeat++){
+  await pool.query("UPDATE securepay_private.abuse_global SET used=599,window_id=floor(extract(epoch FROM clock_timestamp())/60)::bigint");
+  const start=(await pool.query("SELECT window_id AS w FROM securepay_private.abuse_global")).rows[0].w;
+  globalResults=await Promise.all([a({subject:randomUUID()}),b({subject:randomUUID()})]);
+  const end=(await pool.query("SELECT window_id AS w FROM securepay_private.abuse_global")).rows[0].w;
+  if(start===end)break;
+  globalResults=null;
+ }
+ assert.ok(globalResults);assert.equal(globalResults.filter(Boolean).length,1);
+ await reset();assert.equal(await a(identity),true);
+ await assert.rejects(payerPool.query("SELECT * FROM securepay_private.abuse_buckets"),e=>e.code==="42501");
+ await assert.rejects(disputePool.query("SELECT securepay_private.take_customer_budget($1)",["a".repeat(64)]),e=>e.code==="42501");
 });
