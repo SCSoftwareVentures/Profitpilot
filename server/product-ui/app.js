@@ -17,8 +17,10 @@ function credentials(){const tenant=uid("tenant"),token=value("token").trim();if
 let reportUrls=[];
 function clearReportDownloads(){for(const url of reportUrls)URL.revokeObjectURL(url);reportUrls=[];el("report-downloads").replaceChildren();}
 function publishReportDownloads(data,run){const {report,files}=reportFiles(data,run);clearReportDownloads();try{for(const file of files){const url=URL.createObjectURL(new Blob([file.content],{type:file.type}));reportUrls.push(url);const a=make("a",file.name.endsWith(".json")?"Download audited JSON":"Download readable report");a.href=url;a.download=file.name;a.rel="noopener";el("report-downloads").append(a);}show("report-result",report);}catch(e){clearReportDownloads();throw e;}}
-for(const id of ["report-id","report-purpose"])el(id).addEventListener("change",clearReportDownloads);
-el("report-id").addEventListener("input",clearReportDownloads);
+function clearReportSelection(){clearReportDownloads();el("report-result").replaceChildren();el("report-confirm").checked=false;}
+el("report-purpose").addEventListener("change",clearReportDownloads);
+el("report-id").addEventListener("input",clearReportSelection);
+el("report-id").addEventListener("change",clearReportSelection);
 function reset(keepCredentials=false){
  clearReportDownloads();
  epoch++;controller?.abort();controller=null;session=null;records=Object.fromEntries(kinds.map(k=>[k,[]]));jobs=[];cursors={};mappings=[];currentJob=null;acceptedInvoice=null;
@@ -26,8 +28,23 @@ function reset(keepCredentials=false){
  for(const n of document.querySelectorAll(".result,.stack,#metrics,#page-note"))n.replaceChildren();
  el("workspace").hidden=true;el("session-note").textContent="Not connected.";status("Session cleared. Verify a synthetic session.");
 }
-function switchTab(tab){for(const n of document.querySelectorAll("[data-panel]"))n.hidden=n.dataset.panel!==tab;for(const n of document.querySelectorAll("[data-tab]"))n.setAttribute("aria-selected",String(n.dataset.tab===tab));}
-document.querySelectorAll("[data-tab]").forEach(n=>n.addEventListener("click",()=>switchTab(n.dataset.tab)));
+const workspaceTabs=Array.from(document.querySelectorAll("[data-tab]"));
+function switchTab(tab,focus=false){
+ const selected=workspaceTabs.find(n=>n.dataset.tab===tab);if(!selected)return;
+ for(const n of document.querySelectorAll("[data-panel]"))n.hidden=n.dataset.panel!==tab;
+ for(const n of workspaceTabs){const active=n===selected;n.setAttribute("aria-selected",String(active));n.tabIndex=active?0:-1;}
+ if(focus)selected.focus();
+}
+workspaceTabs.forEach((n,i)=>{
+ n.addEventListener("click",()=>switchTab(n.dataset.tab));
+ n.addEventListener("keydown",e=>{
+  let index;
+  if(e.key==="ArrowRight")index=(i+1)%workspaceTabs.length;
+  else if(e.key==="ArrowLeft")index=(i+workspaceTabs.length-1)%workspaceTabs.length;
+  else if(e.key==="Home")index=0;else if(e.key==="End")index=workspaceTabs.length-1;else return;
+  e.preventDefault();switchTab(workspaceTabs[index].dataset.tab,true);
+ });
+});
 for(const id of ["tenant","token"])el(id).addEventListener("input",()=>{if(session||busy)reset(true);});
 window.addEventListener("pagehide",()=>reset());
 window.addEventListener("pageshow",e=>{if(e.persisted)reset();});
@@ -131,7 +148,7 @@ async function action(name){
    case "proposal-read":{const d=await read("/payroll/proposals/"+uid("proposal-id"));set("proposal-digest",d.evidenceDigest);show("proposal-result",d);break;}
    case "proposal-confirm":confirmed("proposal-confirm");show("proposal-result",await read("/payroll/proposals/"+uid("proposal-id")+"/confirm",{confirm:true,evidenceDigest:evidence("proposal-digest")}));break;
    case "report-build":{const [periodStart,periodEnd]=range(value("report-start"),value("report-end"));report(await read("/calculations",{contractId:uid("report-contract"),siteId:uid("report-site"),periodStart,periodEnd}));break;}
-   case "report-read":report(await read("/calculations/"+uid("report-id")));break;
+   case "report-read":{clearReportSelection();const run=uid("report-id"),data=await read("/calculations/"+run);if(uid("report-id")!==run||data.id!==run)throw Error("Report selection changed.");report(data);break;}
    case "report-export":{clearReportDownloads();confirmed("report-confirm");const run=uid("report-id"),purpose=value("report-purpose"),exported=await read("/calculations/"+run+"/export",{purpose});if(uid("report-id")!==run||value("report-purpose")!==purpose)throw Error("Report selection changed; export was not retained.");publishReportDownloads(exported,run);break;}
    case "invoice-register":{
     confirmed("invoice-register-confirm");const f=el("invoice-file").files[0];if(!f||f.size<1||f.size>65536)throw Error("Choose 1–65536 byte synthetic CSV.");

@@ -14,7 +14,7 @@ test("scanned customer invoice through reviewed exact materialization and indepe
  Object.assign(jwk,{kid:"ci-sensitive",alg:"RS256",use:"sig"});
  const keys=createServer((_req,res)=>{res.setHeader("Content-Type","application/json");res.end(JSON.stringify({keys:[jwk]}));});
  await new Promise(r=>keys.listen(0,"127.0.0.1",r));
- const keyId="ci-invoice-intake",secret=randomBytes(32).toString("hex");Object.assign(process.env,{QUARANTINE_UPLOADS_ENABLED:"true",QUARANTINE_KEY_ID:keyId,QUARANTINE_ENCRYPTION_KEY:secret});
+ const keyId="ci-invoice-"+randomBytes(8).toString("hex"),secret=randomBytes(32).toString("hex");Object.assign(process.env,{QUARANTINE_UPLOADS_ENABLED:"true",QUARANTINE_KEY_ID:keyId,QUARANTINE_ENCRYPTION_KEY:secret});
  process.env.NODE_ENV="test";process.env.SYNTHETIC_SECURITY_UI_ENABLED="true";process.env.DATABASE_URL=process.env.TEST_APP_DATABASE_URL;
  process.env.AUTH_ISSUER="https://sensitive-ci.invalid/";process.env.AUTH_AUDIENCE="profitpilot-api";
  process.env.AUTH_JWKS_URL="http://127.0.0.1:"+keys.address().port+"/jwks";
@@ -185,6 +185,7 @@ test("scanned customer invoice through reviewed exact materialization and indepe
    assert.equal(exported.indicativeContribution,"0.20");assert.equal(exported.completeness,"incomplete");
    assert.equal(exported.contribution,null);assert.equal(exported.marginPercent,null);assert.deepEqual(exported.sourceTrace,trace);
    if(process.env.PROFITPILOT_CI_CHROME){const {verifyFinanceBrowser}=await import("./support/finance-browser.mjs");await verifyFinanceBrowser({base,tenant:t,token:await auth("owner"),run:first.id,traceDigest:trace.digest});}
+   if(process.env.PROFITPILOT_CI_WEBDRIVER){const {verifyFinanceWebDriver}=await import("./support/finance-webdriver.mjs");await verifyFinanceWebDriver({base,tenant:t,token:await auth("owner"),run:first.id,traceDigest:trace.digest});}
    assert.equal((await admin.query("SELECT private.verify_audit_chain($1) AS ok",[t])).rows[0].ok,true);
    console.log("Full managed workspace, scanned invoice, payroll reconciliation, independent allocation approval, exact deterministic contribution, scoped read and audited export passed");
   }finally{scanner.release();}
