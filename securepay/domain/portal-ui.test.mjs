@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {Script,createContext} from "node:vm";
 import {createHash,randomUUID} from "node:crypto";
-import {customerPortalPage,ownerDashboardPage,customerQuotePage,ownerQuotePage,customerContractPage,ownerContractPage} from "../../server/securepay-portal-page.js";
+import {customerPortalPage,ownerDashboardPage,customerQuotePage,ownerQuotePage,customerContractPage,ownerContractPage,customerCancellationPage} from "../../server/securepay-portal-page.js";
 import {createPayerTokenVerifier} from "../../server/securepay-router.js";
 import {generateKeyPair,SignJWT} from "jose";
 function ui(page,responses){
@@ -104,4 +104,17 @@ test("owner variation binds the loaded contract state digest and rejects ineligi
  await h.fire("offer");assert.equal(h.calls.length,1);
  h.get("target").value=m;await h.fire("offer");assert.equal(h.calls.length,3);
  assert.deepEqual(JSON.parse(h.calls[1].opts.body),{kind:"variation",reason:"New negotiated scope",stateDigest,milestoneId:m,newAmountCents:6000,newDescription:"New scope"});
+});
+
+test("funded cancellation customer consent resets on selection and never describes an accepted proposal as payment",async()=>{
+ const t=randomUUID(),p=randomUUID(),m=randomUUID(),o=randomUUID(),digest="a".repeat(64);
+ const offer={offerId:o,milestoneId:m,payoutCents:"500",refundCents:"1500",reason:"Agreed cancellation",offerDigest:digest,status:"offered",current:true,caseId:null,caseStatus:null,decision:null};
+ const cancellation={planId:p,stages:[{milestoneId:m,amountCents:"2000",description:"First stage",status:"planned",stateDigest:digest}],offers:[offer],confirmedCancellationRefundCents:"0"};
+ const reply=v=>({code:200,data:{mode:"sandbox",moneyMoved:false,cancellation:v}});
+ const h=ui(customerCancellationPage(),[reply(cancellation),{code:200,data:{mode:"sandbox",moneyMoved:false,status:"negotiation_opened",caseId:randomUUID()}},reply({...cancellation,offers:[{...offer,status:"accepted",current:false}]})]);
+ h.get("tenant").value=t;h.get("plan").value=p;h.get("token").value="fixture";await h.fire("load");
+ h.get("agree").checked=true;await h.fire("agree","change");assert.equal(h.get("accept").disabled,true);
+ h.get("offer-ref").value=o;await h.fire("offer-ref","input");assert.equal(h.get("agree").checked,false);assert.equal(h.get("accept").disabled,true);
+ h.get("agree").checked=true;await h.fire("agree","change");assert.equal(h.get("accept").disabled,false);
+ await h.fire("accept");assert.deepEqual(JSON.parse(h.calls[1].opts.body),{offerId:o,offerDigest:digest,payoutCents:500,refundCents:1500});assert.match(h.get("message").textContent,/No payment moved/);assert.equal(h.get("confirmed").textContent,"AUD $0.00");
 });
