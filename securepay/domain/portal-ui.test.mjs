@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {Script,createContext} from "node:vm";
 import {createHash,randomUUID} from "node:crypto";
-import {customerPortalPage,ownerDashboardPage,customerQuotePage,ownerQuotePage,customerContractPage,ownerContractPage,customerCancellationPage,reviewerPage,disputeAdminPage,settlementAuthorizationPage} from "../../server/securepay-portal-page.js";
+import {customerPortalPage,ownerDashboardPage,customerQuotePage,ownerQuotePage,customerContractPage,ownerContractPage,customerCancellationPage,reviewerPage,disputeAdminPage,settlementAuthorizationPage,postAuthorizationPage} from "../../server/securepay-portal-page.js";
 import {createPayerTokenVerifier} from "../../server/securepay-router.js";
 import {generateKeyPair,SignJWT} from "jose";
 function ui(page,responses){
@@ -157,4 +157,22 @@ test("reassessment screen requires second administrator and exact current reques
  h.get("request-ref").value=requestId;h.get("reassess-op").value="approve";h.get("reassess-reason").value="Independent verification of request";await h.fire("reassess");assert.equal(h.calls.length,2);
  await h.fire("load-reassessments");await h.fire("reassess");assert.deepEqual(JSON.parse(h.calls[3].opts.body),{caseId,requestId,stateDigest,action:"approve",reason:"Independent verification of request"});
  assert.match(h.get("message").textContent,/No payment moved/);
+});
+
+test("post-authorisation reviewer requires exact financial snapshot, evidence retrieval and explicit consent",async()=>{
+ const caseId=randomUUID(),reviewId=randomUUID(),photoId=randomUUID(),digest="a".repeat(64),stateDigest="b".repeat(64),review={caseId,reviewId,status:"pending",reason:"New independent panel",payoutCents:"3000",refundCents:"2000",confirmedPayoutCents:"3000",confirmedRefundCents:"0",remainingCents:"2000",fundingStatus:"funded",journalVerified:true,panelCleared:true,safeToReaffirm:true,legs:[],events:[],photos:[{photoId,digest,purged:false,source:"dispute"}],linkedPhotos:[]};
+ const response=x=>({code:200,data:{mode:"sandbox",moneyMoved:false,...x}});
+ const h=ui(postAuthorizationPage("reviewer"),[response({postAuth:{review,stateDigest,votes:[]}}),response({photo:{photoId,digest,content:"aGVsbG8="}}),response({status:"review_recorded"})]);
+ h.get("case-ref").value=caseId;h.get("token").value="fixture";h.get("outcome").value="reaffirm";await h.fire("load");
+ h.get("confirm").checked=true;await h.fire("confirm","change");assert.equal(h.get("vote").disabled,true);
+ await h.fire("load-photos");assert.equal(h.get("confirm").checked,false);h.get("confirm").checked=true;await h.fire("confirm","change");assert.equal(h.get("vote").disabled,false);
+ h.get("vote-reason").value="Reviewed exact remaining allocation and photos";await h.fire("vote");
+ assert.deepEqual(JSON.parse(h.calls[2].opts.body),{caseId,reviewId,stateDigest,outcome:"reaffirm",reason:"Reviewed exact remaining allocation and photos"});assert.match(h.get("message").textContent,/No payment moved/);
+});
+test("post-authorisation authoriser cannot reaffirm until both independent reviewers approve current state",async()=>{
+ const caseId=randomUUID(),reviewId=randomUUID(),digest="c".repeat(64),review={caseId,reviewId,status:"pending",reason:"Independent panel",payoutCents:"3000",refundCents:"2000",confirmedPayoutCents:"0",confirmedRefundCents:"0",remainingCents:"5000",fundingStatus:"funded",journalVerified:true,panelCleared:true,safeToReaffirm:true,legs:[],events:[],photos:[],linkedPhotos:[]};
+ const response=x=>({code:200,data:{mode:"sandbox",moneyMoved:false,...x}}),v={stage:"reviewer",outcome:"reaffirm",reason:"Independent review"};
+ const h=ui(postAuthorizationPage("settlement"),[response({postAuth:{review,stateDigest:digest,votes:[v]}}),response({postAuth:{review,stateDigest:digest,votes:[v,v]}})]);
+ h.get("case-ref").value=caseId;h.get("token").value="fixture";h.get("outcome").value="reaffirm";await h.fire("load");h.get("confirm").checked=true;await h.fire("confirm","change");assert.equal(h.get("vote").disabled,true);
+ await h.fire("load");h.get("confirm").checked=true;await h.fire("confirm","change");assert.equal(h.get("vote").disabled,false);
 });
