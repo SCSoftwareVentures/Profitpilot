@@ -45,6 +45,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
+      SECUREPAY_CI_REPORT_EXPORT: "true"
       SECUREPAY_TEST_DATABASE: securepay_ci
       SECUREPAY_TEST_DATABASE_URL: postgresql://securepay_ci:disposable-ci-password@127.0.0.1:5432/securepay_ci
     steps:
@@ -55,6 +56,13 @@ jobs:
       - run: npm install --ignore-scripts --no-audit --no-fund
       - name: Test real PostgreSQL concurrency and rollback
         run: node --test securepay/db/concurrency.integration.mjs
+      - name: Publish synthetic buyer reporting demonstration
+        uses: actions/upload-artifact@v4
+        with:
+          name: securepay-report-demo
+          path: securepay-ci-report/
+          if-no-files-found: error
+          retention-days: 7
   evidence-engines:
     runs-on: ubuntu-latest
     timeout-minutes: 10
