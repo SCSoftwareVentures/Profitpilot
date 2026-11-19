@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import {mkdtempSync,writeFileSync,readFileSync,rmSync,symlinkSync} from "node:fs";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
-import {buildManifest,verifyManifest,FILES} from "../scripts/release-candidate-manifest.js";
-const meta={repository:"luxhustle01-ux/Profitpilot",commit:"a".repeat(40),runId:"123",runAttempt:"1",platform:"linux/amd64",apiImage:"sha256:"+"a".repeat(64),databaseImage:"sha256:"+"b".repeat(64)};
+import {buildManifest,verifyManifest,FILES,expectedRepository} from "../scripts/release-candidate-manifest.js";
+const meta={repository:expectedRepository(),commit:"a".repeat(40),runId:"123",runAttempt:"1",platform:"linux/amd64",apiImage:"sha256:"+"a".repeat(64),databaseImage:"sha256:"+"b".repeat(64)};
 const expected={repository:meta.repository,commit:meta.commit,runId:meta.runId,runAttempt:meta.runAttempt};
 function fixture(){
  const dir=mkdtempSync(join(tmpdir(),"pp-candidate-"));const put=(name,data)=>writeFileSync(join(dir,name),typeof data==="string"?data:JSON.stringify(data));
@@ -35,4 +35,14 @@ test("missing scanner evidence, mismatched image ID, high vulnerability and miss
   f.put("api-scan.json",f.scan(meta.apiImage));f.put("sbom.json",{bomFormat:"CycloneDX",components:[]});
   await assert.rejects(()=>buildManifest(f.dir,meta),/SBOM/);
  }finally{f.dispose();}
+});
+
+test("release repository identity survives account renames",()=>{
+ const ci={GITHUB_ACTIONS:"true",GITHUB_REPOSITORY_ID:"1459605816",GITHUB_REPOSITORY_OWNER_ID:"355722999",GITHUB_REPOSITORY:"renamed-owner/Profitpilot"};
+ assert.equal(expectedRepository(ci),ci.GITHUB_REPOSITORY);
+ assert.equal(expectedRepository({...ci,GITHUB_REPOSITORY_ID:"123"}),"luxhustle01-ux/Profitpilot");
+ assert.equal(expectedRepository({...ci,GITHUB_REPOSITORY_OWNER_ID:"123"}),"luxhustle01-ux/Profitpilot");
+ assert.equal(expectedRepository({PROFITPILOT_EXPECTED_REPOSITORY:ci.GITHUB_REPOSITORY}),ci.GITHUB_REPOSITORY);
+ assert.throws(()=>expectedRepository({...ci,GITHUB_REPOSITORY:"renamed-owner/Unrelated"}));
+ assert.throws(()=>expectedRepository({...ci,GITHUB_REPOSITORY:""}));
 });

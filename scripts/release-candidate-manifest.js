@@ -7,9 +7,19 @@ export const FILES=["api-image.tar.gz","api-scan.json","database-image.tar.gz","
 const SHA=/^[0-9a-f]{64}$/,COMMIT=/^[0-9a-f]{40}$/,IMAGE=/^sha256:[0-9a-f]{64}$/;
 const exact=(v,keys)=>v!==null&&typeof v==="object"&&!Array.isArray(v)&&Object.keys(v).length===keys.length&&keys.every(k=>Object.hasOwn(v,k));
 const MAX_FILE=1024*1024*1024,MAX_JSON=32*1024*1024;
+const LEGACY_REPOSITORY="luxhustle01-ux/Profitpilot";
+export function expectedRepository(env=process.env){
+ let repo;
+ if(env.GITHUB_ACTIONS==="true"){
+  if(env.GITHUB_REPOSITORY_ID!=="1459605816"||env.GITHUB_REPOSITORY_OWNER_ID!=="355722999")return LEGACY_REPOSITORY;
+  repo=env.GITHUB_REPOSITORY;
+ }else repo=env.PROFITPILOT_EXPECTED_REPOSITORY??LEGACY_REPOSITORY;
+ if(typeof repo!=="string"||!(/^[A-Za-z0-9-]{1,39}\/Profitpilot$/i).test(repo))throw Error("Invalid expected ProfitPilot repository identity");
+ return repo;
+}
 function metadata(value){
  if(!exact(value,["repository","commit","runId","runAttempt","platform","apiImage","databaseImage"])||
- value.repository!=="luxhustle01-ux/Profitpilot"||typeof value.commit!=="string"||!COMMIT.test(value.commit)||
+ value.repository!==expectedRepository()||typeof value.commit!=="string"||!COMMIT.test(value.commit)||
  typeof value.runId!=="string"||!/^[1-9]\d{0,19}$/.test(value.runId)||
  typeof value.runAttempt!=="string"||!/^[1-9]\d{0,5}$/.test(value.runAttempt)||
  value.platform!=="linux/amd64"||typeof value.apiImage!=="string"||!IMAGE.test(value.apiImage)||
