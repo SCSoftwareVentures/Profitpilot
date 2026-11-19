@@ -2071,6 +2071,7 @@ test("case administration requires registered independent people, explicit decla
  assert.equal((await decide(d)).ok,false);
  assert.equal((await declare(first)).ok,true);
  assert.ok(await firstReview.read(caseId));
+ assert.equal((await decide(d)).ok,false,"Governed reviewer cannot bypass dashboard snapshot and photo controls");
  assert.equal((await action("conflict",d.reviewer.actorId)).ok,true);
  assert.equal(await firstReview.read(caseId),null);
  assert.equal((await decide(d)).ok,false);
@@ -2084,6 +2085,7 @@ test("case administration requires registered independent people, explicit decla
 });
 test("independent settlement dashboard uses exact final decision and freezes future dispatch on reported conflict",async()=>{
  const f=await governedFixture(),{d,caseId,authorizer,action}=f;await governedFinal(f);
+ assert.equal((await d.approval.authorize(d.settlement)).ok,false,"Governed authorizer cannot bypass snapshot control");
  const v=await authorizer.read(caseId);assert.equal(v.case.independent,true);assert.equal(v.case.journalVerified,true);assert.equal(v.case.remainingCents,"5000");
  const cmd={caseId,payoutCents:3000,refundCents:2000,stateDigest:v.stateDigest};
  assert.equal((await authorizer.authorize({...cmd,refundCents:1999})).ok,false);
@@ -2107,4 +2109,34 @@ test("reported reviewer conflict invalidates pending authorization and denies le
  assert.equal((await authorizer.authorize({caseId,payoutCents:3000,refundCents:2000,stateDigest:v.stateDigest})).ok,false);
  assert.equal((await d.approval.authorize(d.settlement)).ok,false);
  assert.equal((await balanceFor(d.s)).remaining_cents,"5000");
+});
+
+test("separate administrator and authorizer MFA services enforce mutual role isolation and exact authorization",async()=>{
+ const {startGovernanceService}=await import("../../server/securepay-governance.js"),{generateKeyPair,exportJWK,SignJWT}=await import("jose"),{createServer}=await import("node:http");
+ const f=await governedFixture();await governedFinal(f);
+ const {d,t,caseId,adminId,key}=f,{privateKey,publicKey}=await generateKeyPair("ES256"),jwk=await exportJWK(publicKey);jwk.kid="governance";jwk.alg="ES256";
+ const jwks=createServer((q,r)=>{r.setHeader("content-type","application/json");r.end(JSON.stringify({keys:[jwk]}));});await new Promise(r=>jwks.listen(0,"127.0.0.1",r));
+ const issuer="https://governance-fixture.invalid",acr="governance-mfa",base={NODE_ENV:"test",SECUREPAY_GOVERNANCE_SANDBOX_ENABLED:"true",SECUREPAY_GOVERNANCE_PORT:"0",SECUREPAY_GOVERNANCE_ISSUER:issuer,SECUREPAY_GOVERNANCE_REQUIRED_ACR:acr,SECUREPAY_GOVERNANCE_JWKS_URL:"http://127.0.0.1:"+jwks.address().port+"/jwks",SECUREPAY_AUTH_AUDIENCE:"securepay-payer",SECUREPAY_OWNER_AUDIENCE:"securepay-owner",SECUREPAY_COMPLETION_AUDIENCE:"securepay-completion",SECUREPAY_REVIEWER_AUDIENCE:"securepay-reviewer",SECUREPAY_ADMINISTRATOR_AUDIENCE:"securepay-admin",SECUREPAY_SETTLEMENT_AUDIENCE:"securepay-settlement",SECUREPAY_GOVERNANCE_TENANT_ID:t};
+ const env=(role,subject,actorId,key,pool)=>({...base,SECUREPAY_GOVERNANCE_ROLE:role,SECUREPAY_GOVERNANCE_AUDIENCE:role==="administrator"?"securepay-admin":"securepay-settlement",SECUREPAY_GOVERNANCE_SUBJECT:subject,SECUREPAY_GOVERNANCE_ACTOR_ID:actorId,SECUREPAY_GOVERNANCE_ACTOR_KEY:key.toString("hex"),SECUREPAY_GOVERNANCE_DATABASE_URL:pool.options.connectionString});
+ const adminEnv=env("administrator","case-admin",adminId,key,adminPool),settlementEnv=env("settlement","settlement-authorizer",d.authorizer.actorId,d.authorizer.key,settlementDashboardPool);
+ let a,b;
+ try{
+  await assert.rejects(startGovernanceService({...adminEnv,SECUREPAY_GOVERNANCE_AUDIENCE:"securepay-settlement"}),/configuration incomplete/);
+  await assert.rejects(startGovernanceService({...adminEnv,SECUREPAY_GOVERNANCE_DATABASE_URL:settlementDashboardPool.options.connectionString}),/Incorrect governance role/);
+  a=await startGovernanceService(adminEnv);b=await startGovernanceService(settlementEnv);
+  const token=(aud,sub)=>new SignJWT({acr,auth_time:Math.floor(Date.now()/1000)}).setProtectedHeader({alg:"ES256",kid:"governance"}).setIssuer(issuer).setAudience(aud).setSubject(sub).setIssuedAt().setExpirationTime("5m").sign(privateKey);
+  const adminToken=await token("securepay-admin","case-admin"),settleToken=await token("securepay-settlement","settlement-authorizer");
+  const url=x=>"http://127.0.0.1:"+x.server.address().port+"/v1/securepay-governance";
+  const post=(x,route,body,bearer)=>fetch(url(x)+"/"+route,{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+bearer},body:JSON.stringify(body)});
+  assert.equal((await fetch(url(a)+"/dashboard")).status,200);assert.equal((await fetch(url(b)+"/dashboard")).status,200);
+  assert.equal((await post(a,"queue",{},settleToken)).status,401);assert.equal((await post(b,"queue",{},adminToken)).status,401);
+  assert.equal((await post(a,"authorize",{},adminToken)).status,404);assert.equal((await post(b,"action",{},settleToken)).status,404);
+  const q=await post(a,"queue",{},adminToken);assert.equal(q.status,200);assert.equal((await q.json()).cases[0].governed,true);
+  const read=await post(b,"read",{caseId},settleToken);assert.equal(read.status,200);const {review}=await read.json();
+  const cmd={caseId,payoutCents:3000,refundCents:2000,stateDigest:review.stateDigest};
+  assert.equal((await post(b,"authorize",{...cmd,refundCents:1999},settleToken)).status,403);
+  const authorized=await post(b,"authorize",cmd,settleToken);assert.equal(authorized.status,200);assert.equal((await authorized.json()).moneyMoved,false);
+  assert.equal((await post(b,"authorize",cmd,settleToken)).status,403);
+  assert.equal((await balanceFor(d.s)).remaining_cents,"5000");
+ }finally{if(a)await a.close();if(b)await b.close();await new Promise(r=>jwks.close(r));}
 });
