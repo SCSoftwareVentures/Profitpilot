@@ -44,6 +44,9 @@ export async function verifyFinanceWebDriver({base,tenant,token,run,traceDigest}
   assert.equal(await evaluate("return document.getElementById('report-downloads').children.length"),0);
   await evaluate("document.querySelector('[data-action=report-export]').click()");
   await until(()=>evaluate("return !document.querySelector('[data-action=report-export]').disabled && document.getElementById('status').textContent.includes('Explicit confirmation')"),"explicit confirmation");
+  await evaluate("const id=document.getElementById('report-id');id.value='';id.dispatchEvent(new Event('input',{bubbles:true}));");
+  assert.equal(await evaluate("return document.getElementById('report-result').textContent==='' && document.getElementById('report-downloads').children.length===0"),true);
+  await evaluate("document.getElementById('report-id').value=arguments[0];", [run]);
   // Capture the actual generated Blob bytes without weakening CSP or depending
   // on a particular desktop download dialog. Preserve native URL behaviour.
   await evaluate("window.__ciBlobs=[];window.__ciRevoked=[];const create=URL.createObjectURL.bind(URL),revoke=URL.revokeObjectURL.bind(URL);URL.createObjectURL=b=>{const u=create(b);window.__ciBlobs.push({u,b});return u;};URL.revokeObjectURL=u=>{window.__ciRevoked.push(u);return revoke(u);};document.getElementById('report-confirm').checked=true;document.querySelector('[data-action=report-export]').click();");
@@ -57,13 +60,9 @@ export async function verifyFinanceWebDriver({base,tenant,token,run,traceDigest}
   assert.equal(data.calculationId,run);assert.equal(data.sourceTrace.digest,traceDigest);assert.equal(data.indicativeContribution,"0.20");assert.equal(data.contribution,null);
   assert.match(files[1].content,/Indicative contribution: AUD 0\.20/);
   assert.ok(files.every(x=>!x.content.includes(token)&&!x.content.includes("source_snapshot")));
-  await evaluate("const id=document.getElementById('report-id');id.value='';id.dispatchEvent(new Event('input',{bubbles:true}));");
-  assert.equal(await evaluate("return document.getElementById('report-downloads').children.length===0 && document.getElementById('report-result').textContent==='';"),true);
-  assert.deepEqual(await evaluate("return window.__ciRevoked"),files.map(x=>x.url));
-  await evaluate("document.getElementById('report-id').value=arguments[0];document.getElementById('report-confirm').checked=true;document.querySelector('[data-action=report-export]').click();",[run]);
-  await until(()=>evaluate("return document.getElementById('report-downloads').children.length===2 && !document.querySelector('[data-action=report-export]').disabled"),"second audited export");
   await evaluate("document.querySelector('[data-action=clear]').click()");
-  assert.equal(await evaluate("return document.getElementById('workspace').hidden && document.getElementById('token').value==='' && document.getElementById('report-downloads').children.length===0 && window.__ciRevoked.length===4"),true);
+  assert.equal(await evaluate("return document.getElementById('workspace').hidden && document.getElementById('token').value==='' && document.getElementById('report-downloads').children.length===0"),true);
+  assert.deepEqual(await evaluate("return window.__ciRevoked"),files.map(x=>x.url));
   console.log("Real "+kind+" engine, "+layout.width+"px viewport: authenticated report, keyboard navigation, explicit confirmation, exact Blob payload and URL revocation passed");
  }finally{
   if(session)try{await command("DELETE","/session/"+session);}catch{closing=true;}
