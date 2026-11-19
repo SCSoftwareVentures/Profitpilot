@@ -247,7 +247,7 @@ export function sharedCostStepProof(t,k,s,o,input,step,identity,env=process.env,
  return [t,k,s,o,JSON.stringify(f.shares),f.evidence,scope,step,...securityWorkProof(t,o,"privileged_operation",scope,step,identity,env,now).slice(5)];
 }
 export function sharedCostStatusProof(t,k,s,o,identity,env=process.env,now=Math.floor(Date.now()/1000)){
- if(![t,s,o].every(x=>typeof x==="string"&&uuid.test(x))||!["payroll","overhead","business_overhead"].includes(k))denied();
+ if(![t,s,o].every(x=>typeof x==="string"&&uuid.test(x))||!["payroll","overhead","business_overhead","non_site_payroll"].includes(k))denied();
  const scope=createHash("sha256").update(["shared-cost-status-v1",k,s].join("\n")).digest("hex");
  return [...signedAction("profitpilot-sensitive-api-v1",[t,o,"shared_cost_status",scope],identity,env,now),k,s];
 }

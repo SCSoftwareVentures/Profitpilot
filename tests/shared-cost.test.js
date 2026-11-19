@@ -17,3 +17,5 @@ test("business overhead canonicalization binds site and contract and admits one 
  assert.equal(sharedCostFields("business_overhead",source,{shares:[shares[0],shares[0]],evidenceDigest}),null);
  assert.equal(sharedCostFields("business_overhead",source,{shares:[[null,contract,base,"0.01"]],evidenceDigest}),null);
 });
+
+test("non-site payroll uses ordered site contract baseline targets without assumed business origin",()=>{const source=randomUUID(),site=randomUUID(),contract=randomUUID(),base=randomUUID();const f=sharedCostFields("non_site_payroll",source,{shares:[[site,contract,base,"0.10"],[null,null,null,"0.10"]],evidenceDigest:"c".repeat(64)});assert.equal(f.canonical.split("\n").at(-1),"~,~,~,0.10");assert.equal(sharedCostFields("non_site_payroll",source,{shares:[[contract,base,"0.20"]],evidenceDigest:"c".repeat(64)}),null);});

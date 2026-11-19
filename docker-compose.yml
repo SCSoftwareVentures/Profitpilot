@@ -97,6 +97,7 @@ services:
       - ./database/migrations/079_reviewed_invoice_credits.sql:/docker-entrypoint-initdb.d/081-reviewed-invoice-credits.sql:ro
       - ./database/migrations/080_invoice_credit_reversals.sql:/docker-entrypoint-initdb.d/082-invoice-credit-reversals.sql:ro
       - ./database/migrations/081_shared_overhead_credits.sql:/docker-entrypoint-initdb.d/083-shared-overhead-credits.sql:ro
+      - ./database/migrations/082_non_site_payroll_allocation.sql:/docker-entrypoint-initdb.d/084-non-site-payroll-allocation.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
