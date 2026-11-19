@@ -26,7 +26,7 @@ CREATE TABLE securepay_private.settlement_leg_events(
 CREATE TABLE securepay_private.settlement_leg_conflicts(
  event_id uuid PRIMARY KEY REFERENCES securepay_private.settlement_leg_events(event_id),
  case_id uuid NOT NULL REFERENCES securepay_private.dispute_cases(case_id),
- reason text NOT NULL CHECK(reason IN ('contradictory_receipt','provider_hold')),
+ reason text NOT NULL CHECK(reason IN ('contradictory_receipt')),
  opened_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 ALTER TABLE securepay_private.settlement_legs OWNER TO securepay_context_owner;
@@ -49,6 +49,23 @@ ALTER FUNCTION securepay_private.initialize_settlement_legs() OWNER TO securepay
 REVOKE ALL ON FUNCTION securepay_private.initialize_settlement_legs() FROM PUBLIC;
 CREATE TRIGGER sp_create_settlement_legs AFTER INSERT ON securepay_private.dispute_settlements FOR EACH ROW EXECUTE FUNCTION securepay_private.initialize_settlement_legs();
 
+-- A provider hold after any attempted settlement leg blocks further dispatch.
+-- Keep the signed provider event and an independent reconciliation marker.
+CREATE FUNCTION securepay_private.flag_settlement_hold() RETURNS trigger
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+BEGIN
+ IF NEW.kind='held' AND EXISTS(
+  SELECT 1 FROM securepay_private.dispute_cases c JOIN securepay_private.settlement_legs l ON l.case_id=c.case_id
+  WHERE c.tenant_id=NEW.tenant_id AND c.milestone_id=NEW.milestone_id AND l.attempts>0
+ ) THEN
+  INSERT INTO securepay_private.provider_reconciliation(event_id,tenant_id,milestone_id,reason)
+  VALUES(NEW.event_id,NEW.tenant_id,NEW.milestone_id,'hold_after_dispatch') ON CONFLICT DO NOTHING;
+ END IF;
+ RETURN NEW;
+END $$;
+ALTER FUNCTION securepay_private.flag_settlement_hold() OWNER TO securepay_context_owner;
+REVOKE ALL ON FUNCTION securepay_private.flag_settlement_hold() FROM PUBLIC;
+CREATE TRIGGER sp_settlement_hold AFTER INSERT ON securepay_private.provider_events FOR EACH ROW EXECUTE FUNCTION securepay_private.flag_settlement_hold();
 CREATE FUNCTION securepay_private.dispatch_settlement_leg(s uuid,t uuid,m uuid,d uuid,k text)
  RETURNS TABLE(leg_id uuid,attempt integer,amount_cents bigint)
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
