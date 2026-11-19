@@ -4,6 +4,7 @@ import rateLimit from "express-rate-limit";
 import pg from "pg";
 import {createRemoteJWKSet,jwtVerify} from "jose";
 import {makePayerService} from "../securepay/domain/payer-service.mjs";
+import {createRecoveryVerifier} from "../securepay/db/recovery-grant.mjs";
 
 // Require a distinct customer audience and recently verified MFA assurance.
 export function createPayerTokenVerifier({issuer,audience,requiredAcr,keyResolver,clock=()=>Math.floor(Date.now()/1000)}){
@@ -47,12 +48,14 @@ export function createSecurePayRouter({enabled=false,verifyToken,service}={}){
       mode:"sandbox",status:"reserved",releaseRequestId:result.releaseRequestId,
       milestoneId:result.milestoneId,amountCents:String(result.amountCents),moneyMoved:false
    });
+   if(result.grantRef)return res.status(201).json({mode:"sandbox",status:"grant_issued",grantRef:result.grantRef});
    return res.status(200).json({mode:"sandbox",status:"pin_updated"});
   }catch(e){
    const status=e.status===400?400:e.code==="23505"?409:e.message==="Payer context denied"?403:503;
    return res.status(status).json({error:status===400?"Invalid request":status===409?"Conflicting request":status===403?"Authorization denied":"SecurePay unavailable"});
   }
  };
+ router.post("/tenants/:tenantId/pin/grant",handle(req=>service.issueGrant({identity:req.payerIdentity,tenantId:req.params.tenantId,body:req.body})));
  router.post("/tenants/:tenantId/pin",handle(req=>service.setPin({identity:req.payerIdentity,tenantId:req.params.tenantId,body:req.body})));
  router.post("/tenants/:tenantId/milestones/:milestoneId/reserve",handle(req=>service.reserve({identity:req.payerIdentity,tenantId:req.params.tenantId,milestoneId:req.params.milestoneId,body:req.body})));
  router.use((err,req,res,next)=>res.status(err.type==="entity.too.large"?413:400).json({error:"Invalid request"}));
@@ -72,6 +75,19 @@ export function createSecurePayRouterFromEnv(env=process.env){
  if(jwksUrl.protocol!=="https:"&&!(env.NODE_ENV==="test"&&jwksUrl.protocol==="http:"&&["127.0.0.1","localhost"].includes(jwksUrl.hostname)))
   throw new Error("SecurePay JWKS requires HTTPS");
  const pool=new pg.Pool({connectionString:databaseUrl,max:4,connectionTimeoutMillis:5000,statement_timeout:10000,ssl:env.SECUREPAY_DATABASE_SSL==="true"?{rejectUnauthorized:true}:false});
- const service=makePayerService({pool,signingKey:Buffer.from(env.SECUREPAY_CONTEXT_HMAC_SECRET,"hex"),pepper:Buffer.from(env.SECUREPAY_PIN_PEPPER,"hex")});
+ const recovery={};
+ if(env.SECUREPAY_RECOVERY_ENABLED==="true"){
+  const recoveryAudience=env.SECUREPAY_RECOVERY_AUDIENCE, recoveryAcr=env.SECUREPAY_RECOVERY_REQUIRED_ACR;
+  const recoveryJwks=new URL(env.SECUREPAY_RECOVERY_JWKS_URL||"");
+  const recoveryIssuer=env.SECUREPAY_RECOVERY_ISSUER;
+  if(!recoveryIssuer||!recoveryAudience||recoveryAudience===audience||recoveryAudience===env.AUTH_AUDIENCE||!recoveryAcr||
+     !hex.test(env.SECUREPAY_RECOVERY_KEY??"")||
+     [env.SECUREPAY_CONTEXT_HMAC_SECRET,env.SECUREPAY_PIN_PEPPER,env.TENANT_CONTEXT_HMAC_SECRET].some(k=>k?.toLowerCase()===env.SECUREPAY_RECOVERY_KEY.toLowerCase())||
+     (recoveryJwks.protocol!=="https:"&&!(env.NODE_ENV==="test"&&recoveryJwks.protocol==="http:"&&["127.0.0.1","localhost"].includes(recoveryJwks.hostname))))
+   throw new Error("SecurePay recovery configuration incomplete");
+  recovery.recoveryKey=Buffer.from(env.SECUREPAY_RECOVERY_KEY,"hex");
+  recovery.verifyRecovery=createRecoveryVerifier({issuer:recoveryIssuer,audience:recoveryAudience,requiredAcr:recoveryAcr,keyResolver:createRemoteJWKSet(recoveryJwks)});
+ }
+ const service=makePayerService({pool,signingKey:Buffer.from(env.SECUREPAY_CONTEXT_HMAC_SECRET,"hex"),pepper:Buffer.from(env.SECUREPAY_PIN_PEPPER,"hex"),...recovery});
  return createSecurePayRouter({enabled:true,service,verifyToken:createPayerTokenVerifier({issuer,audience,requiredAcr,keyResolver:createRemoteJWKSet(jwksUrl)})});
 }
