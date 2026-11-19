@@ -7,6 +7,7 @@ import {authorizeWithPin,authorizePayerInTransaction} from "./authorize-with-pin
 import {changePin,resolvePayer} from "./change-pin.mjs";
 import {withPayer} from "./with-payer.mjs";
 import {deriveCommandKey,reserveSigned,changePinSigned} from "./signed-commands.mjs";
+import {createRecoveryVerifier,issueRecoveryGrant} from "./recovery-grant.mjs";
 import {verifyPinCredential} from "../domain/pin-credential.mjs";
 import {readFile} from "node:fs/promises";
 import pg from "pg";
@@ -21,12 +22,14 @@ if(url.pathname!=="/securepay_ci"||!["localhost","127.0.0.1"].includes(url.hostn
 const pool=new pg.Pool({connectionString:url.href,max:8,connectionTimeoutMillis:5000,
   statement_timeout:10000});
 const payerSigningKey=randomBytes(32);
+const recoveryKey=randomBytes(32);
 let payerPool;
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(singleton,secret) VALUES(true,$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(singleton,secret) VALUES(true,$1)",[deriveCommandKey(pepper)]);
+  await pool.query("INSERT INTO securepay_private.recovery_key(singleton,secret) VALUES(true,$1)",[recoveryKey]);
   const password=randomBytes(32).toString("hex");
   await pool.query("ALTER ROLE securepay_payer_runtime LOGIN PASSWORD '"+password+"'");
   const payerUrl=new URL(url);payerUrl.username="securepay_payer_runtime";payerUrl.password=password;
@@ -374,4 +377,53 @@ test("signed database commands reject counterfeit authority and stale credential
  assert.equal((await asPayer(s,c=>authorizePayerInTransaction(c,{...s,expectedAmountCents:5000,requestId:randomUUID(),idempotencyKey:randomUUID()},pepper))).ok,true);
  assert.equal((await asPayer(s,c=>reserveSigned(c,args,pepper))).ok,false);
  assert.equal((await state(s)).requests,1);
+});
+
+test("dedicated step-up tokens bind payer, tenant, operation and recent MFA; grant replay is atomic",async()=>{
+ const {generateKeyPair,SignJWT}=await import("jose");
+ const {makePayerService}=await import("../domain/payer-service.mjs");
+ const s=await identityFixture();
+ const {publicKey,privateKey}=await generateKeyPair("ES256");
+ const issuer="https://recovery.invalid/",audience="securepay-recovery",requiredAcr="recovery-mfa";
+ const verifyRecovery=createRecoveryVerifier({issuer,audience,requiredAcr,keyResolver:async()=>publicKey});
+ const svc=makePayerService({pool:payerPool,signingKey:payerSigningKey,pepper,recoveryKey,verifyRecovery});
+ const now=Math.floor(Date.now()/1000),jti=randomUUID();
+ const token=async({sub=s.subject,aud=audience,tenant=s.tenantId,purpose="securepay-pin-enroll",acr=requiredAcr,auth=now,id=jti}={})=>
+  new SignJWT({tenant_id:tenant,purpose,acr,auth_time:auth}).setProtectedHeader({alg:"ES256"})
+  .setIssuer(issuer).setAudience(aud).setSubject(sub).setJti(id).setIssuedAt().setExpirationTime("2m").sign(privateKey);
+ const call=(stepUpToken,purpose="enroll")=>svc.issueGrant({identity:{subject:s.subject},tenantId:s.tenantId,body:{purpose,stepUpToken}});
+ for(const options of [{aud:"securepay-customer"},{sub:"another"},{tenant:randomUUID()},{purpose:"securepay-pin-recover"},{acr:"weak"},{auth:now-180}]){
+  assert.equal((await call(await token(options))).ok,false);
+ }
+ const bearer=await token();
+ const results=await Promise.all([call(bearer),call(bearer)]);
+ assert.equal(results.filter(r=>r.ok).length,1);
+ const g=results.find(r=>r.ok);
+ assert.equal((await svc.setPin({identity:{subject:s.subject},tenantId:s.tenantId,body:{pin:s.pin,purpose:"enroll",grantRef:g.grantRef}})).ok,true);
+ const recovery=await call(await token({id:randomUUID(),purpose:"securepay-pin-recover"}),"recover");
+ assert.equal(recovery.ok,true);
+ assert.equal((await svc.setPin({identity:{subject:s.subject},tenantId:s.tenantId,body:{pin:"654321",purpose:"recover",grantRef:recovery.grantRef}})).ok,true);
+ assert.equal((await call(bearer)).ok,false);
+});
+test("recovery issuer key is inaccessible; ordinary signing authority cannot mint grants",async()=>{
+ const s=await identityFixture(), assertion={digest:randomBytes(32).toString("hex"),expires:Math.floor(Date.now()/1000)+60};
+ assert.equal((await asPayer(s,c=>issueRecoveryGrant(c,{...s,purpose:"enroll",assertion},deriveCommandKey(pepper)))).ok,false);
+ await assert.rejects(asPayer(s,c=>c.query("SELECT secret FROM securepay_private.recovery_key")),e=>e.code==="42501");
+ await assert.rejects(asPayer(s,c=>c.query("DELETE FROM securepay_private.recovery_assertions")),e=>e.code==="42501");
+ assert.equal((await asPayer(s,c=>issueRecoveryGrant(c,{...s,purpose:"enroll",assertion},recoveryKey))).ok,true);
+ assert.equal((await asPayer(s,c=>issueRecoveryGrant(c,{...s,purpose:"enroll",assertion},recoveryKey))).ok,false);
+});
+test("audit ledger records PIN failures and reservation atomically; payer cannot alter or inspect it",async()=>{
+ const s=await identityFixture();
+ await pool.query("UPDATE securepay_milestones SET payer_customer_id=$2 WHERE id=$1",[s.milestoneId,s.customerId]);
+ const g=await changeGrant(s);
+ assert.equal((await asPayer(s,c=>changePin(c,g,pepper))).ok,true);
+ const scope={...s,expectedAmountCents:5000,requestId:randomUUID(),idempotencyKey:randomUUID()};
+ assert.equal((await asPayer(s,c=>authorizePayerInTransaction(c,{...scope,pin:"999999"},pepper))).ok,false);
+ const good=await asPayer(s,c=>authorizePayerInTransaction(c,scope,pepper));assert.equal(good.ok,true);
+ const {rows}=await pool.query("SELECT event_type,amount_cents,failure_count FROM securepay_private.audit_events WHERE tenant_id=$1 AND customer_id=$2 ORDER BY event_id",[s.tenantId,s.customerId]);
+ assert.deepEqual(rows.map(r=>r.event_type),["grant_issued","grant_consumed","pin_enrolled","pin_failure","pin_counter_reset","release_reserved"]);
+ assert.equal(rows[3].failure_count,1);assert.equal(rows[5].amount_cents,"5000");
+ await assert.rejects(asPayer(s,c=>c.query("SELECT * FROM securepay_private.audit_events")),e=>e.code==="42501");
+ await assert.rejects(asPayer(s,c=>c.query("DELETE FROM securepay_private.audit_events")),e=>e.code==="42501");
 });
