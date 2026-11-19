@@ -1,7 +1,7 @@
 import {createHmac,createHash,randomBytes} from "node:crypto";
 import {hasRecentMfa} from "./auth.js";
 import {invoiceIntakeFields} from "../src/invoice-intake.js";
-import {invoiceCreditFields,invoiceCreditReversalFields} from "../src/invoice-credit.js";
+import {invoiceCreditFields,invoiceCreditReversalFields,sharedInvoiceCreditFields} from "../src/invoice-credit.js";
 import {supplierCostFields} from "../src/supplier-cost.js";
 import {sharedCostFields,sharedCostCorrectionFields} from "../src/shared-cost.js";
 import {workspaceJobFields} from "../src/workspace-jobs.js";
@@ -279,4 +279,10 @@ export function invoiceCreditReversalProof(t,l,o,input,step,identity,env=process
  const f=invoiceCreditReversalFields(input);if(![t,l,o].every(x=>typeof x==="string"&&uuid.test(x))||!f||o===f[0])denied();
  const scope=createHash("sha256").update(["invoice-credit-reversal-v1",l,...f].join("\n")).digest("hex");
  return [t,l,o,...f,scope,step,...securityWorkProof(t,o,"privileged_operation",scope,step,identity,env,now).slice(5)];
+}
+
+export function sharedInvoiceCreditProof(t,l,o,input,step,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ const f=sharedInvoiceCreditFields(input);if(![t,l,o].every(x=>typeof x==="string"&&uuid.test(x))||!f)denied();
+ const scope=createHash("sha256").update(["shared-invoice-credit-v1",l,f.allocation,...f.fields,...f.shares.map(v=>v.map(x=>x??"~").join(","))].join("\n")).digest("hex");
+ return [t,l,o,f.allocation,...f.fields,JSON.stringify(f.shares),scope,step,...securityWorkProof(t,o,"privileged_operation",scope,step,identity,env,now).slice(5)];
 }

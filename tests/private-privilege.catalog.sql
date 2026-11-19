@@ -16,6 +16,8 @@ BEGIN
     'private.quarantine_invoice_file(uuid,uuid,text,text,bytea,bytea,bytea)',
     'private.quarantine_status(uuid,uuid)','private.session_authorized(text,bigint,bigint,text,bigint,text,text,text)',
     'private.approve_quarantine_promotion_attested(uuid,uuid,bigint,bigint,text,bigint,text,text,text)',
+    'private.site_shared_overhead_credit_summary(uuid,uuid,uuid,date,date,uuid)',
+    'private.api_shared_invoice_credit_step(uuid,uuid,uuid,uuid,text,text,text,jsonb,text,text,bigint,bigint,text,bigint,text,text,text)',
     'private.site_invoice_credit_summary(uuid,uuid,uuid,date,date,uuid)',
     'private.api_invoice_credit_reversal_step(uuid,uuid,uuid,uuid,text,text,text,text,text,bigint,bigint,text,bigint,text,text,text)',
     'private.api_invoice_credit_step(uuid,uuid,uuid,text,text,text,text,text,bigint,bigint,text,bigint,text,text,text)',
