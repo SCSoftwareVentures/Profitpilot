@@ -6,7 +6,7 @@ import {runQuarantineCycle} from "../scripts/quarantine-worker.js";
 import {generateKeyPair,exportJWK,SignJWT} from "jose";
 import pg from "pg";
 
-test("scanned customer invoice through reviewed exact materialization and independent mapping",{skip:!process.env.TEST_ADMIN_DATABASE_URL||!process.env.TEST_APP_DATABASE_URL,timeout:60000},async()=>{
+test("scanned customer invoice through reviewed exact materialization and independent mapping",{skip:!process.env.TEST_ADMIN_DATABASE_URL||!process.env.TEST_APP_DATABASE_URL,timeout:90000},async()=>{
  const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL,max:2});
  const t=randomUUID(),other=randomUUID(),owner=randomUUID(),reviewer=randomUUID(),analyst=randomUUID(),reader=randomUUID();
  const identities={owner,reviewer,analyst,reader};const subjects=Object.fromEntries(Object.entries(identities).map(([k,v])=>[k,"ci-sensitive-"+v]));
@@ -126,7 +126,55 @@ test("scanned customer invoice through reviewed exact materialization and indepe
    await assert.rejects(()=>admin.query("INSERT INTO public.match_reviews(tenant_id,invoice_line_id,confidence,decision) VALUES($1,$2,'HIGH','confirmed')",[t,links[0].line_id]),e=>e.code==="55000");
    await assert.rejects(()=>runtime.query("SELECT * FROM private.invoice_intake_receipts"),e=>e.code==="42501");
    assert.equal((await admin.query("SELECT private.verify_audit_chain($1) AS ok",[t])).rows[0].ok,true);
-   console.log("Scanned exact invoice manifest, independent site mapping, immutable confirmed source and control totals passed");
+   // Complete the same managed site/period through the actual reviewed payroll
+   // APIs: no seeded invoice facts, allocation rows or calculation outputs.
+   const rows=[{source_row_key:"ppr_"+hash("workflow site cost"),amount:"0.10",currency:"AUD"},{source_row_key:"ppr_"+hash("workflow non-site cost"),amount:"0.20",currency:"AUD"}];
+   const payrollHash=hash("source_row_key,amount,currency\n"+rows.map(r=>r.source_row_key+","+r.amount+",AUD\n").join(""));
+   const payroll=await expect("owner","/imports",201,{body:{sourceType:"payroll",fileName:"minimized-payroll-v1.csv",sha256:payrollHash,permissionReference:"reviewed-payroll-authority",periodStart:"2026-11-01",periodEnd:"2026-11-14"}});
+   const poolId=randomUUID(),payrollPath="/payroll/intakes/"+payroll.batch.id+"/orders/"+randomUUID();
+   const payrollInput={poolId,sourceNamespace:randomUUID(),controlTotal:"0.30",rowCount:2,authorityDigest:hash("workflow authority"),policyDigest:hash("workflow allocation policy"),controlDigest:hash("workflow control"),rows};
+   const payrollPreview=await expect("owner",payrollPath+"/preview",200,{body:payrollInput});
+   const payrollStep=step=>({...payrollInput,scopeDigest:payrollPreview.scopeDigest,confirm:true,step});
+   assert.equal((await expect("owner",payrollPath,200,{body:payrollStep("request")})).status,"requested");
+   await expect("owner",payrollPath,403,{body:payrollStep("approve")});
+   assert.equal((await expect("reviewer",payrollPath,200,{body:payrollStep("approve")})).status,"approved");
+   assert.equal((await expect("owner",payrollPath,200,{body:payrollStep("consume")})).status,"source-accepted");
+   const calc={contractId:contract,siteId:site,periodStart:"2026-11-01",periodEnd:"2026-11-14"};
+   await expect("owner","/calculations",422,{body:calc});
+   const allocationPath="/payroll/pools/"+poolId+"/allocations/"+randomUUID();
+   const allocation=await expect("owner",allocationPath,200,{body:{confirm:true,lines:[
+    {sourceRowKey:rows[0].source_row_key,bucket:"approved_allocated",siteId:site,amount:"0.10",evidenceRef:"ev_"+hash("workflow site allocation").slice(0,60)},
+    {sourceRowKey:rows[1].source_row_key,bucket:"non_site",siteId:null,amount:"0.20",evidenceRef:"ev_"+hash("workflow non-site allocation").slice(0,60)}
+   ]}});
+   assert.equal(allocation.residual,"0.00");assert.equal(allocation.allocationConfirmed,false);
+   const confirmPath="/payroll/proposals/"+allocation.proposalId+"/confirm",confirmation={confirm:true,evidenceDigest:allocation.evidenceDigest};
+   await expect("owner",confirmPath,403,{body:confirmation});
+   assert.equal((await expect("reviewer",confirmPath,200,{body:confirmation})).status,"confirmed");
+   const first=await expect("owner","/calculations",201,{body:calc});
+   const second=await expect("owner","/calculations",201,{body:calc});
+   assert.notEqual(first.id,second.id);assert.deepEqual(first.outputs,second.outputs);
+   for(const result of [first,second]){
+    assert.equal(result.outputs.revenue,"0.30");assert.equal(result.outputs.deliveryCost,"0.10");
+    assert.equal(result.outputs.indicativeContribution,"0.20");assert.equal(result.outputs.contribution,null);
+    assert.equal(result.outputs.marginPercent,null);assert.equal(result.outputs.completeness,"incomplete");
+    assert.equal(result.outputs.invoiceLineCount,2);assert.equal(result.outputs.allocationLineCount,1);
+   }
+   await expect("reader","/calculations",403,{body:calc});
+   await expect("reviewer","/calculations",422,{tenant:other,body:calc});
+   const reportPath="/calculations/"+first.id;
+   const summary=await expect("reader",reportPath,200);
+   assert.equal(summary.outputs.revenue,"0.30");assert.equal(summary.outputs.deliveryCost,"0.10");
+   assert.equal(summary.outputs.indicativeContribution,"0.20");assert.equal(summary.outputs.contribution,null);
+   assert.equal(summary.outputs.marginPercent,null);assert.equal(Object.hasOwn(summary,"inputs"),false);
+   await expect("reviewer",reportPath,404,{tenant:other});
+   await expect("reader",reportPath+"/export",403,{body:{purpose:"internal_review"}});
+   await expect("owner",reportPath+"/export",403,{body:{purpose:"internal_review"},claims:{amr:["pwd"]}});
+   const exported=await expect("owner",reportPath+"/export",200,{body:{purpose:"internal_review"}});
+   assert.equal(exported.calculationId,first.id);assert.equal(exported.revenue,"0.30");assert.equal(exported.deliveryCost,"0.10");
+   assert.equal(exported.indicativeContribution,"0.20");assert.equal(exported.completeness,"incomplete");
+   assert.equal(exported.contribution,null);assert.equal(exported.marginPercent,null);
+   assert.equal((await admin.query("SELECT private.verify_audit_chain($1) AS ok",[t])).rows[0].ok,true);
+   console.log("Full managed workspace, scanned invoice, payroll reconciliation, independent allocation approval, exact deterministic contribution, scoped read and audited export passed");
   }finally{scanner.release();}
  }finally{await new Promise(r=>api.close(r));await new Promise(r=>keys.close(r));await Promise.all([admin.end(),runtime.end()]);}
 });

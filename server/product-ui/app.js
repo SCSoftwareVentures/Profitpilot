@@ -2,7 +2,7 @@ import {uuid,amount,date,range,cents,decimal,parseMinimizedRows,mappingLine,mapp
 const el=id=>document.getElementById(id),value=id=>el(id).value,uid=id=>uuid(value(id)),set=(id,v)=>{el(id).value=v??"";};
 const kinds=["business","customer","site","contract","contract_site"];
 const names={business:"Businesses",customer:"Customers",site:"Sites",contract:"Contracts",contract_site:"Site assignments"};
-let records=Object.fromEntries(kinds.map(k=>[k,[]])),jobs=[],cursors={},mappings=[],currentJob=null,session=null,busy=false,epoch=0,controller=null;
+let records=Object.fromEntries(kinds.map(k=>[k,[]])),jobs=[],cursors={},mappings=[],currentJob=null,acceptedInvoice=null,session=null,busy=false,epoch=0,controller=null;
 const required=(id,label)=>{const v=value(id).trim();if(!v)throw Error(label+" is required.");return v;};
 const evidence=id=>{const v=value(id).trim();if(!isDigest(v))throw Error("Supply the exact nonzero SHA-256 evidence reference.");return v;};
 const confirmed=id=>{if(!el(id).checked)throw Error("Explicit confirmation required.");el(id).checked=false;};
@@ -14,7 +14,7 @@ function card(title,detail,buttonText,handler){const n=make("div",undefined,"ite
 function options(id,items,placeholder){const node=el(id),previous=node.value;node.replaceChildren(new Option(placeholder,""),...items.map(x=>new Option(x.label||x.id,x.id)));if(items.some(x=>x.id===previous))node.value=previous;}
 function credentials(){const tenant=uid("tenant"),token=value("token").trim();if(!token||token.length>8192||/\s/.test(token))throw Error("Supply a current synthetic access token.");return {tenant,token};}
 function reset(keepCredentials=false){
- epoch++;controller?.abort();controller=null;session=null;records=Object.fromEntries(kinds.map(k=>[k,[]]));jobs=[];cursors={};mappings=[];currentJob=null;
+ epoch++;controller?.abort();controller=null;session=null;records=Object.fromEntries(kinds.map(k=>[k,[]]));jobs=[];cursors={};mappings=[];currentJob=null;acceptedInvoice=null;
  for(const n of document.querySelectorAll("input,textarea")){if(keepCredentials&&["tenant","token"].includes(n.id))continue;if(n.type==="checkbox")n.checked=false;else n.value="";}
  for(const n of document.querySelectorAll(".result,.stack,#metrics,#page-note"))n.replaceChildren();
  el("workspace").hidden=true;el("session-note").textContent="Not connected.";status("Session cleared. Verify a synthetic session.");
@@ -143,12 +143,13 @@ async function action(name){
     show("invoice-source-result",d);el("invoice-file").value="";break;
    }
    case "invoice-promote":confirmed("invoice-promote-confirm");show("invoice-source-result",await read("/imports/"+uid("invoice-batch")+"/file/approve",{}));break;
-   case "invoice-new":newId("invoice-order");set("invoice-scope","");break;
+   case "invoice-new":acceptedInvoice=null;newId("invoice-order");set("invoice-scope","");break;
+   case "invoice-report-scope":{if(!acceptedInvoice||acceptedInvoice.batchId!==uid("invoice-batch")||acceptedInvoice.orderId!==uid("invoice-order"))throw Error("Read an accepted invoice review first.");const selected=el("invoice-report-line").value;const scope=acceptedInvoice.lines.find(x=>x.rawRowId===selected);if(!scope)throw Error("Choose a reviewed invoice row.");if(!records.contract.some(x=>x.id===scope.contractId)||!assignedSites(records,scope.contractId).some(x=>x.id===scope.siteId))throw Error("Load the relevant workspace records and site assignments before continuing.");set("report-contract",scope.contractId);options("report-site",assignedSites(records,scope.contractId),"Choose assigned site");set("report-site",scope.siteId);set("report-start",date(scope.periodStart));set("report-end",date(scope.periodEnd));el("report-result").replaceChildren();set("report-id","");switchTab("reports");status("Reviewed scope selected. Confirm payroll evidence and build a new calculation; no calculation has been run.");return;}
    case "invoice-preview":
    case "invoice-status":
    case "invoice-step":{
     const path="/invoice-intakes/"+uid("invoice-batch")+"/orders/"+uid("invoice-order");
-    let d;
+    acceptedInvoice=null;options("invoice-report-line",[],"Choose accepted source line");let d;
     if(name==="invoice-status")d=await read(path);
     else{
      const count=Number(value("invoice-count"));
@@ -158,6 +159,7 @@ async function action(name){
      else{confirmed("invoice-review-confirm");d=await read(path,{...body,scopeDigest:evidence("invoice-scope"),step:value("invoice-step"),confirm:true});}
     }
     set("invoice-total",d.controlTotal);set("invoice-count",d.rowCount);set("invoice-evidence",d.evidenceDigest);set("invoice-scope",d.scopeDigest);
+    if(d.status==="accepted"&&Array.isArray(d.lines)&&d.lines.length>0){acceptedInvoice={batchId:uid("invoice-batch"),orderId:uid("invoice-order"),lines:d.lines};options("invoice-report-line",d.lines.map(x=>({id:x.rawRowId,label:"Row "+x.rowNumber+" · "+x.amount+" AUD"})),"Choose accepted source line");}
     show("invoice-review-result",d);break;
    }
    default:throw Error("Unsupported action.");
