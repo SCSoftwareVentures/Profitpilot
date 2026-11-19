@@ -19,6 +19,8 @@ import {canonicalPayrollRows} from "../src/payroll-source-intake.js";
 import {canonicalAllocationMapping} from "../src/payroll-allocation-mapping.js";
 import {WORKSPACE_KINDS,workspaceRecordFields,workspaceVersionFields} from "../src/workspace-records.js";
 import {workspaceJobFields,verifiedJobSummary} from "../src/workspace-jobs.js";
+import {jobReferenceSigner,issueJobReference} from "./core-job-reference.js";
+const coreReferenceKey=jobReferenceSigner();
 import {invoiceIntakeFields,invoiceDigest} from "../src/invoice-intake.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
@@ -580,6 +582,15 @@ app.get("/v1/tenants/:tenantId/workspace/jobs/:jobId",membership,requireRole("ow
   if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
   const result=await sensitiveQuery(req,"SELECT private.api_workspace_job_read($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) AS result",workspaceJobReadProof(req.membership.tenantId,req.params.jobId.toLowerCase(),"status",null,req.identity));
   return res.json(verifiedJobSummary(result));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/workspace/jobs/:jobId/securepay-reference",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{
+  if(!coreReferenceKey)return res.status(404).json({error:"Not found"});
+  if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});
+  const tenantId=req.membership.tenantId,jobId=req.params.jobId.toLowerCase();
+  const result=await sensitiveQuery(req,"SELECT private.api_workspace_job_read($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) AS result",workspaceJobReadProof(tenantId,jobId,"status",null,req.identity));
+  return res.json(issueJobReference({tenantId,jobId,job:verifiedJobSummary(result),signingKey:coreReferenceKey}));
  }catch(e){return failSensitive(e,res,next);}
 });
 app.get("/v1/tenants/:tenantId/workspace/jobs",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{

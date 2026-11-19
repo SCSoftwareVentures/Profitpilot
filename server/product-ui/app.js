@@ -57,6 +57,7 @@ function renderRecords(){const list=records[value("record-filter")];el("record-l
 function selectJob(job){if(busy)return;set("job-selected",job.jobId);currentJob=job;renderJob(job);switchTab("jobs");}
 function renderJobs(){const items=jobs.map(j=>card(nameOf(j.contractId)+" · "+nameOf(j.siteId),j.serviceDate+" · "+j.status+" · "+j.resolvedRequiredChecks+"/"+j.totalRequiredChecks+" checks","Open job",()=>selectJob(j)));el("job-list").replaceChildren(...(items.length?items:[make("p","No loaded jobs.","muted")]));el("overview-jobs").replaceChildren(...(jobs.slice(0,5).map(j=>card(nameOf(j.contractId),j.serviceDate+" · "+j.status+" · "+j.readinessStatus,"Open job",()=>selectJob(j)))));if(!jobs.length)el("overview-jobs").append(make("p","No loaded jobs.","muted"));}
 function renderJob(job){
+ set("job-reference","");
  const n=el("job-details");n.replaceChildren(card(job.status+" · "+job.readinessStatus,nameOf(job.contractId)+" / "+nameOf(job.siteId)+" · "+job.resolvedRequiredChecks+"/"+job.totalRequiredChecks+" required checks"));
  for(const c of job.readiness?.checkResults||[]){const row=card(c.label,c.status+(c.blocking?" · Blocking":""));n.append(row);}
 }
@@ -107,6 +108,7 @@ async function action(name){
    case "job-new":newId("job-id");break;
    case "job-create":confirmed("job-confirm");saveJob(await read("/workspace/jobs/"+uid("job-id"),{confirm:true,action:"create",contractId:uid("job-contract"),siteId:uid("job-site"),serviceDate:date(value("job-date")),evidenceDigest:evidence("job-evidence")}));break;
    case "job-read":saveJob(await read("/workspace/jobs/"+uid("job-selected")));break;
+   case "job-reference":{set("job-reference","");const d=await read("/workspace/jobs/"+uid("job-selected")+"/securepay-reference");if(d.mode!=="sandbox"||d.moneyMoved!==false||typeof d.reference!=="string"||d.reference.length>2048)throw Error("Invalid reference response.");set("job-reference",d.reference);break;}
    case "event-new":newId("event-id");break;
    case "job-event":{confirmed("event-confirm");const op=value("job-action"),body={confirm:true,action:op,eventId:uid("event-id"),evidenceDigest:evidence("event-evidence")};if(op==="check"){body.checkId=value("check-id");body.checkStatus=value("check-status");}saveJob(await read("/workspace/jobs/"+uid("job-selected"),body));break;}
    case "source-inspect":{const s=source();show("source-result",{rowCount:s.rows.length,controlTotal:s.controlTotal,currency:"AUD",fileSha256:await checksum(s.canonical)});break;}

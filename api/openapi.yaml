@@ -1100,6 +1100,20 @@ paths:
         "400": { description: Invalid action or fields }
         "403": { description: Authority denied }
         "409": { description: Ineligible transition }
+  /tenants/{tenantId}/workspace/jobs/{jobId}/securepay-reference:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: jobId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Issue a short-lived read-only synthetic job reference
+      description: Optional synthetic owner/admin with recent MFA. Not a customer quote or payment authority. Disabled in production.
+      responses:
+        "200": { description: Signed reference and expiry }
+        "403": { description: Authority denied }
+        "404": { description: Reference service disabled }
   /tenants/{tenantId}/invoice-intakes/{batchId}/orders/{orderId}/preview:
     parameters:
       - $ref: '#/components/parameters/TenantId'

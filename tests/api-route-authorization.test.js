@@ -33,6 +33,7 @@ const expected=new Map([
   ["POST /v1/tenants/:tenantId/workspace/jobs/:jobId","step-up"],
   ["GET /v1/tenants/:tenantId/workspace/jobs/:jobId","step-up"],
   ["GET /v1/tenants/:tenantId/workspace/jobs","step-up"],
+  ["GET /v1/tenants/:tenantId/workspace/jobs/:jobId/securepay-reference","step-up"],
   ["POST /v1/tenants/:tenantId/workspace/records/:recordId","step-up"],
   ["GET /v1/tenants/:tenantId/workspace/records-by-kind/:kind","step-up"],
   ["POST /v1/tenants/:tenantId/workspace/contracts/:contractId/versions/:orderId","step-up"],

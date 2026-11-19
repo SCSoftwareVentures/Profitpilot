@@ -12,12 +12,13 @@ import {validParticipantRequest,participantOps} from "../securepay/db/participan
 import {projectParticipant} from "./securepay-participant-view.js";
 import {projectFundedCancellation} from "./securepay-funded-cancellation-view.js";
 import {projectContract} from "./securepay-contract-view.js";
+import {jobReferenceVerifier,verifyJobReference,projectJobReference} from "./core-job-reference.js";
 import {makeWorkCompletionOwner} from "../securepay/db/work-completion.mjs";
 import {makeEvidenceScanner,clamavScanner,jpegNormalizer} from "../securepay/db/evidence-scanner.mjs";
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const hex=/^[a-f0-9]{64}$/i;
 const exact=(body,keys)=>body&&typeof body==="object"&&!Array.isArray(body)&&Object.keys(body).length===keys.length&&keys.every(k=>Object.hasOwn(body,k));
-export function createCompletionRouter({enabled=false,tenantId,subject,verifyToken,owner}={}){
+export function createCompletionRouter({enabled=false,tenantId,subject,verifyToken,owner,coreReferenceKey=null}={}){
  const router=express.Router();
  router.use((req,res,next)=>{res.set("Cache-Control","no-store");if(!enabled)return res.status(404).json({error:"Not found"});next();});
  if(!enabled)return router;
@@ -30,7 +31,7 @@ export function createCompletionRouter({enabled=false,tenantId,subject,verifyTok
  router.get("/upload",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,ownerCompletionPage()));
  let uploading=false;
  router.post("/:milestoneId/:action",async(req,res,next)=>{
-  if(req.originalUrl.includes("?")||!uuid.test(req.params.milestoneId)||!["status","start","upload","submit","quote-status","publish-quote","offer-plan","withdraw-plan","contract-status","offer-change","withdraw-change","funded-cancellation-status","offer-funded-cancellation","withdraw-funded-cancellation","ack-negotiated",...participantOps.map(x=>"case-"+x)].includes(req.params.action))return res.status(404).json({error:"Not found"});
+  if(req.originalUrl.includes("?")||!uuid.test(req.params.milestoneId)||!["status","start","upload","submit","quote-status","core-link-preview","publish-quote","offer-plan","withdraw-plan","contract-status","offer-change","withdraw-change","funded-cancellation-status","offer-funded-cancellation","withdraw-funded-cancellation","ack-negotiated",...participantOps.map(x=>"case-"+x)].includes(req.params.action))return res.status(404).json({error:"Not found"});
   try{
    const token=req.headers.authorization?.match(/^Bearer ([^\s]{1,8192})$/i)?.[1];
    if(!token)return res.status(401).json({error:"Authentication required"});
@@ -92,6 +93,15 @@ export function createCompletionRouter({enabled=false,tenantId,subject,verifyTok
     if(action==="contract-status")return res.json({mode:"sandbox",moneyMoved:false,contract:projectContract(result.view,planId)});
     if(action==="offer-change")return res.status(201).json({mode:"sandbox",moneyMoved:false,change:result.change});
     return res.json({mode:"sandbox",moneyMoved:false,status:"withdrawn"});
+   }
+   if(action==="core-link-preview"){
+    if(!coreReferenceKey)return res.status(404).json({error:"Not found"});
+    if(!exact(body,["reference"]))return res.status(400).json({error:"Invalid request"});
+    let snapshot;try{snapshot=verifyJobReference({reference:body.reference,tenantId,jobId:milestoneId,publicKey:coreReferenceKey});}catch{return res.status(403).json({error:"Reference denied"});}
+    const current=await owner.quoteStatus({tenantId,jobId:milestoneId});
+    if(!current?.ok)return res.status(403).json({error:"Authorization denied"});
+    // Read-only; this branch must never call publish, offer, approval or payment operations.
+    return res.json(projectJobReference(snapshot,current.view));
    }
    if(action==="quote-status"||action==="publish-quote"||action==="offer-plan"||action==="withdraw-plan"){
     const jobId=milestoneId;
@@ -156,12 +166,13 @@ export async function startCompletionService(env=process.env,{scanner,disputeSca
   if(!hex.test(env.SECUREPAY_COMPLETION_SCAN_KEY??"")||env.SECUREPAY_COMPLETION_SCAN_KEY.toLowerCase()===key.toLowerCase())throw Error("Independent scan key required");
   scanner=makeEvidenceScanner({key:Buffer.from(env.SECUREPAY_COMPLETION_SCAN_KEY,"hex"),keyId:env.SECUREPAY_COMPLETION_SCAN_KEY_ID??"primary",purpose:"completion",scan:clamavScanner(),normalizeJPEG:jpegNormalizer()});
  }
+ const coreReferenceKey=jobReferenceVerifier(env);
  const pool=new pg.Pool({connectionString:databaseUrl,max:2,connectionTimeoutMillis:5000,statement_timeout:10000,ssl:env.SECUREPAY_COMPLETION_DATABASE_SSL==="true"?{rejectUnauthorized:true}:false});
  try{
   const {rows:[r]}=await pool.query("SELECT current_user AS role");if(r.role!=="securepay_completion_runtime")throw Error("Incorrect completion role");
   const app=express();app.disable("x-powered-by");
   if(!disputeScanner&&env.SECUREPAY_COMPLETION_DISPUTE_SCAN_KEY!==undefined){const dk=env.SECUREPAY_COMPLETION_DISPUTE_SCAN_KEY;if(!hex.test(dk)||[key,env.SECUREPAY_COMPLETION_SCAN_KEY].some(x=>x?.toLowerCase()===dk.toLowerCase()))throw Error("Independent dispute scan key required");disputeScanner=makeEvidenceScanner({key:Buffer.from(dk,"hex"),keyId:env.SECUREPAY_COMPLETION_DISPUTE_SCAN_KEY_ID??"primary",scan:clamavScanner({timeoutMs:7000}),normalizeJPEG:jpegNormalizer({timeoutMs:4000})});}
-  app.use("/v1/securepay-completion",createCompletionRouter({enabled:true,tenantId,subject,verifyToken:createPayerTokenVerifier({issuer,audience,requiredAcr,keyResolver:createRemoteJWKSet(url)}),owner:makeWorkCompletionOwner({pool,actorId,key:Buffer.from(key,"hex"),scanner,disputeScanner})}));
+  app.use("/v1/securepay-completion",createCompletionRouter({enabled:true,tenantId,subject,coreReferenceKey,verifyToken:createPayerTokenVerifier({issuer,audience,requiredAcr,keyResolver:createRemoteJWKSet(url)}),owner:makeWorkCompletionOwner({pool,actorId,key:Buffer.from(key,"hex"),scanner,disputeScanner})}));
   const server=createServer(app);server.requestTimeout=15000;server.headersTimeout=5000;
   await new Promise((resolve,reject)=>{server.once("error",reject);server.listen(port,"127.0.0.1",resolve);});
   return {server,close:async()=>{await new Promise((resolve,reject)=>server.close(e=>e?reject(e):resolve()));await pool.end();}};

@@ -13,6 +13,8 @@ test("approved commercial baseline through jobs and readiness lifecycle",{skip:!
  Object.assign(jwk,{kid:"ci-sensitive",alg:"RS256",use:"sig"});
  const keys=createServer((_req,res)=>{res.setHeader("Content-Type","application/json");res.end(JSON.stringify({keys:[jwk]}));});
  await new Promise(r=>keys.listen(0,"127.0.0.1",r));
+ const refKeys=generateKeyPairSync("ed25519");
+ process.env.CORE_JOB_REFERENCE_ENABLED="true";process.env.CORE_JOB_REFERENCE_SIGNING_KEY=refKeys.privateKey.export({type:"pkcs8",format:"der"}).toString("base64url");
  process.env.NODE_ENV="test";process.env.SYNTHETIC_SECURITY_UI_ENABLED="true";process.env.DATABASE_URL=process.env.TEST_APP_DATABASE_URL;
  process.env.AUTH_ISSUER="https://sensitive-ci.invalid/";process.env.AUTH_AUDIENCE="profitpilot-api";
  process.env.AUTH_JWKS_URL="http://127.0.0.1:"+keys.address().port+"/jwks";
@@ -95,6 +97,15 @@ test("approved commercial baseline through jobs and readiness lifecycle",{skip:!
    assert.equal(r.safetyCertified,false);assert.equal(r.customerAcceptanceVerified,false);
   }
   const ready=await expect("reviewer",jobPath,200);assert.equal(ready.readinessStatus,"ready");assert.equal(ready.readiness.completenessPercent,100);
+  const refPath=jobPath+"/securepay-reference";
+  const exported=await expect("owner",refPath,200);
+  const {verifyJobReference}=await import("../server/core-job-reference.js");
+  const snapshot=verifyJobReference({reference:exported.reference,tenantId:t,jobId:job,publicKey:refKeys.publicKey});
+  assert.equal(snapshot.baselineId,version);assert.equal(snapshot.baselinePrice,"100.00");assert.equal(snapshot.readinessStatus,"ready");
+  await expect("reader",refPath,403);
+  await expect("owner",refPath,403,{claims:{amr:["pwd"]}});
+  await expect("reviewer",refPath,403,{tenant:other});
+  await expect("owner",refPath+"?extra=1",400);
   const start=event("start");
   assert.equal((await expect("owner",jobPath,200,{body:start})).status,"in_progress");
   await expect("owner",jobPath,409,{body:start});
