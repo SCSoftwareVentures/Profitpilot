@@ -40,20 +40,20 @@ $$;
 ALTER FUNCTION securepay_private.recovery_state(uuid,uuid,uuid,uuid) OWNER TO securepay_context_owner;
 REVOKE ALL ON FUNCTION securepay_private.recovery_state(uuid,uuid,uuid,uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION securepay_private.recovery_state(uuid,uuid,uuid,uuid) TO securepay_reconciliation_runtime,securepay_provider_runtime;
-CREATE FUNCTION securepay_private.recover_settlement(id uuid,s uuid,t uuid,m uuid,d uuid,l uuid,op text,r uuid,state_hash text,evidence_hash text,reason text,a1 uuid,a2 uuid,expires bigint,provider_sig text,sig1 text,sig2 text) RETURNS boolean
+CREATE FUNCTION securepay_private.recover_settlement(rid uuid,s uuid,t uuid,m uuid,d uuid,l uuid,op text,r uuid,state_hash text,evidence_hash text,reason text,a1 uuid,a2 uuid,expires bigint,provider_sig text,sig1 text,sig2 text) RETURNS boolean
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE c securepay_private.dispute_cases%ROWTYPE; st securepay_private.dispute_settlements%ROWTYPE;
  leg securepay_private.settlement_legs%ROWTYPE; f securepay_private.provider_funding%ROWTYPE;
  key_bytes bytea;kid text;payload text;balance numeric;
 BEGIN
- IF id IS NULL OR s IS NULL OR t IS NULL OR m IS NULL OR d IS NULL OR a1 IS NULL OR a2 IS NULL OR a1=a2
+ IF rid IS NULL OR s IS NULL OR t IS NULL OR m IS NULL OR d IS NULL OR a1 IS NULL OR a2 IS NULL OR a1=a2
  OR op IS NULL OR op NOT IN ('confirm','retry_once','clear_conflict','lift_hold')
  OR (op='lift_hold')<>(l IS NULL) OR (op IN ('confirm','clear_conflict'))<>(r IS NOT NULL)
  OR state_hash IS NULL OR state_hash !~ '^[a-f0-9]{64}$' OR evidence_hash IS NULL OR evidence_hash !~ '^[a-f0-9]{64}$'
  OR reason IS NULL OR length(btrim(reason)) NOT BETWEEN 10 AND 1000 OR expires IS NULL
  OR expires NOT BETWEEN floor(extract(epoch FROM clock_timestamp()))::bigint AND floor(extract(epoch FROM clock_timestamp()))::bigint+30
  OR provider_sig IS NULL OR provider_sig !~ '^[a-z0-9-]{1,32}[.][a-f0-9]{64}$' THEN RETURN false; END IF;
- payload:=concat_ws(':','sp-recovery-v1',id,s,t,m,d,coalesce(l::text,'-'),op,coalesce(r::text,'-'),state_hash,evidence_hash,encode(convert_to(reason,'UTF8'),'hex'),a1,a2,expires);
+ payload:=concat_ws(':','sp-recovery-v1',rid,s,t,m,d,coalesce(l::text,'-'),op,coalesce(r::text,'-'),state_hash,evidence_hash,encode(convert_to(reason,'UTF8'),'hex'),a1,a2,expires);
  kid:=split_part(provider_sig,'.',1);
  SELECT secret INTO key_bytes FROM securepay_private.provider_key WHERE key_id=kid AND active AND (valid_until IS NULL OR valid_until>clock_timestamp());
  IF key_bytes IS NULL OR encode(public.hmac(convert_to(payload||':'||kid,'UTF8'),key_bytes,'sha256'),'hex')<>split_part(provider_sig,'.',2)
@@ -99,7 +99,7 @@ BEGIN
    OR EXISTS(SELECT 1 FROM securepay_private.settlement_legs WHERE settlement_id=s AND status IN ('submitted','unknown')) THEN RETURN false; END IF;
  END IF;
  INSERT INTO securepay_private.settlement_recoveries(resolution_id,case_id,leg_id,action,actor_one,actor_two,state_digest,evidence_digest,reason,receipt)
- VALUES(id,d,l,op,a1,a2,state_hash,evidence_hash,reason,r);
+ VALUES(rid,d,l,op,a1,a2,state_hash,evidence_hash,reason,r);
  IF op='retry_once' THEN
   UPDATE securepay_private.settlement_legs SET status='pending' WHERE leg_id=l;
  ELSIF op IN ('confirm','clear_conflict') THEN
@@ -114,11 +114,11 @@ BEGIN
    END IF;
    UPDATE securepay_private.settlement_legs SET status='confirmed',receipt=r WHERE leg_id=l;
   END IF;
-  UPDATE securepay_private.settlement_leg_conflicts x SET resolved_at=clock_timestamp(),resolution_id=id
+  UPDATE securepay_private.settlement_leg_conflicts x SET resolved_at=clock_timestamp(),resolution_id=rid
    WHERE x.resolved_at IS NULL AND x.event_id IN (SELECT e.event_id FROM securepay_private.settlement_leg_events e WHERE e.leg_id=l);
  ELSE
   UPDATE securepay_private.provider_funding SET status='funded' WHERE tenant_id=t AND milestone_id=m;
-  UPDATE securepay_private.provider_reconciliation SET resolved_at=clock_timestamp(),resolution_id=id WHERE tenant_id=t AND milestone_id=m AND reason='hold_after_dispatch' AND resolved_at IS NULL;
+  UPDATE securepay_private.provider_reconciliation SET resolved_at=clock_timestamp(),resolution_id=rid WHERE tenant_id=t AND milestone_id=m AND reason='hold_after_dispatch' AND resolved_at IS NULL;
  END IF;
  IF c.status='authorized' AND (f.status='funded' OR op='lift_hold')
  AND NOT EXISTS(SELECT 1 FROM securepay_private.settlement_legs WHERE settlement_id=s AND status<>'confirmed')
