@@ -15,6 +15,7 @@ export function createPayerTokenVerifier({issuer,audience,requiredAcr,keyResolve
   const {payload}=await jwtVerify(token,keyResolver,{issuer,audience,algorithms:["RS256","ES256"],requiredClaims:["sub","exp","iat","auth_time","acr"],maxTokenAge:"5m",clockTolerance:5});
   const now=clock();
   if(typeof payload.sub!=="string"||!payload.sub||payload.sub.length>512||
+     !(payload.aud===audience||(Array.isArray(payload.aud)&&payload.aud.length===1&&payload.aud[0]===audience))||
      payload.acr!==requiredAcr||!Number.isInteger(payload.auth_time)||
      payload.auth_time>now||payload.auth_time<now-300)
    throw new Error("Recent customer assurance required");
