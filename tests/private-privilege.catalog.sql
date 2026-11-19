@@ -16,6 +16,7 @@ BEGIN
     'private.quarantine_invoice_file(uuid,uuid,text,text,bytea,bytea,bytea)',
     'private.quarantine_status(uuid,uuid)','private.session_authorized(text,bigint,bigint,text,bigint,text,text,text)',
     'private.approve_quarantine_promotion_attested(uuid,uuid,bigint,bigint,text,bigint,text,text,text)',
+    'private.api_financial_coverage(uuid,uuid,text,text,bigint,bigint,text,bigint,text,text,text,uuid,date,date)',
     'private.site_business_overhead_summary(uuid,uuid,uuid,date,date,uuid)',
     'private.site_shared_cost_summary(uuid,uuid,uuid,date,date,uuid)',
     'private.site_supplier_cost_summary(uuid,uuid,uuid,date,date,uuid)',

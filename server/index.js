@@ -23,7 +23,7 @@ import {jobReferenceSigner,issueJobReference} from "./core-job-reference.js";
 const coreReferenceKey=jobReferenceSigner();
 import {invoiceIntakeFields,invoiceDigest} from "../src/invoice-intake.js";
 import {supplierCostFields} from "../src/supplier-cost.js";
-import {supplierCostStepProof,supplierCostStatusProof,sharedCostStepProof,sharedCostStatusProof,sharedCostCorrectionProof} from "./sensitive-operation-proof.js";
+import {supplierCostStepProof,supplierCostStatusProof,sharedCostStepProof,sharedCostStatusProof,sharedCostCorrectionProof,financialCoverageProof} from "./sensitive-operation-proof.js";
 import {sharedCostFields,sharedCostCorrectionFields} from "../src/shared-cost.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
@@ -662,6 +662,11 @@ app.post("/v1/tenants/:tenantId/shared-costs/:kind/:sourceId/orders/:orderId",me
 app.get("/v1/tenants/:tenantId/shared-costs/:kind/:sourceId/orders/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
  try{const ids=sharedIds(req);if(!emptyQuery(req)||!["payroll","overhead","business_overhead"].includes(ids[1]))return res.status(400).json({error:"Invalid source scope"});
  return res.json(await sensitiveQuery(req,"SELECT private.api_shared_cost_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) AS result",sharedCostStatusProof(...ids,req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.post("/v1/tenants/:tenantId/financial-coverage",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{const b=req.body;if(!emptyQuery(req)||!exactBody(b,["contractId","siteId","periodStart","periodEnd"])||typeof b.contractId!=="string"||!uuidPattern.test(b.contractId)||typeof b.siteId!=="string"||!uuidPattern.test(b.siteId)||!isIsoDate(b.periodStart)||!isIsoDate(b.periodEnd)||b.periodEnd<b.periodStart||(Date.parse(b.periodEnd)-Date.parse(b.periodStart))/86400000>366)return res.status(400).json({error:"Exact contract, site and period of at most 367 inclusive days required"});
+ return res.json(await sensitiveQuery(req,"SELECT private.api_financial_coverage($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) AS result",financialCoverageProof(req.membership.tenantId,b.contractId.toLowerCase(),b.siteId.toLowerCase(),b.periodStart,b.periodEnd,req.identity)));
  }catch(e){return failSensitive(e,res,next);}
 });
 app.use((err,req,res,next)=>{if(res.destroyed||res.writableEnded)return;if(res.headersSent)return next(err);const id=randomUUID();const status=err.code==="P4501"?429:(err.code==="23505"||err.code==="P4502"||err.code==="P4503")?409:err.code==="54000"?413:err.code==="22P02"||err.code==="22P05"?400:err.status===503?503:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);if(status===503)res.set("Retry-After","5");if(err.code==="P4501")res.set("Retry-After","3600");process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:err.code==="P4501"?"Financial access limit reached; retry later":err.code==="P4502"?"Payroll evidence was corrected; recalculate before relying on this result":err.code==="P4503"?"Shared expense allocation was corrected; recalculate before relying on this result":status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":status===503?"Request capacity temporarily unavailable":"Internal server error",reference:id});});
