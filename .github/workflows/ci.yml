@@ -205,6 +205,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/073_shared_cost_allocation.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/074_shared_cost_calculation.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/075_shared_cost_corrections.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/076_business_overhead_allocation.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
@@ -353,6 +354,12 @@ jobs:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/shared-cost-corrections-api.integration.test.js
+
+      - name: Verify business-wide overhead allocation and correction
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
+        run: |
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/business-overhead-api.integration.test.js
 
       - name: Verify real Firefox report workflow
         env:

@@ -1208,7 +1208,7 @@ paths:
               required: [intakeScopeDigest, classification, evidenceDigest, confirm, step]
               properties:
                 intakeScopeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
-                classification: { enum: [direct_site, overhead_pending, payroll_overlap, excluded] }
+                classification: { enum: [direct_site, overhead_pending, business_overhead_pending, payroll_overlap, excluded] }
                 evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
                 confirm: { const: true }
                 step: { enum: [request, approve, reject, consume] }
@@ -1222,7 +1222,7 @@ paths:
       - name: kind
         in: path
         required: true
-        schema: { enum: [payroll, overhead] }
+        schema: { enum: [payroll, overhead, business_overhead] }
       - name: sourceId
         in: path
         required: true
@@ -1251,8 +1251,8 @@ paths:
                   type: array
                   minItems: 1
                   maxItems: 100
-                  description: Ordered arrays of contract UUID, baseline UUID and positive exact decimal amount. Null contract and baseline represent a single explicit unallocated remainder at the end.
-                  items: { type: array, minItems: 3, maxItems: 3 }
+                  description: 'Site payroll and overhead use [contract, baseline, amount]. Business overhead uses [site, contract, baseline, amount]. All identifier fields null represent one explicit remainder at the end. Sort by contract or by site then contract respectively.'
+                  items: { type: array, minItems: 3, maxItems: 4 }
                 evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
                 replacesOrderId: { type: string, format: uuid, description: Optional active predecessor for independent correction; supply at every correction step }
                 confirm: { const: true }

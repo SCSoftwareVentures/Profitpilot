@@ -7,3 +7,13 @@ test("exact ordered source split canonicalization denies duplicate, unordered an
  for(const bad of [[shares[0],shares[0]],[shares[1],shares[0]],[[null,base,"0.01"]],[[a,base,0.01]],[[a,base,"0.00"]],[[a,base,"0.001"]]])assert.equal(sharedCostFields("payroll",source,{shares:bad,evidenceDigest}),null);
  assert.equal(sharedCostFields("other",source,input),null);
 });
+
+test("business overhead canonicalization binds site and contract and admits one remainder",()=>{
+ const source=randomUUID(),site1=randomUUID(),site2=randomUUID(),contract=randomUUID(),base=randomUUID(),evidenceDigest="b".repeat(64);
+ const shares=[[site1,contract,base,"0.02"],[site2,contract,base,"0.03"]].sort((a,b)=>a[0]<b[0]?-1:1);shares.push([null,null,null,"0.01"]);
+ const x=sharedCostFields("business_overhead",source,{shares,evidenceDigest});
+ assert.equal(x.canonical.split("\n").at(-1),"~,~,~,0.01");
+ assert.equal(sharedCostFields("overhead",source,{shares,evidenceDigest}),null);
+ assert.equal(sharedCostFields("business_overhead",source,{shares:[shares[0],shares[0]],evidenceDigest}),null);
+ assert.equal(sharedCostFields("business_overhead",source,{shares:[[null,contract,base,"0.01"]],evidenceDigest}),null);
+});

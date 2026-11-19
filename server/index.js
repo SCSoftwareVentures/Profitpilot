@@ -658,7 +658,7 @@ app.post("/v1/tenants/:tenantId/shared-costs/:kind/:sourceId/orders/:orderId",me
  }catch(e){return failSensitive(e,res,next);}
 });
 app.get("/v1/tenants/:tenantId/shared-costs/:kind/:sourceId/orders/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
- try{const ids=sharedIds(req);if(!emptyQuery(req)||!["payroll","overhead"].includes(ids[1]))return res.status(400).json({error:"Invalid source scope"});
+ try{const ids=sharedIds(req);if(!emptyQuery(req)||!["payroll","overhead","business_overhead"].includes(ids[1]))return res.status(400).json({error:"Invalid source scope"});
  return res.json(await sensitiveQuery(req,"SELECT private.api_shared_cost_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) AS result",sharedCostStatusProof(...ids,req.identity)));
  }catch(e){return failSensitive(e,res,next);}
 });
