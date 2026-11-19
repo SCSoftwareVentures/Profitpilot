@@ -56,6 +56,9 @@ test("business-wide overhead is allocated across sites with exact review and cor
   assert.deepEqual(listed.items,[{id:contract,kind:"contract",parentId:business,relatedId:customer,label:"Synthetic contract"}]);assert.equal(listed.nextCursor,null);
   assert.equal((await expect("reviewer","/workspace/records-by-kind/contract",200,{tenant:other})).items.length,0);
   await expect("reader","/workspace/records-by-kind/contract",403);
+   const site2=randomUUID();
+   await make(site2,record("site",business,null,"Synthetic second site"));
+   await make(randomUUID(),record("contract_site",contract,site2,null));
   const order=randomUUID(),version=randomUUID(),vpath="/workspace/contracts/"+contract+"/versions/"+order;
   const terms={versionId:version,periodStart:"2026-11-01",periodEnd:"2026-11-30",price:"100.00",taxBasis:"gst_exclusive",billingBasis:"monthly",evidenceDigest:hash("synthetic contract evidence")};
   const op=(step,change={})=>({confirm:true,step,...terms,...change});
@@ -119,9 +122,7 @@ test("business-wide overhead is allocated across sites with exact review and cor
    }
 
 
-   const site2=randomUUID();
-   await make(site2,record("site",business,null,"Synthetic second site"));
-   await make(randomUUID(),record("contract_site",contract,site2,null));
+
    await supplier("BUSINESS-OVERHEAD","0.09","business_overhead_pending");
    const source=(await admin.query("SELECT l.id FROM public.invoice_lines l JOIN public.invoices i ON i.tenant_id=l.tenant_id AND i.id=l.invoice_id WHERE l.tenant_id=$1 AND i.direction='supplier'",[t])).rows[0].id;
    const shares=[[site,contract,version,"0.03"],[site2,contract,version,"0.04"]].sort((a,b)=>a[0]<b[0]?-1:1);shares.push([null,null,null,"0.02"]);
