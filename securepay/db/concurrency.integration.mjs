@@ -2331,3 +2331,54 @@ test("only new cleared authorizer can approve definitive nonexecution retry afte
  assert.equal((await d.confirm.record({...s,...next,outcome:"confirmed",receipt:randomUUID()})).ok,true);
  assert.equal((await balanceFor(d.s)).remaining_cents,"2000");
 });
+
+test("emergency administrator succession requires inactive prior administrator, exact snapshot and three distinct humans",async()=>{
+ await pool.query(await readFile(new URL("securepay-admin-succession-draft.sql",import.meta.url),"utf8"));
+ const f=await governedFixture();await governedFinal(f);const {d,t,caseId,admin,adminId,authorizer}=f;
+ const requester=await anotherGovernanceActor(f,"administrator"),approver=await anotherGovernanceActor(f,"administrator"),nominee=await anotherGovernanceActor(f,"administrator");
+ const request={caseId,nominee:nominee.actorId,action:"request",reason:"Independent emergency administrative continuity"};
+ assert.equal((await requester.service.succession(request)).ok,false);
+ await pool.query("UPDATE securepay_private.dispute_actors SET active=false WHERE tenant_id=$1 AND actor_id=$2",[t,adminId]);
+ assert.equal((await requester.service.succession({...request,nominee:requester.actorId})).ok,false);
+ const offer=await requester.service.succession(request);assert.equal(offer.ok,true);
+ const {requestId,stateDigest}=offer.succession,cmd={...request,requestId,stateDigest,action:"approve",reason:"Independent second administrative authorization"};
+ assert.equal((await requester.service.succession(cmd)).ok,false);assert.equal((await nominee.service.succession(cmd)).ok,false);
+ const queue=await approver.service.successions();assert.equal(queue[0].current,true);assert.equal(queue[0].nominee,nominee.actorId);
+ assert.equal((await approver.service.succession({...cmd,stateDigest:"0".repeat(64)})).ok,false);
+ // Reinstating the original administrator invalidates the request.
+ await pool.query("UPDATE securepay_private.dispute_actors SET active=true WHERE tenant_id=$1 AND actor_id=$2",[t,adminId]);
+ assert.equal((await approver.service.succession(cmd)).ok,false);
+ await pool.query("UPDATE securepay_private.dispute_actors SET active=false WHERE tenant_id=$1 AND actor_id=$2",[t,adminId]);
+ const result=await Promise.all([approver.service.succession(cmd),approver.service.succession(cmd)]);assert.equal(result.filter(x=>x.ok).length,1);
+ assert.equal((await nominee.service.queue()).find(x=>x.caseId===caseId).managedByMe,true);
+ const old=await pool.query("SELECT previous_admin,nominee,approved_by,status FROM securepay_private.case_admin_successions WHERE request_id=$1",[requestId]);
+ assert.deepEqual(old.rows[0],{previous_admin:adminId,nominee:nominee.actorId,approved_by:approver.actorId,status:"approved"});
+ await pool.query("UPDATE securepay_private.dispute_actors SET active=true WHERE tenant_id=$1 AND actor_id=$2",[t,adminId]);
+ assert.equal((await admin.action({caseId,target:d.reviewer.actorId,action:"revoke",reason:"Former administrator tries to revoke"})).ok,false);
+ const alias=await anotherGovernanceActor(f,"reviewer");
+ await pool.query("UPDATE securepay_private.actor_person_registry SET person_digest=(SELECT person_digest FROM securepay_private.actor_person_registry WHERE tenant_id=$1 AND actor_id=$2) WHERE tenant_id=$1 AND actor_id=$3",[t,approver.actorId,alias.actorId]);
+ assert.equal((await nominee.service.action({caseId,target:alias.actorId,action:"assign",reason:"Attempt assignment of previous succession approver"})).ok,false);
+ const v=await authorizer.read(caseId);assert.equal(v.case.independent,true);assert.equal(v.case.caseStatus,"final");
+ assert.equal((await balanceFor(d.s)).remaining_cents,"5000");
+ await assert.rejects(adminPool.query("UPDATE securepay_private.case_admin_successions SET status='withdrawn'"),e=>e.code==="42501");
+ assert.equal((await verifyAuditChain(auditPool,t)).ok,true);
+});
+test("succession transfers authority but preserves pending financial review and withdraws predecessor reassessment",async()=>{
+ const f=await governedFixture();await governedFinal(f);const {d,t,caseId,admin,adminId,first}=f;
+ assert.equal((await first.reportConflict({caseId,reason:"Disclosed conflict requiring reassessment"})).ok,true);
+ const prior=await admin.reassess({caseId,action:"request",reason:"Prior administrator requests reassessment"});assert.equal(prior.ok,true);
+ const r=await anotherGovernanceActor(f,"administrator"),a=await anotherGovernanceActor(f,"administrator"),n=await anotherGovernanceActor(f,"administrator");
+ await pool.query("UPDATE securepay_private.dispute_actors SET active=false WHERE tenant_id=$1 AND actor_id=$2",[t,adminId]);
+ const q=await r.service.succession({caseId,nominee:n.actorId,action:"request",reason:"Replacement of unavailable administrator"});assert.equal(q.ok,true);
+ const cmd={caseId,nominee:n.actorId,requestId:q.succession.requestId,stateDigest:q.succession.stateDigest,action:"approve",reason:"Independent continuity approval"};
+ assert.equal((await f.action("conflict",d.second.actorId)).ok,false);
+ // A new governance event invalidates the exact succession snapshot.
+ assert.equal((await f.second.reportConflict({caseId,reason:"Second reviewer disclosed another relationship"})).ok,true);
+ assert.equal((await a.service.succession(cmd)).ok,false);
+ assert.equal((await r.service.succession({...cmd,action:"withdraw"})).ok,true);
+ const next=await r.service.succession({caseId,nominee:n.actorId,action:"request",reason:"Reissued with changed governance state"});assert.equal(next.ok,true);
+ assert.equal((await a.service.succession({...cmd,requestId:next.succession.requestId,stateDigest:next.succession.stateDigest})).ok,true);
+ const archived=(await pool.query("SELECT status FROM securepay_private.case_reassessments WHERE request_id=$1",[prior.reassessment.requestId])).rows[0];assert.equal(archived.status,"withdrawn");
+ assert.equal((await n.service.reassess({caseId,action:"request",reason:"Successor requests fresh independent reassessment"})).ok,true);
+ assert.equal((await balanceFor(d.s)).remaining_cents,"5000");
+});
