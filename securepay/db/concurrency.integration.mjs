@@ -12,6 +12,7 @@ import {makeNotificationWorker} from "./notification-worker.mjs";
 import {makeSandboxProvider} from "./sandbox-provider.mjs";
 import {makeDisputeActor,makeSettlementAuthorizer,makeSettlementProvider} from "./dispute-settlement.mjs";
 import {makeRectificationActor,scanDisputeDeadlines} from "./rectification.mjs";
+import {verifyAuditChain} from "./audit-chain.mjs";
 import {verifyPinCredential} from "../domain/pin-credential.mjs";
 import {readFile} from "node:fs/promises";
 import pg from "pg";
@@ -28,9 +29,9 @@ const pool=new pg.Pool({connectionString:url.href,max:8,connectionTimeoutMillis:
 const payerSigningKey=randomBytes(32);
 const recoveryKey=randomBytes(32);
 const providerKey=randomBytes(32);
-let payerPool, notificationPool, providerPool, provider, disputePool, settlementPool, escalationPool;
+let payerPool, notificationPool, providerPool, provider, disputePool, settlementPool, escalationPool, auditPool;
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(key_id,secret) VALUES('primary',$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(key_id,secret) VALUES('primary',$1)",[deriveCommandKey(pepper)]);
@@ -58,13 +59,15 @@ before(async()=>{
   disputePool=await rolePool("securepay_dispute_runtime");
   settlementPool=await rolePool("securepay_settlement_runtime");
   escalationPool=await rolePool("securepay_escalation_runtime");
+  auditPool=await rolePool("securepay_audit_runtime");
+  await pool.query("INSERT INTO securepay_private.evidence_keys(key_id,secret,write_enabled) VALUES('primary',$1,true)",[randomBytes(32)]);
   await pool.query("CREATE TABLE securepay_ci_staff_only(secret text); INSERT INTO securepay_ci_staff_only VALUES ('fixture')");
   // Fixture admin bypasses RLS solely to exercise transaction semantics.
   // No permissive policies are installed; restricted role tested below.
   await pool.query("CREATE ROLE securepay_ci_restricted NOLOGIN NOBYPASSRLS");
   await pool.query("GRANT SELECT, INSERT, UPDATE ON securepay_milestones, securepay_release_requests, securepay_release_proofs, securepay_customer_pins, securepay_payer_identities, securepay_pin_change_grants TO securepay_ci_restricted");
 });
-after(async()=>{if(escalationPool)await escalationPool.end();if(disputePool)await disputePool.end();if(settlementPool)await settlementPool.end();if(providerPool)await providerPool.end();if(notificationPool)await notificationPool.end();if(payerPool)await payerPool.end();await pool.end();});
+after(async()=>{if(auditPool)await auditPool.end();if(escalationPool)await escalationPool.end();if(disputePool)await disputePool.end();if(settlementPool)await settlementPool.end();if(providerPool)await providerPool.end();if(notificationPool)await notificationPool.end();if(payerPool)await payerPool.end();await pool.end();});
 async function fixture(status="approved",tenantId=randomUUID()) {
   const milestoneId=randomUUID(), customerId=randomUUID();
   await pool.query("INSERT INTO securepay_milestones(id,tenant_id,job_id,amount_cents,status) VALUES($1,$2,$3,5000,$4)",
@@ -892,4 +895,64 @@ test("business deadlines exclude weekends and configured holidays; overdue actio
  assert.equal((await evidence(d)).ok,true);assert.ok((await repairState(d)).owner_responded_at);
  assert.equal((await decide(d)).ok,true);
  await assert.rejects(escalationPool.query("SELECT * FROM securepay_private.dispute_cases"),e=>e.code==="42501");
+});
+
+test("encrypted evidence rotates write keys without altering prior content; corruption and missing keys fail closed",async()=>{
+ const d=await disputeFixture();assert.equal((await openCase(d)).ok,true);
+ const bytes=pngFixture(),p=await photo(d,d.owner,bytes);assert.equal(p.ok,true);
+ const load=async id=>(await pool.query("SELECT content,key_id,plaintext_size FROM securepay_private.dispute_photos WHERE photo_id=$1",[id])).rows[0];
+ const stored=await load(p.photoId);assert.notDeepEqual(stored.content,bytes);assert.equal(stored.plaintext_size,bytes.length);assert.equal(stored.key_id,"primary");
+ const read=()=>d.customer.repairService.readPhoto({...d.scope,photoId:p.photoId});
+ await assert.rejects(disputePool.query("SELECT secret FROM securepay_private.evidence_keys"),e=>e.code==="42501");
+ try{
+  await pool.query("UPDATE securepay_private.evidence_keys SET write_enabled=false WHERE key_id='primary'");
+  assert.equal((await photo(d,d.owner)).ok,false);
+  await pool.query("INSERT INTO securepay_private.evidence_keys(key_id,secret,write_enabled) VALUES('rotation-test',$1,true)",[randomBytes(32)]);
+  const newer=await photo(d,d.owner);assert.equal(newer.ok,true);
+  assert.equal((await load(newer.photoId)).key_id,"rotation-test");
+  assert.deepEqual((await read()).content,bytes);
+  await pool.query("UPDATE securepay_private.evidence_keys SET read_enabled=false WHERE key_id='primary'");
+  await assert.rejects(read(),/Evidence unavailable/);
+  await pool.query("UPDATE securepay_private.evidence_keys SET read_enabled=true WHERE key_id='primary'");
+  const corrupt=Buffer.from(stored.content);corrupt[corrupt.length-10]^=1;
+  await pool.query("UPDATE securepay_private.dispute_photos SET content=$2 WHERE photo_id=$1",[p.photoId,corrupt]);
+  await assert.rejects(read());
+  await pool.query("UPDATE securepay_private.dispute_photos SET content=$2 WHERE photo_id=$1",[p.photoId,stored.content]);
+  assert.deepEqual((await read()).content,bytes);
+ }finally{
+  await pool.query("UPDATE securepay_private.evidence_keys SET write_enabled=false WHERE key_id='rotation-test'; UPDATE securepay_private.evidence_keys SET write_enabled=true,read_enabled=true WHERE key_id='primary'");
+ }
+});
+test("tenant audit export verifies paged chain, subsequent checkpoint continuity and evidence access",async()=>{
+ const d=await disputeFixture();assert.equal((await openCase(d)).ok,true);
+ const first=await verifyAuditChain(auditPool,d.s.tenantId,{pageSize:2});assert.equal(first.ok,true);assert.ok(BigInt(first.checkpoint.last_seq)>0n);
+ const p=await photo(d,d.owner);assert.equal(p.ok,true);
+ assert.ok(await d.customer.repairService.readPhoto({...d.scope,photoId:p.photoId}));
+ const next=await verifyAuditChain(auditPool,d.s.tenantId,{checkpoint:first.checkpoint,pageSize:2});assert.equal(next.ok,true);
+ assert.ok(BigInt(next.checkpoint.last_seq)>BigInt(first.checkpoint.last_seq));
+ const {rows}=await pool.query("SELECT operation,source FROM securepay_private.audit_chain WHERE tenant_id=$1 ORDER BY seq",[d.s.tenantId]);
+ assert.ok(rows.some(r=>r.source==="dispute_photos"&&r.operation==="READ"));
+ assert.ok(rows.some(r=>r.source==="provider_events"));
+ assert.ok(rows.some(r=>r.source==="audit_events"));
+ await assert.rejects(disputePool.query("SELECT * FROM securepay_private.audit_chain"),e=>e.code==="42501");
+ await assert.rejects(auditPool.query("UPDATE securepay_private.audit_chain SET row_digest=$1",["0".repeat(64)]),e=>e.code==="42501");
+ const empty=await verifyAuditChain(auditPool,randomUUID());assert.equal(empty.checkpoint.last_seq,"0");
+});
+test("independent verifier detects altered rows, deleted entries and rewritten head against retained checkpoint",async()=>{
+ const d=await disputeFixture();assert.equal((await openCase(d)).ok,true);
+ const t=d.s.tenantId,original=await verifyAuditChain(auditPool,t);assert.equal(original.ok,true);
+ const saved=(await pool.query("SELECT * FROM securepay_private.audit_chain WHERE tenant_id=$1 AND seq=1",[t])).rows[0];
+ await pool.query("UPDATE securepay_private.audit_chain SET row_digest=$2 WHERE tenant_id=$1 AND seq=1",[t,"0".repeat(64)]);
+ assert.equal((await verifyAuditChain(auditPool,t)).ok,false);
+ await pool.query("UPDATE securepay_private.audit_chain SET row_digest=$2 WHERE tenant_id=$1 AND seq=1",[t,saved.row_digest]);
+ assert.equal((await verifyAuditChain(auditPool,t)).ok,true);
+ await pool.query("DELETE FROM securepay_private.audit_chain WHERE tenant_id=$1 AND seq=1",[t]);
+ assert.equal((await verifyAuditChain(auditPool,t)).ok,false);
+ await pool.query("INSERT INTO securepay_private.audit_chain(tenant_id,seq,source,operation,row_digest,occurred_us,prev_hash,entry_hash) VALUES($1,$2,$3,$4,$5,$6,$7,$8)",[t,saved.seq,saved.source,saved.operation,saved.row_digest,saved.occurred_us,saved.prev_hash,saved.entry_hash]);
+ assert.equal((await verifyAuditChain(auditPool,t)).ok,true);
+ const prior=(await pool.query("SELECT entry_hash,seq FROM securepay_private.audit_chain WHERE tenant_id=$1 ORDER BY seq DESC OFFSET 1 LIMIT 1",[t])).rows[0];
+ await pool.query("DELETE FROM securepay_private.audit_chain WHERE tenant_id=$1 AND seq>$2",[t,prior.seq]);
+ await pool.query("UPDATE securepay_private.audit_chain_heads SET last_seq=$2,last_hash=$3 WHERE tenant_id=$1",[t,prior.seq,prior.entry_hash]);
+ assert.equal((await verifyAuditChain(auditPool,t)).ok,true);
+ assert.deepEqual(await verifyAuditChain(auditPool,t,{checkpoint:original.checkpoint}),{ok:false,reason:"truncated_history"});
 });
