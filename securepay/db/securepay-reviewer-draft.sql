@@ -2,6 +2,14 @@
 BEGIN;
 CREATE ROLE securepay_reviewer_runtime NOLOGIN NOINHERIT NOSUPERUSER NOBYPASSRLS;
 GRANT USAGE ON SCHEMA securepay_private TO securepay_reviewer_runtime;
+CREATE TABLE securepay_private.reviewer_photo_reads(
+ tenant_id uuid NOT NULL,case_id uuid NOT NULL REFERENCES securepay_private.dispute_cases(case_id),reviewer_id uuid NOT NULL,
+ source text NOT NULL CHECK(source IN ('completion','dispute')),photo_id uuid NOT NULL,digest text NOT NULL CHECK(digest ~ '^[a-f0-9]{64}$'),read_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+ PRIMARY KEY(case_id,reviewer_id,source,photo_id,digest)
+);
+ALTER TABLE securepay_private.reviewer_photo_reads OWNER TO securepay_context_owner;
+REVOKE ALL ON securepay_private.reviewer_photo_reads FROM PUBLIC,securepay_reviewer_runtime,securepay_dispute_runtime;
+CREATE TRIGGER sp_chain_review_photo_read AFTER INSERT ON securepay_private.reviewer_photo_reads FOR EACH ROW EXECUTE FUNCTION securepay_private.capture_audit_chain();
 CREATE FUNCTION securepay_private.reviewer_assigned(t uuid,d uuid,a uuid) RETURNS boolean
  LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
  SELECT EXISTS(SELECT 1 FROM securepay_private.dispute_photo_reviewers r JOIN securepay_private.dispute_actors x ON x.tenant_id=r.tenant_id AND x.actor_id=r.reviewer_id
@@ -34,6 +42,7 @@ BEGIN
  'responseDueAt',c.response_due_at,'ownerRespondedAt',c.owner_responded_at,'responseEscalatedAt',c.response_escalated_at,'repairDueAt',c.repair_due_at,'repairReviewDueAt',c.repair_review_due_at,
  'events',(SELECT coalesce(jsonb_agg(jsonb_build_object('eventId',e.event_id,'action',e.action,'details',e.details,'digest',e.evidence_digest,'payoutCents',e.payout_cents::text,'refundCents',e.refund_cents::text,'at',e.occurred_at,'role',CASE WHEN e.actor_id=c.customer_id THEN 'customer' WHEN e.actor_id=c.owner_id THEN 'owner' ELSE 'reviewer_or_authority' END) ORDER BY e.occurred_at,e.event_id),'[]'::jsonb) FROM securepay_private.dispute_events e WHERE e.case_id=d),
  'photos',(SELECT coalesce(jsonb_agg(jsonb_build_object('photoId',p.photo_id,'digest',p.digest,'purged',p.purged_at IS NOT NULL,'source','dispute') ORDER BY p.photo_id),'[]'::jsonb) FROM securepay_private.dispute_photos p WHERE p.case_id=d),
+ 'linkedCompletions',(SELECT coalesce(jsonb_agg(jsonb_build_object('completionId',w.completion_id,'manifestDigest',l.manifest_digest,'status',w.status,'comments',w.comments,'rejectionReason',w.rejection_reason) ORDER BY w.completion_id),'[]'::jsonb) FROM securepay_private.work_dispute_links l JOIN securepay_private.work_completion w ON w.completion_id=l.completion_id WHERE l.case_id=d AND l.tenant_id=t),
  'linkedPhotos',(SELECT coalesce(jsonb_agg(jsonb_build_object('photoId',p.photo_id,'digest',p.digest,'purged',p.purged_at IS NOT NULL,'source','completion','manifestDigest',l.manifest_digest) ORDER BY p.photo_id),'[]'::jsonb) FROM securepay_private.work_dispute_links l JOIN securepay_private.work_photos p ON p.completion_id=l.completion_id WHERE l.case_id=d AND l.tenant_id=t),
  'deadlines',(SELECT coalesce(jsonb_agg(jsonb_build_object('kind',e.kind,'dueAt',e.due_at) ORDER BY e.due_at,e.kind),'[]'::jsonb) FROM securepay_private.dispute_deadline_events e WHERE e.case_id=d))
  INTO r FROM securepay_private.dispute_cases c JOIN public.securepay_milestones m ON m.tenant_id=c.tenant_id AND m.id=c.milestone_id
@@ -66,10 +75,12 @@ BEGIN
  IF k IS NULL THEN RETURN NULL; END IF;
  IF source='completion' THEN
   inner_sig:=encode(public.hmac(convert_to(concat_ws(':','sp-linked-work-v1',t,mid,d,a,p,expires),'UTF8'),k,'sha256'),'hex');
-  RETURN securepay_private.dispute_work_evidence(t,mid,d,a,p,expires,inner_sig);
- END IF;
+  r:=securepay_private.dispute_work_evidence(t,mid,d,a,p,expires,inner_sig);
+ ELSE
  inner_sig:=encode(public.hmac(convert_to(concat_ws(':','sp-photo-read-v1',p,t,mid,d,a,expires),'UTF8'),k,'sha256'),'hex');
  SELECT jsonb_build_object('photoId',p,'digest',q.digest,'content',replace(encode(q.content,'base64'),chr(10),'')) INTO r FROM securepay_private.read_dispute_photo(p,t,mid,d,a,expires,inner_sig) q WHERE q.media_type='image/png';
+ END IF;
+ IF r IS NOT NULL THEN INSERT INTO securepay_private.reviewer_photo_reads(tenant_id,case_id,reviewer_id,source,photo_id,digest) VALUES(t,d,a,source,p,r->>'digest') ON CONFLICT DO NOTHING; END IF;
  RETURN r;
 END $$;
 CREATE FUNCTION securepay_private.reviewer_decision(e uuid,t uuid,d uuid,a uuid,op text,reason text,payout bigint,refund bigint,state_hash text,expires bigint,sig text) RETURNS boolean
@@ -85,7 +96,7 @@ BEGIN
  s:=securepay_private.reviewer_snapshot(t,d,a);
  IF s IS NULL THEN RETURN false; END IF;
  h:=encode(public.digest(convert_to(s::text,'UTF8'),'sha256'),'hex');
- IF h<>state_hash THEN RETURN false; END IF;
+ IF h<>state_hash OR EXISTS(SELECT 1 FROM jsonb_array_elements((s->'photos')||(s->'linkedPhotos')) p WHERE NOT (p->>'purged')::boolean AND NOT EXISTS(SELECT 1 FROM securepay_private.reviewer_photo_reads r WHERE r.tenant_id=t AND r.case_id=d AND r.reviewer_id=a AND r.source=p->>'source' AND r.photo_id=(p->>'photoId')::uuid AND r.digest=p->>'digest')) THEN RETURN false; END IF;
  SELECT secret INTO k FROM securepay_private.dispute_actors WHERE tenant_id=t AND actor_id=a AND active AND role='reviewer';
  IF k IS NULL THEN RETURN false; END IF;
  inner_sig:=encode(public.hmac(convert_to(concat_ws(':','sp-dispute-v1',e,t,mid,d,a,op,encode(convert_to(reason,'UTF8'),'hex'),h,payout,refund,expires),'UTF8'),k,'sha256'),'hex');
