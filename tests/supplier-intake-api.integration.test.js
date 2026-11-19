@@ -125,7 +125,27 @@ test("scanned supplier costs independently reviewed and kept separate from reven
    await expect("owner",duplicate.path+"/preview",409,{body:{controlTotal:"0.11",rowCount:1,evidenceDigest:hash("duplicate") }});
    assert.equal((await admin.query("SELECT count(*)::int n FROM public.invoices WHERE tenant_id=$1 AND direction='customer'",[t])).rows[0].n,0);
    assert.equal((await admin.query("SELECT private.verify_audit_chain($1) AS ok",[t])).rows[0].ok,true);
-   console.log("Reviewed supplier direction, exact direct site candidate mapping, authorization, duplicate denial and immutable materialization passed");
+   const cp="/supplier-costs/"+supplier.batch+"/orders/"+randomUUID();
+   const input={intakeScopeDigest:preview.scopeDigest,classification:"direct_site",evidenceDigest:hash("reviewed no overlap evidence"),confirm:true};
+   const act=(step,patch={})=>({...input,step,...patch});
+   await expect("reader",cp,403,{body:act("request")});
+   await expect("owner",cp,403,{body:act("request"),claims:{amr:["pwd"]}});
+   await expect("reviewer",cp,403,{tenant:other,body:act("request")});
+   await expect("owner",cp,403,{body:act("request",{intakeScopeDigest:hash("wrong source")})});
+   assert.equal((await expect("owner",cp,200,{body:act("request")})).status,"requested");
+   await expect("owner",cp,403,{body:act("approve")});
+   await expect("reviewer",cp,403,{body:act("approve",{classification:"payroll_overlap"})});
+   assert.equal((await expect("reviewer",cp,200,{body:act("approve")})).status,"approved_pending_record");
+   await expect("reviewer",cp,403,{body:act("consume")});
+   const classified=await expect("owner",cp,200,{body:act("consume")});
+   assert.equal(classified.status,"classified");assert.equal(classified.classification,"direct_site");assert.equal(classified.includedInCalculation,false);assert.equal(classified.paymentAuthorized,false);
+   assert.deepEqual(await expect("reviewer",cp,200),classified);
+   await expect("owner",cp,409,{body:act("consume")});
+   await expect("owner","/supplier-costs/"+supplier.batch+"/orders/"+randomUUID(),409,{body:act("request")});
+   await assert.rejects(()=>runtime.query("SELECT * FROM private.supplier_cost_receipts"),e=>e.code==="42501");
+   await assert.rejects(()=>admin.query("DELETE FROM private.supplier_cost_receipts WHERE tenant_id=$1",[t]),e=>e.code==="55000");
+   assert.equal((await admin.query("SELECT private.verify_audit_chain($1) AS ok",[t])).rows[0].ok,true);
+   console.log("Reviewed supplier direction, exact direct site candidate mapping, authorization, duplicate denial and immutable materialization passed; independent cost disposition passed");
   }finally{scanner.release();}
  }finally{await new Promise(r=>api.close(r));await new Promise(r=>keys.close(r));await Promise.all([admin.end(),runtime.end()]);}
 });

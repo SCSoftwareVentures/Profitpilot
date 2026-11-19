@@ -200,6 +200,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/068_reviewed_invoice_intake.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/069_calculation_source_receipts.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/070_reviewed_supplier_intake.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/071_supplier_cost_classification.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql

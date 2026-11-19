@@ -28,6 +28,8 @@ const expected=new Map([
   ["POST /v1/tenants/:tenantId/privacy/cases/:caseId","step-up"],
   ["GET /v1/tenants/:tenantId/privacy/cases/:caseId","step-up"],
   ["POST /v1/tenants/:tenantId/invoice-intakes/:batchId/orders/:orderId/preview","step-up"],
+  ["GET /v1/tenants/:tenantId/supplier-costs/:batchId/orders/:orderId","step-up"],
+  ["POST /v1/tenants/:tenantId/supplier-costs/:batchId/orders/:orderId","step-up"],
   ["GET /v1/tenants/:tenantId/invoice-intakes/:batchId/orders/:orderId","step-up"],
   ["POST /v1/tenants/:tenantId/invoice-intakes/:batchId/orders/:orderId","step-up"],
   ["POST /v1/tenants/:tenantId/workspace/jobs/:jobId","step-up"],
@@ -83,7 +85,7 @@ test("authenticated API responses carry explicit no-store protection",()=>{
   assert.match(source,/app\.use\(\(req,res,next\)\s*=>\s*\{res\.set\("Cache-Control","no-store"\)/);
   assert.ok(source.indexOf('res.set("Cache-Control","no-store")')<source.indexOf('app.use(process.env.NODE_ENV==="production"?sharedLimiter'),"privacy headers precede throttling");
   assert.ok(source.includes("app.use(createRequestAdmission(32))"),"all routes including health must share admission controls");
-  assert.ok(source.indexOf("app.use(helmet())")<source.indexOf("app.use(createRequestAdmission(32))"),"admission rejections must receive security headers");
+  assert.ok(source.includes("const defaultHelmet=helmet();")&&source.indexOf("return (local?localCandidateHelmet:defaultHelmet)(req,res,next);")<source.indexOf("app.use(createRequestAdmission(32))"),"admission rejections must receive security headers");
   assert.ok(source.indexOf('res.set("Cache-Control","no-store")')<source.indexOf('app.use("/v1",authRequired())'),"cache controls must precede authentication and tenant endpoints");
 });
 
