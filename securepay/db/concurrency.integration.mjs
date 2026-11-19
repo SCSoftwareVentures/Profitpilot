@@ -1,7 +1,9 @@
 // Dedicated disposable PostgreSQL database only. Never point this test at production.
 import test,{after,before} from "node:test";
 import assert from "node:assert/strict";
-import {randomUUID} from "node:crypto";
+import {randomUUID,randomBytes} from "node:crypto";
+import {createPinCredential} from "../domain/pin-credential.mjs";
+import {authorizeWithPin} from "./authorize-with-pin.mjs";
 import {readFile} from "node:fs/promises";
 import pg from "pg";
 import {reserveAuthorizedRelease} from "./reserve-authorized-release.mjs";
@@ -15,12 +17,12 @@ if(url.pathname!=="/securepay_ci"||!["localhost","127.0.0.1"].includes(url.hostn
 const pool=new pg.Pool({connectionString:url.href,max:8,connectionTimeoutMillis:5000,
   statement_timeout:10000});
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   // Fixture admin bypasses RLS solely to exercise transaction semantics.
   // No permissive policies are installed; restricted role tested below.
   await pool.query("CREATE ROLE securepay_ci_restricted NOLOGIN NOBYPASSRLS");
-  await pool.query("GRANT SELECT, INSERT, UPDATE ON securepay_milestones, securepay_release_requests, securepay_release_proofs TO securepay_ci_restricted");
+  await pool.query("GRANT SELECT, INSERT, UPDATE ON securepay_milestones, securepay_release_requests, securepay_release_proofs, securepay_customer_pins TO securepay_ci_restricted");
 });
 after(async()=>pool.end());
 async function fixture(status="approved",tenantId=randomUUID()) {
@@ -100,7 +102,7 @@ test("draft RLS denies restricted role reads and mutations",async()=>{
   try {
     await c.query("BEGIN");
     await c.query("SET LOCAL ROLE securepay_ci_restricted");
-    for(const table of ["securepay_milestones","securepay_release_requests","securepay_release_proofs"]){
+    for(const table of ["securepay_milestones","securepay_release_requests","securepay_release_proofs","securepay_customer_pins"]){
       const {rows}=await c.query("SELECT * FROM "+table);
       assert.equal(rows.length,0);
     }
@@ -131,4 +133,47 @@ test("proof that expires while waiting for the milestone lock is rejected",async
   } finally {await blocker.query("ROLLBACK");blocker.release();}
   assert.match((await attempt).error?.message??"",/Authorization rejected/);
   assert.deepEqual(await state(s),{status:"approved",version:"0",requests:0,consumed:0});
+});
+
+const pepper=randomBytes(32);
+async function pinFixture(){
+ const s=await fixture(),pin="012345";
+ const cred=await createPinCredential({...s,pin,pepper});
+ await pool.query("INSERT INTO securepay_customer_pins(tenant_id,customer_id,salt,pin_hash) VALUES($1,$2,$3,$4)",[s.tenantId,s.customerId,cred.salt,cred.pinHash]);
+ await pool.query("UPDATE securepay_milestones SET payer_customer_id=$2 WHERE id=$1",[s.milestoneId,s.customerId]);
+ return {...s,pin,expectedAmountCents:5000};
+}
+const attempt=(s,patch={})=>authorizeWithPin(pool,{...s,requestId:randomUUID(),idempotencyKey:randomUUID(),...patch},pepper);
+test("real PIN reserves only the agreed amount for the identified payer and cannot be replayed",async()=>{
+ const s=await pinFixture();
+ assert.equal((await attempt(s,{expectedAmountCents:5001})).ok,false);
+ assert.equal((await attempt(s,{customerId:randomUUID()})).ok,false);
+ assert.equal((await attempt(s,{tenantId:randomUUID()})).ok,false);
+ assert.equal((await state(s)).requests,0);
+ const r=await attempt(s);
+ assert.equal(r.ok,true);
+ assert.equal((await attempt(s)).ok,false);
+ const persisted=await state(s);
+ assert.equal(persisted.status,"release_pending");
+ assert.equal(persisted.requests,1);
+ assert.equal(persisted.consumed,1);
+});
+test("concurrent wrong PINs persist failed attempts and lock out valid PIN until expiry",async()=>{
+ const s=await pinFixture();
+ const failures=await Promise.all(Array.from({length:6},()=>attempt(s,{pin:"999999"})));
+ assert.equal(failures.every(x=>!x.ok),true);
+ const {rows:[locked]}=await pool.query("SELECT failed_attempts,locked_until>clock_timestamp() AS locked FROM securepay_customer_pins WHERE tenant_id=$1 AND customer_id=$2",[s.tenantId,s.customerId]);
+ assert.deepEqual(locked,{failed_attempts:5,locked:true});
+ assert.equal((await attempt(s)).ok,false);
+ assert.equal((await state(s)).requests,0);
+ await pool.query("UPDATE securepay_customer_pins SET locked_until=clock_timestamp()-interval '1 second' WHERE tenant_id=$1 AND customer_id=$2",[s.tenantId,s.customerId]);
+ assert.equal((await attempt(s)).ok,true);
+ const {rows:[after]}=await pool.query("SELECT failed_attempts,locked_until FROM securepay_customer_pins WHERE tenant_id=$1 AND customer_id=$2",[s.tenantId,s.customerId]);
+ assert.deepEqual(after,{failed_attempts:0,locked_until:null});
+});
+test("concurrent correct PIN requests reserve a single release",async()=>{
+ const s=await pinFixture();
+ const results=await Promise.all([attempt(s),attempt(s)]);
+ assert.equal(results.filter(x=>x.ok).length,1);
+ assert.equal((await state(s)).requests,1);
 });
