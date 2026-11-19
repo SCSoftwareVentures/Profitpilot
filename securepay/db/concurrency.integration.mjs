@@ -2244,3 +2244,51 @@ test("reassessment and self-conflict HTTP routes enforce role-specific permissio
   assert.equal((await balanceFor(f.d.s)).remaining_cents,"5000");
  }finally{await new Promise(r=>s.close(r));}
 });
+
+test("post-authorization conflict recovery independently reaffirms remaining original legs without duplicating confirmed payments",async()=>{
+ await pool.query(await readFile(new URL("securepay-post-authorisation-draft.sql",import.meta.url),"utf8"));
+ const f=await governedFixture();await governedFinal(f);const {d,caseId,authorizer,admin,first,declare}=f;
+ const v=await authorizer.read(caseId),a=await authorizer.authorize({caseId,payoutCents:3000,refundCents:2000,stateDigest:v.stateDigest});assert.equal(a.ok,true);
+ const s={...d.settlement,settlementId:a.settlementId},leg=await d.confirm.dispatch({...s,kind:"payout"});assert.equal(leg.ok,true);
+ const r1=await anotherGovernanceActor(f,"reviewer"),r2=await anotherGovernanceActor(f,"reviewer"),auth=await anotherGovernanceActor(f,"settlement");
+ const req={caseId,reviewerOne:r1.actorId,reviewerTwo:r2.actorId,authorizerId:auth.actorId,reason:"Fresh panel after original reviewer conflict"};
+ assert.equal((await admin.startPostAuth(req)).ok,false);
+ assert.equal((await first.reportConflict({caseId,reason:"Discovered professional conflict after authorization"})).ok,true);
+ assert.equal((await admin.startPostAuth({...req,reviewerOne:d.second.actorId})).ok,false);
+ const opened=await admin.startPostAuth(req);assert.equal(opened.ok,true);
+ assert.equal((await admin.startPostAuth(req)).ok,false);
+ for(const x of [r1,r2,auth])assert.equal((await declare(x.service)).ok,true);
+ const v1=await r1.service.postAuthRead(caseId);assert.equal(v1.review.safeToReaffirm,false);
+ const vote=(x,v,outcome="reaffirm")=>x.service.postAuthVote({caseId,reviewId:opened.reviewId,outcome,reason:"Independent review and exact allocation assessment",stateDigest:v.stateDigest});
+ assert.equal((await vote(r1,v1)).ok,false);
+ assert.equal((await d.confirm.dispatch({...s,kind:"refund"})).ok,false);
+ assert.equal((await d.confirm.record({...s,...leg,outcome:"confirmed",receipt:randomUUID()})).ok,true);
+ const p=await r1.service.postAuthRead(caseId);assert.equal(p.review.safeToReaffirm,true);assert.equal(p.review.remainingCents,"2000");assert.equal(p.review.confirmedPayoutCents,"3000");
+ assert.equal((await vote(r1,v1)).ok,false);assert.equal((await vote(auth,p)).ok,false);
+ assert.equal((await vote(r1,p)).ok,false);
+ for(const x of [r1,r2]){for(const photo of [...p.review.photos,...p.review.linkedPhotos])if(!photo.purged)assert.ok(await x.review.photo({caseId,photoId:photo.photoId,source:photo.source}));}
+ assert.equal((await vote(r1,p)).ok,true);assert.equal((await vote(r1,p)).ok,false);assert.equal((await vote(auth,p)).ok,false);
+ assert.equal((await vote(r2,p)).ok,true);
+ const results=await Promise.all([vote(auth,p),vote(auth,p)]);assert.equal(results.filter(x=>x.ok).length,1);
+ assert.equal((await d.confirm.dispatch({...s,kind:"payout"})).ok,false);
+ const refund=await d.confirm.dispatch({...s,kind:"refund"});assert.equal(refund.ok,true);assert.equal(refund.amountCents,2000);
+ assert.equal((await d.confirm.record({...s,...refund,outcome:"confirmed",receipt:randomUUID()})).ok,true);
+ assert.deepEqual(await balanceFor(d.s),{funded_cents:"5000",payout_cents:"3000",refund_cents:"2000",remaining_cents:"0"});
+ assert.equal((await state(d.s)).status,"settled");assert.equal((await verifyAuditChain(auditPool,f.t)).ok,true);
+});
+test("post-authorization dissent stops all new transfers and cannot rewrite original financial allocation",async()=>{
+ const f=await governedFixture();await governedFinal(f);const {d,caseId,authorizer,admin,first,declare}=f;
+ const v=await authorizer.read(caseId),a=await authorizer.authorize({caseId,payoutCents:3000,refundCents:2000,stateDigest:v.stateDigest});assert.equal(a.ok,true);
+ assert.equal((await first.reportConflict({caseId,reason:"Disclosed conflict after authorization"})).ok,true);
+ const r1=await anotherGovernanceActor(f,"reviewer"),r2=await anotherGovernanceActor(f,"reviewer"),auth=await anotherGovernanceActor(f,"settlement");
+ const q=await admin.startPostAuth({caseId,reviewerOne:r1.actorId,reviewerTwo:r2.actorId,authorizerId:auth.actorId,reason:"Independent assessment of possible incorrect allocation"});assert.equal(q.ok,true);
+ for(const x of [r1,r2,auth])assert.equal((await declare(x.service)).ok,true);
+ const p=await r1.service.postAuthRead(caseId);
+ assert.equal((await r1.service.postAuthVote({caseId,reviewId:q.reviewId,outcome:"stop",reason:"Existing allocation requires separate legal remedy",stateDigest:p.stateDigest})).ok,true);
+ const s={...d.settlement,settlementId:a.settlementId};
+ assert.equal((await d.confirm.dispatch({...s,kind:"payout"})).ok,false);
+ assert.equal((await d.confirm.dispatch({...s,kind:"refund"})).ok,false);
+ assert.equal((await auth.service.postAuthRead(caseId)).review.status,"stopped");
+ assert.deepEqual(await balanceFor(d.s),{funded_cents:"5000",payout_cents:"0",refund_cents:"0",remaining_cents:"5000"});
+ await assert.rejects(reviewerPool.query("UPDATE securepay_private.post_auth_votes SET outcome='reaffirm'"),e=>e.code==="42501");
+});
