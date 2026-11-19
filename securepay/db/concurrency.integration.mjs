@@ -2489,3 +2489,22 @@ test("customer and owner dispute portals route screened uploads and exact scope 
   assert.equal((await balanceFor(d.s)).remaining_cents,"5000");
  }finally{await Promise.all([new Promise(r=>as.close(r)),new Promise(r=>gs.close(r)),new Promise(r=>os.close(r))]);await rm(dir,{recursive:true,force:true});}
 });
+
+test("verified customer can enter the dispute portal from a completion dispute without having a preprovisioned signing actor",async()=>{
+ const d=await completionFixture(),{s,scope,owner,svc,payer}=d;
+ assert.equal((await provider.event({...s,kind:"funded",amountCents:5000})).status,"applied");
+ assert.equal((await owner.start(scope)).ok,true);assert.equal((await owner.upload({...scope,mediaType:"image/png",content:pngFixture()})).ok,true);assert.equal((await owner.submit(scope)).ok,true);
+ const v=(await svc.completion({...payer,body:{}})).completion,caseId=randomUUID();
+ assert.equal((await pool.query("SELECT count(*)::int AS n FROM securepay_private.dispute_actors WHERE tenant_id=$1 AND actor_id=$2",[s.tenantId,s.customerId])).rows[0].n,0);
+ assert.equal((await svc.dispute({...payer,body:{caseId,severity:"moderate",manifestDigest:v.manifestDigest,version:v.version,reason:"Work completion requires independent review"}})).ok,true);
+ assert.equal((await pool.query("SELECT role FROM securepay_private.dispute_actors WHERE tenant_id=$1 AND actor_id=$2",[s.tenantId,s.customerId])).rows[0].role,"customer");
+ const current=await svc.participant({...payer,op:"view",body:{}});assert.equal(current.ok,true);assert.equal(current.participant.case.caseId,caseId);
+ assert.equal(current.participant.case.linkedPhotos.length,1);
+ assert.equal((await svc.participant({...payer,op:"upload",body:{caseId,mediaType:"image/png",content:pngFixture().toString("base64")}})).ok,false);
+ const p=current.participant.case.linkedPhotos[0];assert.equal((await svc.participant({...payer,op:"photo",body:{caseId,photoId:p.photoId,source:"completion"}})).ok,true);
+ assert.equal((await owner.participant({tenantId:s.tenantId,milestoneId:s.milestoneId,op:"view",body:{}})).ok,true);
+ assert.equal((await svc.participant({...payer,op:"evidence",body:{caseId,stateDigest:current.participant.stateDigest,reason:"Customer supplementary explanation"}})).ok,true);
+ await assert.rejects(completionPool.query("SELECT * FROM securepay_private.dispute_actors"),e=>e.code==="42501");
+ await assert.rejects(asPayer(s,c=>c.query("SELECT securepay_private.participant_command(NULL,NULL,NULL,NULL,NULL)")),e=>e.code==="42501");
+ assert.equal((await balanceFor(s)).remaining_cents,"5000");
+});
