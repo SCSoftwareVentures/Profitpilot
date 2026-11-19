@@ -4,7 +4,7 @@
 import {randomUUID} from "node:crypto";
 import {withPayer} from "../db/with-payer.mjs";
 import {authorizePayerInTransaction} from "../db/authorize-with-pin.mjs";
-import {changePin} from "../db/change-pin.mjs";
+import {changePin,resolvePayer} from "../db/change-pin.mjs";
 import {issueRecoveryGrant} from "../db/recovery-grant.mjs";
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 function exact(body,keys){
@@ -19,12 +19,22 @@ export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecov
  if(recoveryEnabled&&(!Buffer.isBuffer(recoveryKey)||recoveryKey.length!==32||recoveryKey.equals(signingKey)||recoveryKey.equals(pepper)||typeof verifyRecovery!=="function"))
   throw new Error("SecurePay recovery unavailable");
  function context(identity,tenantId){
-  if(!identity||typeof identity.subject!=="string"||!identity.subject||identity.subject.length>512)
+  const now=Math.floor(Date.now()/1000);
+  if(!identity||typeof identity.subject!=="string"||!identity.subject||identity.subject.length>512||!Number.isSafeInteger(identity.authTime)||identity.authTime>now||identity.authTime<now-300)
    throw Object.assign(new Error("Authentication required"),{status:401});
   if(typeof tenantId!=="string"||!uuid.test(tenantId))
    throw Object.assign(new Error("Invalid request"),{status:400});
-  return {subject:identity.subject,tenantId,signingKey};
+  return {subject:identity.subject,tenantId,signingKey,authTime:identity.authTime};
  }
+ // Hold the same identity lock as PIN recovery, so a concurrent reset
+ // cannot race an authenticated request past the revocation cutoff.
+ const authenticated=(ctx,fn,stepUpTime=ctx.authTime)=>withPayer(pool,ctx,async c=>{
+  const customerId=await resolvePayer(c,ctx);
+  if(!customerId)return {ok:false};
+  const {rows:[r]}=await c.query("SELECT (session_revoked_at IS NULL OR (to_timestamp($3)>session_revoked_at AND to_timestamp($4)>session_revoked_at)) AS valid FROM securepay_payer_identities WHERE tenant_id=$1 AND customer_id=$2",[ctx.tenantId,customerId,ctx.authTime,stepUpTime]);
+  if(r?.valid!==true)return {ok:false};
+  return fn(c);
+ });
  const bad=()=>{throw Object.assign(new Error("Invalid request"),{status:400});};
  return Object.freeze({
   async reserve({identity,tenantId,milestoneId,body}){
@@ -34,7 +44,7 @@ export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecov
       typeof body.pin!=="string"||!/^[0-9]{6}$/.test(body.pin)||
       !Number.isSafeInteger(body.expectedAmountCents)||body.expectedAmountCents<=0||
       typeof body.idempotencyKey!=="string"||!uuid.test(body.idempotencyKey))bad();
-   return withPayer(pool,ctx,c=>authorizePayerInTransaction(c,{tenantId,subject:ctx.subject,milestoneId,
+   return authenticated(ctx,c=>authorizePayerInTransaction(c,{tenantId,subject:ctx.subject,milestoneId,
       pin:body.pin,expectedAmountCents:body.expectedAmountCents,idempotencyKey:body.idempotencyKey,requestId:randomUUID()},pepper));
   },
   async issueGrant({identity,tenantId,body}){
@@ -45,14 +55,14 @@ export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecov
    let assertion;
    try{assertion=await verifyRecovery(body.stepUpToken,{subject:ctx.subject,tenantId,purpose:body.purpose});}
    catch{return {ok:false};}
-   return withPayer(pool,ctx,c=>issueRecoveryGrant(c,{tenantId,subject:ctx.subject,purpose:body.purpose,assertion},recoveryKey));
+   return authenticated(ctx,c=>issueRecoveryGrant(c,{tenantId,subject:ctx.subject,purpose:body.purpose,assertion},recoveryKey),assertion.authTime);
   },
   async setPin({identity,tenantId,body}){
    const ctx=context(identity,tenantId);
    if(!exact(body,["pin","purpose","grantRef"])||!["enroll","recover"].includes(body.purpose)||
       typeof body.pin!=="string"||!/^[0-9]{6}$/.test(body.pin)||
       typeof body.grantRef!=="string"||!uuid.test(body.grantRef))bad();
-   return withPayer(pool,ctx,c=>changePin(c,{tenantId,subject:ctx.subject,
+   return authenticated(ctx,c=>changePin(c,{tenantId,subject:ctx.subject,
      pin:body.pin,purpose:body.purpose,grantRef:body.grantRef},pepper));
   }
  });
