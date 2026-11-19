@@ -4,7 +4,7 @@ import {createHmac,createHash,randomUUID} from "node:crypto";
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const check=(...ids)=>{if(!ids.every(x=>typeof x==="string"&&uuid.test(x)))throw Error("Invalid repair scope");};
 const expires=()=>Math.floor(Date.now()/1000)+15;
-export function makeRectificationActor({pool,actorId,key}){
+export function makeRectificationActor({pool,actorId,key,scanner}){
  if(!pool?.query||!Buffer.isBuffer(key)||key.length!==32)throw Error("Repair authority unavailable");
  check(actorId);
  const mac=(parts)=>createHmac("sha256",key).update(parts.join(":")).digest("hex");
@@ -12,9 +12,13 @@ export function makeRectificationActor({pool,actorId,key}){
   async storePhoto({photoId=randomUUID(),tenantId,milestoneId,caseId,mediaType,content}){
    check(photoId,tenantId,milestoneId,caseId);
    if(!Buffer.isBuffer(content)||content.length<8||content.length>2097152||!["image/jpeg","image/png"].includes(mediaType))throw Error("Invalid evidence");
-   const digest=createHash("sha256").update(content).digest("hex"),exp=expires();
+   if(typeof scanner?.attest!=="function")return {ok:false};
+   const snapshot=Buffer.from(content);
+   let attestation;try{attestation=await scanner.attest({photoId,tenantId,milestoneId,caseId,actorId,mediaType,content:Buffer.from(snapshot)});}catch{return {ok:false};}
+   const digest=createHash("sha256").update(snapshot).digest("hex"),exp=expires();
+   if(!attestation||attestation.digest!==digest||!Number.isSafeInteger(attestation.exp)||typeof attestation.signature!=="string")return {ok:false};
    const sig=mac(["sp-photo-v1",photoId,tenantId,milestoneId,caseId,actorId,mediaType,digest,exp]);
-   const {rows:[r]}=await pool.query("SELECT securepay_private.store_dispute_photo($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::text,$7::text,$8::bytea,$9::bigint,$10::text) AS ok",[photoId,tenantId,milestoneId,caseId,actorId,mediaType,digest,content,exp,sig]);
+   const {rows:[r]}=await pool.query("SELECT securepay_private.store_screened_photo($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::text,$7::text,$8::bytea,$9::bigint,$10::text,$11::bigint,$12::text) AS ok",[photoId,tenantId,milestoneId,caseId,actorId,mediaType,digest,snapshot,exp,sig,attestation.exp,attestation.signature]);
    return r.ok?{ok:true,photoId,digest}:{ok:false};
   },
   async readPhoto({photoId,tenantId,milestoneId,caseId}){
@@ -41,4 +45,10 @@ export async function scanDisputeDeadlines(pool,batchSize=50){
  if(!pool?.query||!Number.isInteger(batchSize)||batchSize<1||batchSize>100)throw Error("Invalid escalation batch");
  const {rows:[r]}=await pool.query("SELECT securepay_private.scan_dispute_deadlines($1::integer) AS escalated",[batchSize]);
  return r.escalated;
+}
+
+export async function purgeExpiredEvidence(pool,batchSize=50){
+ if(!pool?.query||!Number.isInteger(batchSize)||batchSize<1||batchSize>100)throw Error("Invalid retention batch");
+ const {rows:[r]}=await pool.query("SELECT securepay_private.purge_expired_evidence($1::integer) AS purged",[batchSize]);
+ return r.purged;
 }
