@@ -621,6 +621,11 @@ test("separate authority process verifies JWT and PIN; gateway has no signing ke
   assert.equal(page.status,200);assert.match(page.headers.get("content-security-policy"),/sha256-/);assert.match(await page.text(),/SANDBOX ONLY/);
   const read=await post(viewRoute,{},bearer);assert.equal(read.status,200);
   assert.deepEqual(await read.json(),{mode:"sandbox",moneyMoved:false,milestoneId:s.milestoneId,amountCents:"5000",status:"approved",fundingStatus:"funded",isFinal:false,requestStatus:null});
+  const completionResponse=await post("/milestones/"+s.milestoneId+"/completion",{},bearer);
+  assert.equal(completionResponse.status,200);const completion=await completionResponse.json();assert.equal(completion.status,"approved");assert.equal(completion.photos.length,1);assert.equal(completion.amountCents,"5000");
+  const photoResponse=await post("/milestones/"+s.milestoneId+"/photo",{photoId:completion.photos[0].photoId},bearer);assert.equal(photoResponse.status,200);
+  const photo=await photoResponse.json();assert.equal(photo.digest,completion.photos[0].digest);assert.equal(validEvidencePNG(Buffer.from(photo.content,"base64")),true);
+  assert.equal((await post("/milestones/"+s.milestoneId+"/photo",{photoId:randomUUID()},bearer)).status,403);
   assert.equal((await post(viewRoute,{customerId:s.customerId},bearer)).status,400);
   assert.equal((await post(viewRoute,{},await token("unknown"))).status,403);
   assert.equal((await post("/milestones/"+randomUUID()+"/view",{},bearer)).status,403);
