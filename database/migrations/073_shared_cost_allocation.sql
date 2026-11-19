@@ -44,7 +44,7 @@ BEGIN
  OR EXISTS(SELECT 1 FROM private.revoked_identity_sessions WHERE user_id=actor AND session_digest=p_session)
  THEN RAISE EXCEPTION 'Sensitive operation denied' USING ERRCODE='42501'; END IF;
  RETURN actor;
-END $fn$
+END $fn$;
 
 CREATE TABLE private.shared_cost_orders(
  tenant_id uuid NOT NULL,order_id uuid NOT NULL,source_kind text NOT NULL CHECK(source_kind IN ('payroll','overhead')),
@@ -234,7 +234,7 @@ BEGIN
  INTO total,result FROM hashes;
  IF total>100000 OR result IS NULL THEN RAISE EXCEPTION 'Sensitive recovery inventory exceeds reviewed capacity' USING ERRCODE='54000'; END IF;
  RETURN result;
-END $fn$
+END $fn$;
 REVOKE ALL ON FUNCTION private.sensitive_recovery_fingerprint() FROM PUBLIC,profitpilot_app;
 CREATE OR REPLACE FUNCTION private.verify_security_catalog() RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog AS $fn$
  SELECT coalesce((SELECT digest=private.security_catalog_digest() FROM private.security_catalog_baseline WHERE revision=73),false)
