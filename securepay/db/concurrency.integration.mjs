@@ -26,11 +26,11 @@ const payerSigningKey=randomBytes(32);
 const recoveryKey=randomBytes(32);
 let payerPool, notificationPool;
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
-  await pool.query("INSERT INTO securepay_private.context_key(singleton,secret) VALUES(true,$1)",[payerSigningKey]);
-  await pool.query("INSERT INTO securepay_private.command_key(singleton,secret) VALUES(true,$1)",[deriveCommandKey(pepper)]);
-  await pool.query("INSERT INTO securepay_private.recovery_key(singleton,secret) VALUES(true,$1)",[recoveryKey]);
+  await pool.query("INSERT INTO securepay_private.context_key(key_id,secret) VALUES('primary',$1)",[payerSigningKey]);
+  await pool.query("INSERT INTO securepay_private.command_key(key_id,secret) VALUES('primary',$1)",[deriveCommandKey(pepper)]);
+  await pool.query("INSERT INTO securepay_private.recovery_key(key_id,secret) VALUES('primary',$1)",[recoveryKey]);
   const password=randomBytes(32).toString("hex");
   await pool.query("ALTER ROLE securepay_payer_runtime LOGIN PASSWORD '"+password+"'");
   const payerUrl=new URL(url);payerUrl.username="securepay_payer_runtime";payerUrl.password=password;
@@ -552,7 +552,7 @@ test("separate authority process verifies JWT and PIN; gateway has no signing ke
   PATH:process.env.PATH,NODE_ENV:"test",SECUREPAY_SANDBOX_ENABLED:"true",SECUREPAY_AUTHORITY_SOCKET:socket,
   SECUREPAY_AUTH_ISSUER:issuer,SECUREPAY_AUTH_AUDIENCE:audience,SECUREPAY_AUTH_REQUIRED_ACR:acr,
   SECUREPAY_AUTH_JWKS_URL:"http://127.0.0.1:"+jwks.address().port+"/jwks",
-  SECUREPAY_DATABASE_URL:payerPool.options.connectionString,SECUREPAY_CONTEXT_HMAC_SECRET:payerSigningKey.toString("hex"),SECUREPAY_PIN_PEPPER:pepper.toString("hex")
+  SECUREPAY_DATABASE_URL:payerPool.options.connectionString,SECUREPAY_CONTEXT_HMAC_SECRET:payerSigningKey.toString("hex"),SECUREPAY_PIN_PEPPER:pepper.toString("hex"),SECUREPAY_COMMAND_KEY:deriveCommandKey(pepper).toString("hex")
  },stdio:["ignore","pipe","pipe"]});
  const stopped=new Promise(r=>child.once("exit",r));
  const app=express();app.use("/v1/securepay",createSecurePayGateway(gatewayEnv));
@@ -590,5 +590,56 @@ test("separate authority process verifies JWT and PIN; gateway has no signing ke
   if(child.exitCode===null&&child.signalCode===null){child.kill("SIGKILL");await stopped;}
   if(gateway.listening)await close(gateway);
   await close(jwks);await rm(dir,{recursive:true,force:true});
+ }
+});
+
+test("signing key rotation supports overlap, then rejects revoked and expired context keys",async()=>{
+ const s=await identityFixture(),next=randomBytes(32);
+ await pool.query("INSERT INTO securepay_private.context_key(key_id,secret) VALUES('next',$1)",[next]);
+ const old=()=>asPayer(s,c=>c.query("SELECT securepay_private.current_payer($1) AS payer",[s.tenantId]));
+ const modern=()=>withPayer(payerPool,{...s,signingKey:next,contextKeyId:"next"},c=>c.query("SELECT securepay_private.current_payer($1) AS payer",[s.tenantId]));
+ try{
+  assert.equal((await old()).rows[0].payer,s.customerId);
+  assert.equal((await modern()).rows[0].payer,s.customerId);
+  await pool.query("UPDATE securepay_private.context_key SET active=false WHERE key_id='primary'");
+  await assert.rejects(old(),/Payer context denied/);
+  assert.equal((await modern()).rows[0].payer,s.customerId);
+  await pool.query("UPDATE securepay_private.context_key SET valid_until=clock_timestamp()-interval '1 second' WHERE key_id='next'");
+  await assert.rejects(modern(),/Payer context denied/);
+ }finally{
+  await pool.query("UPDATE securepay_private.context_key SET active=true WHERE key_id='primary'; DELETE FROM securepay_private.context_key WHERE key_id='next'");
+ }
+});
+test("command key rotation leaves enrolled PIN intact and old command authority cannot reserve after revocation",async()=>{
+ const s=await identityFixture(),next=randomBytes(32);
+ await pool.query("UPDATE securepay_milestones SET payer_customer_id=$2 WHERE id=$1",[s.milestoneId,s.customerId]);
+ const g=await changeGrant(s);
+ assert.equal((await asPayer(s,c=>changePin(c,g,pepper))).ok,true);
+ await pool.query("INSERT INTO securepay_private.command_key(key_id,secret) VALUES('next',$1)",[next]);
+ try{
+  await pool.query("UPDATE securepay_private.command_key SET active=false WHERE key_id='primary'");
+  const scope={...s,expectedAmountCents:5000,requestId:randomUUID(),idempotencyKey:randomUUID()};
+  assert.equal((await asPayer(s,c=>authorizePayerInTransaction(c,scope,pepper))).ok,false);
+  assert.equal((await state(s)).requests,0);
+  assert.equal((await asPayer(s,c=>authorizePayerInTransaction(c,scope,pepper,{id:"next",key:next}))).ok,true);
+  assert.equal((await state(s)).requests,1);
+ }finally{
+  await pool.query("UPDATE securepay_private.command_key SET active=true WHERE key_id='primary'; DELETE FROM securepay_private.command_key WHERE key_id='next'");
+ }
+});
+test("recovery signing key rotation rejects retired key and cross-purpose key material",async()=>{
+ const s=await identityFixture(),next=randomBytes(32);
+ await pool.query("INSERT INTO securepay_private.recovery_key(key_id,secret) VALUES('next',$1)",[next]);
+ const issue=(key,id)=>asPayer(s,c=>issueRecoveryGrant(c,{...s,purpose:"enroll",assertion:{digest:randomBytes(32).toString("hex"),expires:Math.floor(Date.now()/1000)+60}},key,id));
+ try{
+  assert.equal((await issue(recoveryKey,"primary")).ok,true);
+  assert.equal((await issue(next,"next")).ok,true);
+  await pool.query("UPDATE securepay_private.recovery_key SET active=false WHERE key_id='primary'");
+  assert.equal((await issue(recoveryKey,"primary")).ok,false);
+  assert.equal((await issue(deriveCommandKey(pepper),"next")).ok,false);
+  assert.equal((await issue(next,"next")).ok,true);
+  await assert.rejects(asPayer(s,c=>c.query("UPDATE securepay_private.recovery_key SET active=true")),e=>e.code==="42501");
+ }finally{
+  await pool.query("UPDATE securepay_private.recovery_key SET active=true WHERE key_id='primary'; DELETE FROM securepay_private.recovery_key WHERE key_id='next'");
  }
 });
