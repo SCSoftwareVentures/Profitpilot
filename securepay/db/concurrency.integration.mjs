@@ -1825,7 +1825,9 @@ test("negotiated funded cancellation conserves exact funds and requires independ
  assert.equal((await ack({...body,refundCents:1499})).ok,false);
  assert.equal((await r.review(r.two,"finalize")).ok,false);
  assert.equal((await ack(body)).ok,true);
- assert.equal((await r.owner.action({...r.scope,action:"ack",details:"Owner accepts provisional decision"})).ok,true);
+ assert.equal((await r.owner.action({...r.scope,action:"ack",details:"Owner accepts provisional decision"})).ok,false);
+ assert.equal((await d.owner.acknowledgeFundedCancellation({...contract,...body,refundCents:1499})).ok,false);
+ assert.equal((await d.owner.acknowledgeFundedCancellation({...contract,...body})).ok,true);
  assert.equal((await r.review(r.one,"finalize")).ok,false);
  assert.equal((await r.review(r.two,"finalize")).ok,true);
  assert.equal((await r.confirm.dispatch({...r.settlement,kind:"refund"})).ok,false);
