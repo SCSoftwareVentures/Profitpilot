@@ -25,7 +25,7 @@ const payerSigningKey=randomBytes(32);
 const recoveryKey=randomBytes(32);
 let payerPool;
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(singleton,secret) VALUES(true,$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(singleton,secret) VALUES(true,$1)",[deriveCommandKey(pepper)]);
@@ -391,7 +391,7 @@ test("dedicated step-up tokens bind payer, tenant, operation and recent MFA; gra
  const token=async({sub=s.subject,aud=audience,tenant=s.tenantId,purpose="securepay-pin-enroll",acr=requiredAcr,auth=now,id=jti}={})=>
   new SignJWT({tenant_id:tenant,purpose,acr,auth_time:auth}).setProtectedHeader({alg:"ES256"})
   .setIssuer(issuer).setAudience(aud).setSubject(sub).setJti(id).setIssuedAt().setExpirationTime("2m").sign(privateKey);
- const call=(stepUpToken,purpose="enroll")=>svc.issueGrant({identity:{subject:s.subject},tenantId:s.tenantId,body:{purpose,stepUpToken}});
+ const call=(stepUpToken,purpose="enroll")=>svc.issueGrant({identity:{subject:s.subject,authTime:now},tenantId:s.tenantId,body:{purpose,stepUpToken}});
  for(const options of [{aud:"securepay-customer"},{sub:"another"},{tenant:randomUUID()},{purpose:"securepay-pin-recover"},{acr:"weak"},{auth:now-180}]){
   assert.equal((await call(await token(options))).ok,false);
  }
@@ -399,10 +399,10 @@ test("dedicated step-up tokens bind payer, tenant, operation and recent MFA; gra
  const results=await Promise.all([call(bearer),call(bearer)]);
  assert.equal(results.filter(r=>r.ok).length,1);
  const g=results.find(r=>r.ok);
- assert.equal((await svc.setPin({identity:{subject:s.subject},tenantId:s.tenantId,body:{pin:s.pin,purpose:"enroll",grantRef:g.grantRef}})).ok,true);
+ assert.equal((await svc.setPin({identity:{subject:s.subject,authTime:now},tenantId:s.tenantId,body:{pin:s.pin,purpose:"enroll",grantRef:g.grantRef}})).ok,true);
  const recovery=await call(await token({id:randomUUID(),purpose:"securepay-pin-recover"}),"recover");
  assert.equal(recovery.ok,true);
- assert.equal((await svc.setPin({identity:{subject:s.subject},tenantId:s.tenantId,body:{pin:"654321",purpose:"recover",grantRef:recovery.grantRef}})).ok,true);
+ assert.equal((await svc.setPin({identity:{subject:s.subject,authTime:now},tenantId:s.tenantId,body:{pin:"654321",purpose:"recover",grantRef:recovery.grantRef}})).ok,true);
  assert.equal((await call(bearer)).ok,false);
 });
 test("recovery issuer key is inaccessible; ordinary signing authority cannot mint grants",async()=>{
@@ -426,4 +426,46 @@ test("audit ledger records PIN failures and reservation atomically; payer cannot
  assert.equal(rows[3].failure_count,1);assert.equal(rows[5].amount_cents,"5000");
  await assert.rejects(asPayer(s,c=>c.query("SELECT * FROM securepay_private.audit_events")),e=>e.code==="42501");
  await assert.rejects(asPayer(s,c=>c.query("DELETE FROM securepay_private.audit_events")),e=>e.code==="42501");
+});
+
+test("PIN recovery revokes prior sessions, queues notification atomically and requires fresh authentication",async()=>{
+ const {makePayerService}=await import("../domain/payer-service.mjs");
+ const s=await identityFixture();
+ const svc=makePayerService({pool:payerPool,signingKey:payerSigningKey,pepper});
+ const now=Math.floor(Date.now()/1000);
+ const identity={subject:s.subject,authTime:now};
+ const set=(g,pin=s.pin,id=identity)=>svc.setPin({identity:id,tenantId:s.tenantId,body:{pin,purpose:g.purpose,grantRef:g.grantRef}});
+ await pool.query("UPDATE securepay_milestones SET payer_customer_id=$2 WHERE id=$1",[s.milestoneId,s.customerId]);
+ assert.equal((await set(await changeGrant(s))).ok,true);
+ const g=await changeGrant(s,"recover");
+ assert.equal((await set(g,"654321")).ok,true);
+ const req={identity,tenantId:s.tenantId,milestoneId:s.milestoneId,body:{pin:"654321",expectedAmountCents:5000,idempotencyKey:randomUUID()}};
+ assert.equal((await svc.reserve(req)).ok,false);
+ assert.equal((await set(await changeGrant(s,"recover"),"654322")).ok,false);
+ const {rows:[r]}=await pool.query("SELECT session_revoked_at FROM securepay_payer_identities WHERE tenant_id=$1 AND customer_id=$2",[s.tenantId,s.customerId]);
+ assert.ok(r.session_revoked_at.getTime()>=now*1000);
+ const {rows}=await pool.query("SELECT event_type,delivered_at FROM securepay_private.recovery_notification_outbox WHERE tenant_id=$1 AND customer_id=$2 ORDER BY notification_id",[s.tenantId,s.customerId]);
+ assert.deepEqual(rows,[{event_type:"pin_enrolled",delivered_at:null},{event_type:"pin_recovered",delivered_at:null}]);
+ await assert.rejects(asPayer(s,c=>c.query("UPDATE securepay_payer_identities SET session_revoked_at=NULL WHERE tenant_id=$1",[s.tenantId])),e=>e.code==="42501");
+ await assert.rejects(asPayer(s,c=>c.query("UPDATE securepay_private.recovery_notification_outbox SET delivered_at=now()")),e=>e.code==="42501");
+ // JWT auth_time has whole-second resolution: wait for the next second.
+ const next=Math.floor(r.session_revoked_at.getTime()/1000)+1;
+ await new Promise(resolve=>setTimeout(resolve,Math.max(0,next*1000-Date.now()+20)));
+ assert.equal((await svc.reserve({...req,identity:{subject:s.subject,authTime:Math.floor(Date.now()/1000)}})).ok,true);
+ assert.equal((await state(s)).requests,1);
+});
+
+test("rollback of PIN recovery also rolls back revocation and notification intent",async()=>{
+ const s=await identityFixture(),enroll=await changeGrant(s);
+ assert.equal((await asPayer(s,c=>changePin(c,enroll,pepper))).ok,true);
+ const g=await changeGrant(s,"recover");
+ await assert.rejects(asPayer(s,async c=>{
+  assert.equal((await changePin(c,{...g,pin:"654321"},pepper)).ok,true);
+  throw Error("forced rollback");
+ }),/forced rollback/);
+ const {rows:[r]}=await pool.query("SELECT session_revoked_at FROM securepay_payer_identities WHERE tenant_id=$1 AND customer_id=$2",[s.tenantId,s.customerId]);
+ assert.equal(r.session_revoked_at,null);
+ const {rows}=await pool.query("SELECT event_type FROM securepay_private.recovery_notification_outbox WHERE tenant_id=$1 AND customer_id=$2",[s.tenantId,s.customerId]);
+ assert.deepEqual(rows,[{event_type:"pin_enrolled"}]);
+ assert.equal((await asPayer(s,c=>changePin(c,{...g,pin:"654321"},pepper))).ok,true);
 });
