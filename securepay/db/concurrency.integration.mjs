@@ -40,7 +40,7 @@ let payerPool, notificationPool, providerPool, provider, disputePool, settlement
 const scanKey=randomBytes(32);
 const scanner=makeEvidenceScanner({key:scanKey,scan:async()=>"clean"});
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql","securepay-reporting-draft.sql","securepay-portal-draft.sql","securepay-work-completion-draft.sql","securepay-work-revision-draft.sql","securepay-payment-plan-draft.sql","securepay-quote-bridge-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql","securepay-reporting-draft.sql","securepay-portal-draft.sql","securepay-work-completion-draft.sql","securepay-work-revision-draft.sql","securepay-payment-plan-draft.sql","securepay-quote-bridge-draft.sql","securepay-contract-changes-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(key_id,secret) VALUES('primary',$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(key_id,secret) VALUES('primary',$1)",[deriveCommandKey(pepper)]);
@@ -1683,4 +1683,73 @@ test("owner quote and customer agreement HTTP APIs enforce scoped persisted quot
   assert.equal((await post(url+"/accept",{planDigest:v.planDigest,expectedTotalCents:5000},d.s.subject)).status,200);
   assert.equal((await own("publish-quote",{previousDigest:q.quote.quoteDigest,description:"Amended",totalCents:6000})).status,403);
  }finally{await Promise.all([new Promise(r=>ownerServer.close(r)),new Promise(r=>payerServer.close(r)),new Promise(r=>gatewayServer.close(r))]);await rm(dir,{recursive:true,force:true});}
+});
+
+async function acceptedContract(){
+ const {d,scope,publish,offer,items}=await quoteFixture(),q=await publish(),p=await offer(q.quote.quoteDigest);
+ assert.equal(p.ok,true);
+ assert.equal((await d.svc.acceptPlan({...d.payer,planId:p.planId,body:{planDigest:p.planDigest,expectedTotalCents:5000},requireQuote:true})).ok,true);
+ const contract={tenantId:scope.tenantId,planId:p.planId};
+ const read=()=>d.owner.contractStatus(contract);
+ const propose=async terms=>d.owner.offerChange({...contract,stateDigest:(await read()).view.stateDigest,...terms});
+ const accept=change=>d.svc.acceptChange({...d.payer,planId:p.planId,body:{changeId:change.changeId,changeDigest:change.changeDigest,expectedTotalCents:Number(change.newTotalCents)}});
+ return {d,items,contract,read,propose,accept,p};
+}
+test("bilateral variation changes only untouched unfunded stage, preserves original offer and rejects stale amount or cross-tenant consent",async()=>{
+ const {d,items,contract,read,propose,accept,p}=await acceptedContract(),before=(await read()).view;
+ const terms={kind:"variation",milestoneId:items[0].milestoneId,newAmountCents:2500,newDescription:"Agreed extra work",reason:"Additional agreed cleaning work"};
+ assert.equal((await d.owner.offerChange({...contract,...terms,stateDigest:"0".repeat(64)})).ok,false);
+ const proposed=await propose(terms);assert.equal(proposed.ok,true);assert.equal(proposed.change.newTotalCents,"5500");
+ assert.equal((await read()).view.state.effectiveTotalCents,"5000");
+ assert.equal((await propose(terms)).ok,false);
+ const foreign=await completionFixture();
+ assert.equal((await foreign.svc.acceptChange({...foreign.payer,planId:contract.planId,body:{changeId:proposed.change.changeId,changeDigest:proposed.change.changeDigest,expectedTotalCents:5500}})).ok,false);
+ assert.equal((await accept({...proposed.change,newTotalCents:"5499"})).ok,false);
+ assert.equal((await accept({...proposed.change,changeDigest:"0".repeat(64)})).ok,false);
+ const results=await Promise.all([accept(proposed.change),accept(proposed.change)]);assert.equal(results.filter(x=>x.ok).length,1);
+ const after=(await read()).view;assert.equal(after.state.effectiveTotalCents,"5500");assert.equal(after.state.originalTotalCents,"5000");assert.equal(after.state.stages[0].amountCents,"2500");assert.equal(after.state.stages[0].description,"Agreed extra work");assert.equal(after.changes[0].affectedStages[0].amountCents,"2000");
+ const initial=(await d.svc.plan({...d.payer,planId:p.planId,body:{}})).plan;assert.deepEqual(initial.items,items);assert.equal(initial.totalCents,"5000");
+ assert.notEqual(after.stateDigest,before.stateDigest);
+ const {projectContract}=await import("../../server/securepay-contract-view.js");assert.equal(projectContract(after,contract.planId).state.effectiveTotalCents,"5500");
+ await assert.rejects(completionPool.query("UPDATE securepay_private.contract_changes SET new_total=1"),e=>e.code==="42501");
+ assert.equal((await verifyAuditChain(auditPool,contract.tenantId)).ok,true);
+});
+test("cancellation of remaining untouched work preserves confirmed payments and prevents funding or work on cancelled stages",async()=>{
+ const {d,items,contract,read,propose,accept}=await acceptedContract();
+ const first=items[0],last=items[1],s={...d.s,milestoneId:first.milestoneId,fundingRef:randomUUID()},payer={...d.payer,milestoneId:first.milestoneId},work={tenantId:s.tenantId,milestoneId:s.milestoneId,completionId:randomUUID()};
+ assert.equal((await provider.event({...s,kind:"funded",amountCents:2000})).status,"applied");
+ assert.equal((await propose({kind:"cancel_remaining",reason:"Both parties agreed to cancellation"})).ok,false);
+ assert.equal((await d.owner.start(work)).ok,true);const photo=await d.owner.upload({...work,mediaType:"image/png",content:pngFixture()});assert.equal(photo.ok,true);
+ assert.equal((await d.owner.submit(work)).ok,true);const w=(await d.svc.completion({...payer,body:{}})).completion;
+ assert.equal((await d.svc.photo({...payer,body:{photoId:photo.photoId}})).ok,true);
+ assert.equal((await d.svc.approve({...payer,body:{completionId:w.completionId,manifestDigest:w.manifestDigest,expectedAmountCents:2000,version:w.version}})).ok,true);
+ const g=await changeGrant(s);assert.equal((await asPayer(s,c=>changePin(c,g,pepper))).ok,true);
+ const reserve=await d.svc.reserve({...payer,body:{pin:s.pin,expectedAmountCents:2000,idempotencyKey:randomUUID()}});assert.equal(reserve.ok,true);
+ assert.equal((await provider.beginDispatch({...s,requestId:reserve.releaseRequestId})).ok,true);
+ assert.equal((await provider.event({...s,kind:"released",amountCents:2000,requestId:reserve.releaseRequestId,transactionRef:randomUUID()})).status,"applied");
+ const before=await balanceFor(s),cancel=await propose({kind:"cancel_remaining",reason:"Both parties agreed to cancellation of remaining work"});assert.equal(cancel.ok,true);assert.equal(cancel.change.newTotalCents,"2000");
+ assert.equal((await accept(cancel.change)).ok,true);
+ const v=(await read()).view;assert.equal(v.state.stages[0].status,"released");assert.equal(v.state.stages[1].status,"cancelled");assert.equal(v.state.effectiveTotalCents,"2000");
+ assert.deepEqual(await balanceFor(s),before);assert.equal((await balanceFor({...s,milestoneId:last.milestoneId})).funded_cents,"0");
+ assert.equal((await d.owner.start({tenantId:s.tenantId,milestoneId:last.milestoneId})).ok,false);
+ assert.equal((await provider.event({tenantId:s.tenantId,milestoneId:last.milestoneId,kind:"funded",amountCents:3000,fundingRef:randomUUID()})).status,"denied");
+ assert.equal((await propose({kind:"cancel_remaining",reason:"Repeat cancelled agreement"})).ok,false);
+ const actor=await reportingActor(contract.tenantId);const report=await loadReconciliationReport(reportingPool,actor);assert.ok(report.milestones.some(m=>m.milestoneId===last.milestoneId&&m.status==="cancelled"));
+});
+test("funding arriving during change acceptance cannot be silently changed or cancelled; stale proposal is withdrawable",async()=>{
+ const {d,items,contract,read,propose,accept}=await acceptedContract();
+ const p=await propose({kind:"variation",milestoneId:items[0].milestoneId,newAmountCents:2500,newDescription:"More work",reason:"Additional scope requested"});assert.equal(p.ok,true);
+ const [funded,accepted]=await Promise.all([provider.event({tenantId:contract.tenantId,milestoneId:items[0].milestoneId,kind:"funded",amountCents:2000,fundingRef:randomUUID()}),accept(p.change)]);
+ assert.equal(Number(funded.status==="applied")+Number(accepted.ok),1);
+ if(!accepted.ok){
+  const v=(await read()).view;assert.equal(v.changes[0].current,false);assert.equal(v.state.stages[0].amountCents,"2000");
+  assert.equal((await accept(p.change)).ok,false);assert.equal((await d.owner.withdrawChange({...contract,changeId:p.change.changeId})).ok,true);
+ }else assert.equal((await read()).view.state.stages[0].amountCents,"2500");
+});
+test("full unfunded cancellation is independently accepted as zero commitment and never creates financial journal entries",async()=>{
+ const {d,items,contract,read,propose,accept}=await acceptedContract();
+ const p=await propose({kind:"cancel_remaining",reason:"Mutually agreed cancellation before work"});assert.equal(p.ok,true);assert.equal(p.change.newTotalCents,"0");
+ assert.equal((await accept(p.change)).ok,true);
+ const view=(await read()).view;assert.equal(view.state.effectiveTotalCents,"0");assert.ok(view.state.stages.every(x=>x.status==="cancelled"));
+ for(const item of items)assert.deepEqual(await balanceFor({tenantId:contract.tenantId,milestoneId:item.milestoneId}),{funded_cents:"0",payout_cents:"0",refund_cents:"0",remaining_cents:"0"});
 });
