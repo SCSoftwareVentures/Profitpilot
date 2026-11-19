@@ -42,7 +42,7 @@ CREATE FUNCTION securepay_private.participant_command(t uuid,m uuid,a uuid,op te
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE c securepay_private.dispute_cases%ROWTYPE;s jsonb;k bytea;exp bigint;ev uuid;ph uuid;src text;reason text;h text;inner_sig text;v jsonb;due bigint;act text;blob bytea;dg text;original text;mime text;scan_exp bigint;envelope text;
 BEGIN
- IF t IS NULL OR m IS NULL OR a IS NULL OR op IS NULL OR body IS NULL OR jsonb_typeof(body)<>'object' THEN RETURN NULL; END IF;
+ IF t IS NULL OR m IS NULL OR a IS NULL OR op IS NULL OR body IS NULL OR octet_length(body::text)>2800000 OR jsonb_typeof(body)<>'object' THEN RETURN NULL; END IF;
  PERFORM 1 FROM public.securepay_milestones WHERE tenant_id=t AND id=m FOR UPDATE;
  IF NOT FOUND THEN RETURN NULL; END IF;
  PERFORM 1 FROM securepay_private.provider_funding WHERE tenant_id=t AND milestone_id=m FOR UPDATE;
@@ -59,7 +59,7 @@ BEGIN
  END IF;
  IF body->>'caseId' IS DISTINCT FROM c.case_id::text THEN RETURN NULL; END IF;
  IF op='photo' THEN
-  ph:=(body->>'photoId')::uuid;src:=body->>'source';
+  ph:=(body->>'photoId')::uuid;src:=body->>'source';IF ph IS NULL THEN RETURN NULL; END IF;
   IF src='completion' THEN
    inner_sig:=encode(public.hmac(convert_to(concat_ws(':','sp-linked-work-v1',t,m,c.case_id,a,ph,exp),'UTF8'),k,'sha256'),'hex');
    v:=securepay_private.dispute_work_evidence(t,m,c.case_id,a,ph,exp,inner_sig);
@@ -73,7 +73,7 @@ BEGIN
  IF op='upload' THEN
   ph:=(body->>'photoId')::uuid;dg:=body->>'digest';original:=body->>'originalDigest';mime:=body->>'originalMediaType';
   scan_exp:=(body->>'scanExpiry')::bigint;envelope:=body->>'scanSignature';
-  IF length(body->>'content')>2796204 THEN RETURN NULL; END IF;
+  IF ph IS NULL OR body->>'content' IS NULL OR length(body->>'content')>2796204 THEN RETURN NULL; END IF;
   blob:=decode(body->>'content','base64');
   inner_sig:=encode(public.hmac(convert_to(concat_ws(':','sp-photo-v1',ph,t,m,c.case_id,a,'image/png',dg,exp),'UTF8'),k,'sha256'),'hex');
   IF securepay_private.store_screened_photo_v2(ph,t,m,c.case_id,a,'image/png',dg,blob,exp,inner_sig,scan_exp,envelope,mime,original) IS DISTINCT FROM true THEN RETURN NULL; END IF;
@@ -105,7 +105,7 @@ BEGIN
   IF act IS NULL OR act NOT IN ('propose','accept_plan','submit_repair','accept_repair','escalate') THEN RETURN NULL; END IF;
   IF act='accept_repair' AND NOT EXISTS(SELECT 1 FROM securepay_private.participant_photo_reads v JOIN securepay_private.dispute_photos p ON p.photo_id=v.photo_id AND p.case_id=v.case_id AND p.digest=v.digest WHERE v.case_id=c.case_id AND v.actor_id=a AND v.photo_id=ph AND p.purged_at IS NULL) THEN RETURN NULL; END IF;
   inner_sig:=encode(public.hmac(convert_to(concat_ws(':','sp-repair-v1',ev,t,m,c.case_id,a,act,encode(convert_to(reason,'UTF8'),'hex'),coalesce(due::text,'-'),coalesce(ph::text,'-'),exp),'UTF8'),k,'sha256'),'hex');
-  IF securepay_private.repair_action(ev,t,m,c.case_id,a,act,reason,due,ph,exp,inner_sig) IS DISTINCT FROM true THEN RETURN NULL; END IF;
+  IF securepay_private.repair_action_internal(ev,t,m,c.case_id,a,act,reason,due,ph,exp,inner_sig) IS DISTINCT FROM true THEN RETURN NULL; END IF;
   RETURN jsonb_build_object('recorded',true);
  END IF;
  RETURN NULL;
@@ -136,4 +136,23 @@ GRANT EXECUTE ON FUNCTION securepay_private.payer_participant(uuid,uuid,text,jso
 ALTER FUNCTION securepay_private.owner_participant(uuid,uuid,uuid,text,text,bigint,text) OWNER TO securepay_context_owner;
 REVOKE ALL ON FUNCTION securepay_private.owner_participant(uuid,uuid,uuid,text,text,bigint,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION securepay_private.owner_participant(uuid,uuid,uuid,text,text,bigint,text) TO securepay_completion_runtime;
+CREATE OR REPLACE FUNCTION securepay_private.dispute_action(e uuid,t uuid,m uuid,d uuid,a uuid,op text,details text,digest text,payout bigint,refund bigint,expires bigint,sig text) RETURNS boolean
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+BEGIN
+ IF op IN ('decide','finalize') THEN RETURN false; END IF;
+ IF op IN ('ack','appeal') THEN RETURN false; END IF;
+ RETURN securepay_private.dispute_action_internal(e,t,m,d,a,op,details,digest,payout,refund,expires,sig);
+END $$;
+ALTER FUNCTION securepay_private.repair_action(uuid,uuid,uuid,uuid,uuid,text,text,bigint,uuid,bigint,text) RENAME TO repair_action_internal;
+REVOKE EXECUTE ON FUNCTION securepay_private.repair_action_internal(uuid,uuid,uuid,uuid,uuid,text,text,bigint,uuid,bigint,text) FROM securepay_dispute_runtime;
+CREATE FUNCTION securepay_private.repair_action(e uuid,t uuid,m uuid,d uuid,a uuid,op text,details text,due bigint,photo uuid,expires bigint,sig text) RETURNS boolean
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+BEGIN
+ IF securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-repair-v1',e,t,m,d,a,op,encode(convert_to(details,'UTF8'),'hex'),coalesce(due::text,'-'),coalesce(photo::text,'-'),expires),expires,sig) IS DISTINCT FROM 'reviewer' THEN RETURN false; END IF;
+ RETURN securepay_private.repair_action_internal(e,t,m,d,a,op,details,due,photo,expires,sig);
+END $$;
+ALTER FUNCTION securepay_private.repair_action(uuid,uuid,uuid,uuid,uuid,text,text,bigint,uuid,bigint,text) OWNER TO securepay_context_owner;
+REVOKE ALL ON FUNCTION securepay_private.repair_action(uuid,uuid,uuid,uuid,uuid,text,text,bigint,uuid,bigint,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION securepay_private.repair_action(uuid,uuid,uuid,uuid,uuid,text,text,bigint,uuid,bigint,text) TO securepay_dispute_runtime;
+
 COMMIT;
