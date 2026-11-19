@@ -304,4 +304,5 @@ BEGIN
  RETURN true;
 EXCEPTION WHEN unique_violation THEN RETURN false;
 END $$;
+GRANT EXECUTE ON FUNCTION securepay_private.retry_settlement_leg(uuid,uuid,uuid,uuid,uuid,uuid,uuid,integer,bigint,text) TO securepay_settlement_dashboard_runtime;
 COMMIT;
