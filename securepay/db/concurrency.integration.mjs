@@ -1947,6 +1947,10 @@ test("assigned reviewer queue, immutable evidence read and state-bound decision 
  const current=await reviewer.read(d.scope.caseId);
  assert.equal((await reviewer.decide({...cmd,stateDigest:current.stateDigest})).ok,false);
  assert.ok(await reviewer.photo({caseId:d.scope.caseId,photoId:extra.photoId,source:"dispute"}));
+ const receiptRows=(await pool.query("SELECT source,photo_id,digest FROM securepay_private.reviewer_photo_reads WHERE case_id=$1 AND reviewer_id=$2 ORDER BY photo_id",[d.scope.caseId,d.reviewer.actorId])).rows;
+ assert.deepEqual(receiptRows.map(x=>x.photo_id).sort(),[p.photoId,extra.photoId].sort(),"Photo receipts must be persisted for both images");
+ assert.ok(receiptRows.every(x=>x.source==="dispute"),"Receipt scope must match dispute source");
+ assert.equal((await reviewer.read(d.scope.caseId)).stateDigest,current.stateDigest,"Photo reads must not change adjudication snapshot");
  assert.equal((await reviewer.decide({...cmd,stateDigest:current.stateDigest})).ok,true);
  assert.equal((await d.approval.authorize(d.settlement)).ok,false);
  assert.equal((await d.call(d.customer,"ack","Customer acknowledged")).ok,true);
