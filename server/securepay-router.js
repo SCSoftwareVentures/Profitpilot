@@ -3,6 +3,7 @@ import express from "express";
 import rateLimit from "express-rate-limit";
 import pg from "pg";
 import {createRemoteJWKSet,jwtVerify} from "jose";
+import {makeSharedCustomerBudget} from "../securepay/db/shared-budget.mjs";
 import {makePayerService} from "../securepay/domain/payer-service.mjs";
 import {validKeyId} from "../securepay/db/key-envelope.mjs";
 import {createRecoveryVerifier} from "../securepay/db/recovery-grant.mjs";
@@ -20,7 +21,7 @@ export function createPayerTokenVerifier({issuer,audience,requiredAcr,keyResolve
   return {subject:payload.sub,authTime:payload.auth_time};
  };
 }
-export function createSecurePayRouter({enabled=false,verifyToken,service}={}){
+export function createSecurePayRouter({enabled=false,verifyToken,service,takeBudget}={}){
  const router=express.Router();
  router.use((req,res,next)=>{
   res.set("Cache-Control","no-store");
@@ -37,6 +38,11 @@ export function createSecurePayRouter({enabled=false,verifyToken,service}={}){
    req.payerIdentity=await verifyToken(token);
    next();
   }catch{return res.status(401).json({error:"Customer authentication required"});}
+ });
+ router.use(async(req,res,next)=>{
+  if(typeof takeBudget!=="function")return next(); // isolated fixture constructor only
+  try{if(!await takeBudget(req.payerIdentity))return res.status(429).json({error:"Too many requests"});next();}
+  catch{return res.status(503).json({error:"SecurePay unavailable"});}
  });
  router.use(express.json({limit:"8kb",strict:true}));
  const handle=fn=>async(req,res)=>{
@@ -68,7 +74,8 @@ export function createSecurePayRouterFromEnv(env=process.env){
  const {SECUREPAY_AUTH_ISSUER:issuer,SECUREPAY_AUTH_AUDIENCE:audience,SECUREPAY_AUTH_JWKS_URL:jwks,SECUREPAY_AUTH_REQUIRED_ACR:requiredAcr,SECUREPAY_DATABASE_URL:databaseUrl}=env;
  const hex=/^[a-f0-9]{64}$/i;
  if(!issuer||!audience||audience===env.AUTH_AUDIENCE||!jwks||!requiredAcr||!databaseUrl||
-    !hex.test(env.SECUREPAY_CONTEXT_HMAC_SECRET??"")||!hex.test(env.SECUREPAY_PIN_PEPPER??"")||!hex.test(env.SECUREPAY_COMMAND_KEY??"")||!validKeyId(env.SECUREPAY_CONTEXT_KEY_ID??"primary")||!validKeyId(env.SECUREPAY_COMMAND_KEY_ID??"primary")||
+    !hex.test(env.SECUREPAY_CONTEXT_HMAC_SECRET??"")||!hex.test(env.SECUREPAY_PIN_PEPPER??"")||!hex.test(env.SECUREPAY_COMMAND_KEY??"")||!hex.test(env.SECUREPAY_RATE_LIMIT_KEY??"")||
+    [env.SECUREPAY_CONTEXT_HMAC_SECRET,env.SECUREPAY_PIN_PEPPER,env.SECUREPAY_COMMAND_KEY,env.SECUREPAY_RECOVERY_KEY,env.TENANT_CONTEXT_HMAC_SECRET].some(k=>k?.toLowerCase()===env.SECUREPAY_RATE_LIMIT_KEY.toLowerCase())||!validKeyId(env.SECUREPAY_CONTEXT_KEY_ID??"primary")||!validKeyId(env.SECUREPAY_COMMAND_KEY_ID??"primary")||
     [env.SECUREPAY_CONTEXT_HMAC_SECRET,env.SECUREPAY_PIN_PEPPER,env.TENANT_CONTEXT_HMAC_SECRET].some(k=>k?.toLowerCase()===env.SECUREPAY_COMMAND_KEY.toLowerCase())||
     env.SECUREPAY_CONTEXT_HMAC_SECRET.toLowerCase()===env.SECUREPAY_PIN_PEPPER.toLowerCase()||
     [env.SECUREPAY_CONTEXT_HMAC_SECRET,env.SECUREPAY_PIN_PEPPER].some(k=>k.toLowerCase()===(env.TENANT_CONTEXT_HMAC_SECRET??"").toLowerCase())||databaseUrl===env.DATABASE_URL)
@@ -92,5 +99,5 @@ export function createSecurePayRouterFromEnv(env=process.env){
   recovery.verifyRecovery=createRecoveryVerifier({issuer:recoveryIssuer,audience:recoveryAudience,requiredAcr:recoveryAcr,keyResolver:createRemoteJWKSet(recoveryJwks)});
  }
  const service=makePayerService({pool,signingKey:Buffer.from(env.SECUREPAY_CONTEXT_HMAC_SECRET,"hex"),pepper:Buffer.from(env.SECUREPAY_PIN_PEPPER,"hex"),contextKeyId:env.SECUREPAY_CONTEXT_KEY_ID??"primary",commandAuthority:{id:env.SECUREPAY_COMMAND_KEY_ID??"primary",key:Buffer.from(env.SECUREPAY_COMMAND_KEY,"hex")},...recovery});
- return createSecurePayRouter({enabled:true,service,verifyToken:createPayerTokenVerifier({issuer,audience,requiredAcr,keyResolver:createRemoteJWKSet(jwksUrl)})});
+ return createSecurePayRouter({enabled:true,service,takeBudget:makeSharedCustomerBudget({pool,key:Buffer.from(env.SECUREPAY_RATE_LIMIT_KEY,"hex"),issuer}),verifyToken:createPayerTokenVerifier({issuer,audience,requiredAcr,keyResolver:createRemoteJWKSet(jwksUrl)})});
 }
