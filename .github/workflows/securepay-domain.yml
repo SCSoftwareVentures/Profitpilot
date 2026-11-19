@@ -3,14 +3,14 @@ on:
   pull_request:
     paths:
       - 'securepay/**'
-      - 'server/securepay-router.js'
+      - 'server/securepay-*.js'
       - 'package.json'
       - '.github/workflows/securepay-domain.yml'
   push:
     branches: [main]
     paths:
       - 'securepay/**'
-      - 'server/securepay-router.js'
+      - 'server/securepay-*.js'
       - 'package.json'
 jobs:
   state-machine:
