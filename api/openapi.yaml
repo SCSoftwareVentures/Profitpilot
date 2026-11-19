@@ -1261,6 +1261,30 @@ paths:
         "200": { description: Reviewed disposition; no calculation or payment effected }
         "403": { description: Authority denied }
         "409": { description: Non-reconciled or already allocated source }
+  /tenants/{tenantId}/financial-coverage:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      summary: Inspect point-in-time financial source coverage without creating a calculation
+      description: MFA owner or admin only. Counts and contextual tenant-wide totals are not attributed to the selected contract. Never certifies completeness or definitive profit.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [contractId, siteId, periodStart, periodEnd]
+              properties:
+                contractId: { type: string, format: uuid }
+                siteId: { type: string, format: uuid }
+                periodStart: { type: string, format: date }
+                periodEnd: { type: string, format: date }
+      responses:
+        "200": { description: Bounded calculation-readiness diagnostic }
+        "400": { description: Invalid scope }
+        "403": { description: Authority denied }
+        "429": { description: Financial access limit reached }
 components:
   schemas:
     ErrorResponse:

@@ -256,3 +256,9 @@ export function sharedCostCorrectionProof(t,k,s,o,input,step,identity,env=proces
  const scope=createHash("sha256").update(f.canonical).digest("hex");
  return [t,k,s,o,f.replaces,JSON.stringify(f.shares),f.evidence,scope,step,...securityWorkProof(t,o,"privileged_operation",scope,step,identity,env,now).slice(5)];
 }
+
+export function financialCoverageProof(t,c,s,starts,ends,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ if(![t,c,s].every(x=>typeof x==="string"&&uuid.test(x))||![starts,ends].every(x=>typeof x==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(x)))denied();
+ const scope=createHash("sha256").update(["financial-coverage-v1",s,starts,ends].join("\n")).digest("hex");
+ return [...signedAction("profitpilot-sensitive-api-v1",[t,c,"financial_coverage",scope],identity,env,now),s,starts,ends];
+}
