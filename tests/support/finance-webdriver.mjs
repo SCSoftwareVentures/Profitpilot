@@ -30,9 +30,9 @@ export async function verifyFinanceWebDriver({base,tenant,token,run,traceDigest}
   await call("/timeouts",{script:15000,pageLoad:20000,implicit:0});
   await call("/window/rect",{width:480,height:900,x:0,y:0});
   await call("/url",{url:base+"/candidate/workspace/"});
-  await until(()=>evaluate("return document.readyState==='complete' && !!document.getElementById('tenant')"),"workspace document");
+  await until(()=>evaluate("return document.readyState==='complete' && document.documentElement.dataset.workspaceReady==='true'"),"workspace module initialization");
   await evaluate("document.getElementById('tenant').value=arguments[0];document.getElementById('token').value=arguments[1];document.querySelector('[data-action=connect]').click();",[tenant,token]);
-  await until(()=>evaluate("return !document.getElementById('workspace').hidden && !document.querySelector('[data-action=connect]').disabled"),"authenticated workspace");
+  await until(async()=>{const state=await evaluate("return {visible:!document.getElementById('workspace').hidden,busy:document.querySelector('[data-action=connect]').disabled,failed:document.getElementById('status').classList.contains('error'),reason:document.getElementById('status').textContent};");if(state.failed&&!state.busy){const reason=state.reason;throw Error("Workspace session failed: "+(/HTTP 429/.test(reason)?"rate restricted":/Authority denied/.test(reason)?"authority denied":/Unable to read/.test(reason)?"network failure":/Response unavailable/.test(reason)?"invalid response":/Unexpected page/.test(reason)?"invalid page":/Session changed/.test(reason)?"session changed":"other application error"));}return state.visible&&!state.busy;},"authenticated workspace",25000);
   assert.equal(await evaluate("return document.querySelector('[role=tab][aria-selected=true]').id"),"tab-overview");
   await evaluate("const tab=document.getElementById('tab-overview');tab.focus();tab.dispatchEvent(new KeyboardEvent('keydown',{key:'End',bubbles:true,cancelable:true}));");
   assert.deepEqual(await evaluate("return [document.activeElement.id,document.getElementById('tab-reports').tabIndex,document.getElementById('tab-overview').tabIndex,document.getElementById('panel-reports').hidden]"),["tab-reports",0,-1,false]);
