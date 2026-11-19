@@ -28,20 +28,29 @@ export function makeSettlementAuthorizer({pool,key,actorId}){
   const x=expiry(),args=[settlementId,tenantId,milestoneId,caseId,actorId,payoutCents,refundCents,x];
   const {rows:[r]}=await pool.query("SELECT securepay_private.authorize_settlement($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::bigint,$7::bigint,$8::bigint,$9::text) AS ok",[...args,mac(key,["sp-settlement-v1",...args])]);
   return response(r.ok);
+ },async retry({eventId=randomUUID(),settlementId,tenantId,milestoneId,caseId,legId,attempt}){
+  checkIds(eventId,settlementId,tenantId,milestoneId,caseId,legId);
+  if(!Number.isInteger(attempt)||attempt<1||attempt>2)throw Error("Invalid retry attempt");
+  const x=expiry(),args=[eventId,settlementId,tenantId,milestoneId,caseId,legId,actorId,attempt,x];
+  const {rows:[r]}=await pool.query("SELECT securepay_private.retry_settlement_leg($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::uuid,$7::uuid,$8::integer,$9::bigint,$10::text) AS ok",[...args,mac(key,["sp-leg-retry-v1",...args])]);
+  return response(r.ok);
  }});
 }
 export function makeSettlementProvider({pool,key,keyId="primary"}){
  checkKey(pool,key);if(!validKeyId(keyId))throw Error("Invalid provider key ID");
- return Object.freeze({async dispatch({settlementId,tenantId,milestoneId,caseId}){
+ return Object.freeze({async dispatch({settlementId,tenantId,milestoneId,caseId,kind}){
   checkIds(settlementId,tenantId,milestoneId,caseId);
-  const {rows:[r]}=await pool.query("SELECT securepay_private.begin_settlement_dispatch($1::uuid,$2::uuid,$3::uuid,$4::uuid) AS ok",[settlementId,tenantId,milestoneId,caseId]);
-  return response(r.ok);
- },async confirm({settlementId,tenantId,milestoneId,caseId,receipt,payoutCents,refundCents}){
-  checkIds(settlementId,tenantId,milestoneId,caseId,receipt);
-  if(payoutCents===null||refundCents===null||!cents(payoutCents)||!cents(refundCents))throw Error("Invalid settlement amounts");
-  const x=expiry(),args=[settlementId,tenantId,milestoneId,caseId,receipt,payoutCents,refundCents,x];
-  const sig=signEnvelope(key,keyId,["sp-settlement-receipt-v1",...args].join(":"));
-  const {rows:[r]}=await pool.query("SELECT securepay_private.confirm_settlement($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::bigint,$7::bigint,$8::bigint,$9::text) AS ok",[...args,sig]);
-  return response(r.ok);
+  if(!["payout","refund"].includes(kind))throw Error("Invalid settlement leg");
+  const {rows:[r]}=await pool.query("SELECT * FROM securepay_private.dispatch_settlement_leg($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::text)",[settlementId,tenantId,milestoneId,caseId,kind]);
+  return r?{...response(true),legId:r.leg_id,idempotencyKey:r.leg_id,attempt:r.attempt,amountCents:Number(r.amount_cents),kind}:response(false);
+ },async record({eventId=randomUUID(),settlementId,tenantId,milestoneId,caseId,legId,kind,amountCents,attempt,outcome,receipt=null}){
+  checkIds(eventId,settlementId,tenantId,milestoneId,caseId,legId);
+  if(!["payout","refund"].includes(kind)||!Number.isSafeInteger(amountCents)||amountCents<=0||!Number.isInteger(attempt)||attempt<1||attempt>3||
+    !["unknown","not_executed","confirmed"].includes(outcome)||(outcome==="confirmed")!==(receipt!==null))throw Error("Invalid settlement receipt");
+  if(receipt!==null)checkIds(receipt);
+  const x=expiry(),args=[eventId,settlementId,tenantId,milestoneId,caseId,legId,kind,amountCents,attempt,outcome,receipt,x];
+  const sig=signEnvelope(key,keyId,["sp-settlement-leg-v1",...args.map(v=>v??"-")].join(":"));
+  const {rows:[r]}=await pool.query("SELECT securepay_private.record_settlement_leg($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::uuid,$7::text,$8::bigint,$9::integer,$10::text,$11::uuid,$12::bigint,$13::text) AS result",[...args,sig]);
+  return {...response(["applied","duplicate"].includes(r.result)),status:r.result};
  }});
 }
