@@ -19,3 +19,8 @@ test("version two export separates reviewed direct supplier expenses and payroll
  const v={...fixture,deliveryCost:"0.15",indicativeContribution:"0.15",sourceTrace:{...fixture.sourceTrace,format:"profitpilot-source-trace-v2",payrollCost:"0.10",supplierCost:"0.05",supplierLineCount:1,supplierExcludedLineCount:2,supplierPendingLineCount:3}};
  const {report,files}=reportFiles(v,run);assert.equal(report.sourceTrace.supplierCost,"0.05");assert.match(files[1].content,/Included direct supplier expenses: AUD 0[.]05/);assert.throws(()=>reportFiles({...v,sourceTrace:{...v.sourceTrace,supplierCost:"0.06"}},run));
 });
+
+test("v3 reconciles allocated overhead without charging site remainder",()=>{
+ const v={...fixture,deliveryCost:"0.07",indicativeContribution:"0.23",sourceTrace:{...fixture.sourceTrace,format:"profitpilot-source-trace-v3",payrollCost:"0.03",supplierCost:"0.02",overheadCost:"0.02",sharedSourceCount:2,unallocatedSharedCost:"0.02",supplierLineCount:1,supplierExcludedLineCount:0,supplierPendingLineCount:1}};
+ const {report,files}=reportFiles(v,run);assert.equal(report.sourceTrace.overheadCost,"0.02");assert.match(files[1].content,/Unallocated site remainder/);assert.throws(()=>reportFiles({...v,sourceTrace:{...v.sourceTrace,overheadCost:"0.03"}},run));
+});
