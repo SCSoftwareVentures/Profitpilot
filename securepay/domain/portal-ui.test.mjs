@@ -148,3 +148,13 @@ test("administrator case actions require rationale and exact actor identifier",a
  h.get("token").value="fixture";await h.fire("load");h.get("case-ref").value=caseId;h.get("op").value="assign";h.get("target").value=target;h.get("reason").value="short";await h.fire("apply");assert.equal(h.calls.length,1);
  h.get("reason").value="Documented independent reviewer assignment";await h.fire("apply");assert.deepEqual(JSON.parse(h.calls[1].opts.body),{caseId,target,action:"assign",reason:"Documented independent reviewer assignment"});
 });
+
+test("reassessment screen requires second administrator and exact current request digest",async()=>{
+ const caseId=randomUUID(),requestId=randomUUID(),stateDigest="a".repeat(64),request={caseId,requestId,stateDigest,reason:"Compromised reviewer",priorStatus:"final",priorPayoutCents:"3000",priorRefundCents:"2000",current:true,requestedByMe:false};
+ const response=x=>({code:200,data:{mode:"sandbox",moneyMoved:false,...x}});
+ const h=ui(disputeAdminPage(),[response({cases:[]}),response({requests:[{...request,requestedByMe:true}]}),response({requests:[request]}),response({reassessment:{requestId,status:"approved"}}),response({cases:[]}),response({requests:[]})]);
+ h.get("token").value="fixture";await h.fire("load");h.get("case-ref").value=caseId;await h.fire("load-reassessments");
+ h.get("request-ref").value=requestId;h.get("reassess-op").value="approve";h.get("reassess-reason").value="Independent verification of request";await h.fire("reassess");assert.equal(h.calls.length,2);
+ await h.fire("load-reassessments");await h.fire("reassess");assert.deepEqual(JSON.parse(h.calls[3].opts.body),{caseId,requestId,stateDigest,action:"approve",reason:"Independent verification of request"});
+ assert.match(h.get("message").textContent,/No payment moved/);
+});
