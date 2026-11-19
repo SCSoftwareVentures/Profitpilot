@@ -19,11 +19,17 @@ export function makeWorkCompletionOwner({pool,actorId,key,scanner}){
    const {rows:[r]}=await pool.query("SELECT securepay_private.owner_quote_view($1,$2,$3,$4,$5) AS view",[...args,mac(["sp-quote-view-v1",...args])]);
    return r?.view?{ok:true,view:r.view}:{ok:false};
   },
-  async offerPlan({planId=randomUUID(),tenantId,jobId,items}){
+  async offerPlan({planId=randomUUID(),tenantId,jobId,items,quoteDigest=null}){
    ids(planId,tenantId,jobId);
    if(!Array.isArray(items)||items.length<1||items.length>20||items.some(x=>!x||typeof x!=="object"||Object.keys(x).length!==4||!uuid.test(x.milestoneId)||!Number.isSafeInteger(x.amountCents)||x.amountCents<=0||typeof x.description!=="string"||!x.description.trim()||x.description.length>500||typeof x.final!=="boolean"))throw Error("Invalid milestone plan");
    const terms=JSON.stringify(items),exp=expiry();
    if(Buffer.byteLength(terms)>32768)throw Error("Plan exceeds size limit");
+   if(quoteDigest!==null){
+    if(typeof quoteDigest!=="string"||!/^[a-f0-9]{64}$/.test(quoteDigest))throw Error("Invalid quote digest");
+    const args=[planId,tenantId,jobId,actorId,terms,quoteDigest,exp];
+    const {rows:[r]}=await pool.query("SELECT securepay_private.offer_payment_plan_bound($1,$2,$3,$4,$5,$6,$7,$8) AS digest",[...args,mac(["sp-plan-offer-v2",planId,tenantId,jobId,actorId,quoteDigest,Buffer.from(terms).toString("hex"),exp])]);
+    return r?.digest?{ok:true,planId,planDigest:r.digest}:{ok:false};
+   }
    const args=[planId,tenantId,jobId,actorId,terms,exp];
    const {rows:[r]}=await pool.query("SELECT securepay_private.offer_payment_plan($1,$2,$3,$4,$5,$6,$7) AS digest",[...args,mac(["sp-plan-offer-v1",planId,tenantId,jobId,actorId,Buffer.from(terms).toString("hex"),exp])]);
    return r?.digest?{ok:true,planId,planDigest:r.digest}:{ok:false};
