@@ -58,7 +58,7 @@ export function createCompletionRouter({enabled=false,tenantId,subject,verifyTok
      if(!exact(body,["changeId"])||!uuid.test(body.changeId))return res.status(400).json({error:"Invalid request"});
      result=await owner.withdrawChange({tenantId,planId,changeId:body.changeId});
     }else{
-     if(!exact(body,["kind","milestoneId","newAmountCents","newDescription","reason"])||!["variation","cancel_remaining"].includes(body.kind)||typeof body.reason!=="string"||body.reason.trim().length<10||body.reason.length>2000||body.reason.includes("\0"))return res.status(400).json({error:"Invalid request"});
+     if(!exact(body,["kind","milestoneId","newAmountCents","newDescription","reason","stateDigest"])||typeof body.stateDigest!=="string"||!/^[a-f0-9]{64}$/.test(body.stateDigest)||!["variation","cancel_remaining"].includes(body.kind)||typeof body.reason!=="string"||body.reason.trim().length<10||body.reason.length>2000||body.reason.includes("\0"))return res.status(400).json({error:"Invalid request"});
      if(body.kind==="variation"?(typeof body.milestoneId!=="string"||!uuid.test(body.milestoneId)||!Number.isSafeInteger(body.newAmountCents)||body.newAmountCents<=0||typeof body.newDescription!=="string"||!body.newDescription.trim()||body.newDescription.length>500||body.newDescription.includes("\0")):(body.milestoneId!==null||body.newAmountCents!==null||body.newDescription!==null))return res.status(400).json({error:"Invalid request"});
      result=await owner.offerChange({tenantId,planId,...body});
     }
