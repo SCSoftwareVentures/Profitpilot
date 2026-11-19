@@ -795,6 +795,13 @@ test("appeal requires both parties' additional evidence; separate settlement and
  assert.equal((await d.confirm.confirm({...settlement,receipt})).ok,false);
  const dispatch=await Promise.all([d.confirm.dispatch(settlement),d.confirm.dispatch(settlement)]);
  assert.equal(dispatch.filter(x=>x.ok).length,1);
+ // An ordinary release receipt must not be reused for a dispute settlement.
+ const ordinary=await providerPayer({funded:true});
+ const rr=await reserveProvider(ordinary);assert.equal(rr.ok,true);
+ assert.equal((await provider.beginDispatch({...ordinary,requestId:rr.releaseRequestId})).ok,true);
+ const usedReceipt=randomUUID();
+ assert.equal((await providerEvent(ordinary,"released",{requestId:rr.releaseRequestId,transactionRef:usedReceipt})).status,"applied");
+ assert.equal((await d.confirm.confirm({...settlement,receipt:usedReceipt})).ok,false);
  assert.equal((await d.confirm.confirm({...settlement,receipt,refundCents:2999})).ok,false);
  const fakeProvider=makeSettlementProvider({pool:providerPool,key:randomBytes(32)});
  assert.equal((await fakeProvider.confirm({...settlement,receipt})).ok,false);
