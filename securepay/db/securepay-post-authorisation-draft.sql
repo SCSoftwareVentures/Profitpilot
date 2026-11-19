@@ -75,6 +75,7 @@ BEGIN
   OR EXISTS(SELECT 1 FROM securepay_private.case_reassessments q WHERE q.case_id=d AND q.status='approved' AND NOT securepay_private.person_distinct(t,x,q.approved_by)) THEN RETURN false; END IF;
  END LOOP;
  INSERT INTO securepay_private.post_auth_reviews(review_id,tenant_id,case_id,settlement_id,administrator_id,reviewer_one,reviewer_two,authorizer_id,reason) VALUES(r,t,d,st.settlement_id,a,u,v,w,reason);
+ UPDATE securepay_private.case_governance_assignments SET revoked_at=clock_timestamp() WHERE case_id=d AND revoked_at IS NULL;
  FOREACH x IN ARRAY ARRAY[u,v,w] LOOP
   wanted:=CASE WHEN x=w THEN 'settlement' ELSE 'reviewer' END;
   INSERT INTO securepay_private.case_governance_assignments(case_id,tenant_id,actor_id,role,assigned_by,reason) VALUES(d,t,x,wanted,a,reason);
@@ -90,7 +91,7 @@ CREATE FUNCTION securepay_private.post_auth_snapshot(t uuid,d uuid) RETURNS json
  'payoutCents',st.payout_cents::text,'refundCents',st.refund_cents::text,'confirmedPayoutCents',b.payout_cents::text,'confirmedRefundCents',b.refund_cents::text,'remainingCents',b.remaining_cents::text,
  'fundingStatus',f.status,'caseStatus',c.status,'providerState',securepay_private.recovery_state(p.settlement_id,t,c.milestone_id,d),
  'journalVerified',securepay_private.verify_financial_journal(t,c.milestone_id),'panelCleared',securepay_private.post_auth_panel_valid(t,d,p.review_id),
- 'safeToReaffirm',f.status='funded' AND c.status='authorized' AND securepay_private.verify_financial_journal(t,c.milestone_id) AND NOT EXISTS(SELECT 1 FROM securepay_private.settlement_legs x WHERE x.settlement_id=p.settlement_id AND x.status IN ('submitted','unknown','not_executed'))
+ 'safeToReaffirm',f.status='funded' AND c.status='authorized' AND securepay_private.verify_financial_journal(t,c.milestone_id) AND NOT EXISTS(SELECT 1 FROM securepay_private.settlement_legs x WHERE x.settlement_id=p.settlement_id AND x.status IN ('submitted','unknown'))
  AND NOT EXISTS(SELECT 1 FROM securepay_private.provider_reconciliation x WHERE x.tenant_id=t AND x.milestone_id=c.milestone_id AND x.resolved_at IS NULL)
  AND NOT EXISTS(SELECT 1 FROM securepay_private.settlement_leg_conflicts x WHERE x.case_id=d AND x.resolved_at IS NULL),
  'legs',(SELECT coalesce(jsonb_agg(jsonb_build_object('kind',l.kind,'amountCents',l.amount_cents::text,'status',l.status,'attempts',l.attempts) ORDER BY l.kind),'[]'::jsonb) FROM securepay_private.settlement_legs l WHERE l.settlement_id=p.settlement_id),
