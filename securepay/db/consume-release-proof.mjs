@@ -11,10 +11,10 @@ export async function consumeReleaseProof(client,{tenantId,milestoneId,customerI
    throw new Error("Invalid SecurePay authorization scope");
  const result=await client.query(
   `UPDATE securepay_release_proofs
-     SET consumed_at=now(), consumed_request_id=$6
+     SET consumed_at=clock_timestamp(), consumed_request_id=$6
    WHERE tenant_id=$1 AND milestone_id=$2 AND customer_id=$3
      AND proof_ref=$4 AND amount_cents=$5 AND consumed_at IS NULL
-     AND expires_at>now()
+     AND expires_at>clock_timestamp()
    RETURNING proof_ref`,
   [tenantId,milestoneId,customerId,authorizationRef,String(amountCents),requestId]);
  return result.rowCount===1;
