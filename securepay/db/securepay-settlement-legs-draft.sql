@@ -119,6 +119,7 @@ BEGIN
  -- Never silently discard a contradictory signed receipt. Freeze outstanding
  -- dispatches for independent investigation, never create another transfer.
  IF op='confirmed' AND (leg.status IN ('confirmed','not_executed','pending') OR n<>leg.attempts) THEN
+  INSERT INTO securepay_private.provider_receipts(receipt) VALUES(r) ON CONFLICT DO NOTHING;
   INSERT INTO securepay_private.settlement_leg_events(event_id,case_id,leg_id,outcome,attempt,receipt) VALUES(e,d,l,op,n,r);
   INSERT INTO securepay_private.settlement_leg_conflicts(event_id,case_id,reason) VALUES(e,d,'contradictory_receipt');
   RETURN 'reconcile';
@@ -172,4 +173,20 @@ GRANT EXECUTE ON FUNCTION securepay_private.record_settlement_leg(uuid,uuid,uuid
 ALTER FUNCTION securepay_private.retry_settlement_leg(uuid,uuid,uuid,uuid,uuid,uuid,uuid,integer,bigint,text) OWNER TO securepay_context_owner;
 REVOKE ALL ON FUNCTION securepay_private.retry_settlement_leg(uuid,uuid,uuid,uuid,uuid,uuid,uuid,integer,bigint,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION securepay_private.retry_settlement_leg(uuid,uuid,uuid,uuid,uuid,uuid,uuid,integer,bigint,text) TO securepay_settlement_runtime;
+CREATE OR REPLACE FUNCTION securepay_private.purge_expired_evidence(batch_size integer) RETURNS integer
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE c securepay_private.dispute_cases%ROWTYPE; total integer:=0; changed integer; n timestamptz:=clock_timestamp();
+BEGIN
+ IF batch_size IS NULL OR batch_size NOT BETWEEN 1 AND 100 THEN RETURN 0; END IF;
+ FOR c IN SELECT q.* FROM securepay_private.dispute_cases q JOIN securepay_private.evidence_retention_policy p ON p.case_id=q.case_id AND p.tenant_id=q.tenant_id
+ WHERE q.status='settled' AND NOT p.legal_hold AND p.retain_until<=n AND NOT EXISTS(SELECT 1 FROM securepay_private.settlement_leg_conflicts f WHERE f.case_id=q.case_id)
+ AND EXISTS(SELECT 1 FROM securepay_private.dispute_photos x WHERE x.case_id=q.case_id AND x.purged_at IS NULL)
+ ORDER BY p.retain_until,q.case_id LIMIT batch_size FOR UPDATE OF q SKIP LOCKED LOOP
+  PERFORM 1 FROM securepay_private.evidence_retention_policy p WHERE p.case_id=c.case_id AND p.tenant_id=c.tenant_id AND NOT p.legal_hold AND p.retain_until<=clock_timestamp() FOR UPDATE;
+  IF NOT FOUND OR EXISTS(SELECT 1 FROM securepay_private.settlement_leg_conflicts f WHERE f.case_id=c.case_id) THEN CONTINUE; END IF;
+  UPDATE securepay_private.dispute_photos SET content=NULL,purged_at=clock_timestamp() WHERE case_id=c.case_id AND purged_at IS NULL;
+  GET DIAGNOSTICS changed=ROW_COUNT;total:=total+changed;
+ END LOOP;
+ RETURN total;
+END $$;
 COMMIT;
