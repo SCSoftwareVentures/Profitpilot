@@ -40,7 +40,7 @@ let payerPool, notificationPool, providerPool, provider, disputePool, settlement
 const scanKey=randomBytes(32);
 const scanner=makeEvidenceScanner({key:scanKey,scan:async()=>"clean"});
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql","securepay-reporting-draft.sql","securepay-portal-draft.sql","securepay-work-completion-draft.sql","securepay-work-revision-draft.sql","securepay-payment-plan-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql","securepay-reporting-draft.sql","securepay-portal-draft.sql","securepay-work-completion-draft.sql","securepay-work-revision-draft.sql","securepay-payment-plan-draft.sql","securepay-quote-bridge-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(key_id,secret) VALUES('primary',$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(key_id,secret) VALUES('primary',$1)",[deriveCommandKey(pepper)]);
@@ -1604,4 +1604,75 @@ test("final stage submission requires confirmed and balanced preceding stages",a
  assert.equal((await provider.event({...s,kind:"released",amountCents:2000,requestId:reserve.releaseRequestId,transactionRef:randomUUID()})).status,"applied");
  assert.equal((await d.owner.submit(finalScope)).ok,true);
  assert.equal((await state({milestoneId:two.milestoneId})).status,"submitted");
+});
+
+async function quoteFixture(){
+ const d=await completionFixture(),jobId=randomUUID(),scope={tenantId:d.s.tenantId,jobId};
+ await pool.query("INSERT INTO securepay_private.quote_job_parties(tenant_id,job_id,customer_id,owner_id) VALUES($1,$2,$3,$4)",[scope.tenantId,jobId,d.s.customerId,d.actorId]);
+ const publish=(more={})=>d.owner.publishQuote({...scope,description:"Complete the agreed cleaning work.",totalCents:5000,...more});
+ const items=[{milestoneId:randomUUID(),description:"Completed first stage",amountCents:2000,final:false},{milestoneId:randomUUID(),description:"Final completion",amountCents:3000,final:true}];
+ const offer=(quoteDigest,more={})=>d.owner.offerPlan({...scope,quoteDigest,items,...more});
+ return {d,scope,publish,offer,items};
+}
+test("published quote revisions bind the displayed customer scope and reject stale same-price offers and legacy bypass",async()=>{
+ const {d,scope,publish,offer,items}=await quoteFixture();
+ const first=await publish();assert.equal(first.ok,true);
+ assert.equal((await d.owner.offerPlan({...scope,items})).ok,false);
+ const old=await offer(first.quote.quoteDigest);assert.equal(old.ok,true);
+ const next=await publish({previousDigest:first.quote.quoteDigest,description:"Revised agreed cleaning scope"});assert.equal(next.ok,true);
+ assert.equal(next.quote.revision,2);assert.notEqual(next.quote.quoteDigest,first.quote.quoteDigest);
+ const prior=(await d.svc.plan({...d.payer,planId:old.planId,body:{}})).plan;
+ assert.equal(prior.status,"withdrawn");assert.equal(prior.quote.description,first.quote.description);
+ assert.equal((await offer(first.quote.quoteDigest)).ok,false);
+ assert.equal((await publish({previousDigest:first.quote.quoteDigest})).ok,false);
+ assert.equal((await d.svc.acceptPlan({...d.payer,planId:old.planId,body:{planDigest:old.planDigest,expectedTotalCents:5000},requireQuote:true})).ok,false);
+ const current=await offer(next.quote.quoteDigest);assert.equal(current.ok,true);
+ const view=(await d.svc.plan({...d.payer,planId:current.planId,body:{}})).plan;
+ assert.equal(view.quote.description,next.quote.description);assert.equal(view.quote.revision,2);assert.deepEqual(view.items,items);
+ assert.equal((await d.svc.acceptPlan({...d.payer,planId:current.planId,body:{planDigest:current.planDigest,expectedTotalCents:5000},requireQuote:true})).ok,true);
+ assert.equal((await publish({previousDigest:next.quote.quoteDigest,totalCents:6000})).ok,false);
+ assert.equal((await d.owner.quoteStatus(scope)).view.plan.status,"accepted");
+ const rows=(await pool.query("SELECT revision,previous_digest,quote_digest FROM securepay_private.quote_revisions WHERE tenant_id=$1 AND job_id=$2 ORDER BY revision",[scope.tenantId,scope.jobId])).rows;
+ assert.deepEqual(rows,[{revision:1,previous_digest:null,quote_digest:first.quote.quoteDigest},{revision:2,previous_digest:first.quote.quoteDigest,quote_digest:next.quote.quoteDigest}]);
+ await assert.rejects(completionPool.query("UPDATE securepay_private.quote_revisions SET total_cents=1"),e=>e.code==="42501");
+ assert.equal((await verifyAuditChain(auditPool,scope.tenantId)).ok,true);
+});
+test("concurrent quote amendment and customer acceptance have exactly one winner",async()=>{
+ const {d,scope,publish,offer}=await quoteFixture(),q=await publish(),p=await offer(q.quote.quoteDigest);
+ assert.equal(p.ok,true);
+ const [amend,accept]=await Promise.all([publish({previousDigest:q.quote.quoteDigest,totalCents:6000}),d.svc.acceptPlan({...d.payer,planId:p.planId,body:{planDigest:p.planDigest,expectedTotalCents:5000},requireQuote:true})]);
+ assert.equal(Number(amend.ok)+Number(accept.ok),1);
+ const v=(await d.owner.quoteStatus(scope)).view;
+ assert.equal(v.quote.revision,amend.ok?2:1);
+ const rows=(await pool.query("SELECT count(*)::int AS n FROM public.securepay_milestones WHERE tenant_id=$1 AND job_id=$2",[scope.tenantId,scope.jobId])).rows;
+ assert.equal(rows[0].n,accept.ok?2:0);
+});
+test("owner quote and customer agreement HTTP APIs enforce scoped persisted quote and exact consent",async()=>{
+ const {createCompletionRouter}=await import("../../server/securepay-completion.js");
+ const {createSecurePayRouter}=await import("../../server/securepay-router.js");
+ const {createServer}=await import("node:http");
+ const {default:express}=await import("express");
+ const {d,scope,items}=await quoteFixture();
+ const ownerApp=express(),payerApp=express();
+ ownerApp.use("/v1/securepay-completion",createCompletionRouter({enabled:true,tenantId:scope.tenantId,subject:"assigned-owner",verifyToken:async token=>({subject:token}),owner:d.owner}));
+ payerApp.use("/v1/securepay",createSecurePayRouter({enabled:true,service:d.svc,verifyToken:async token=>({subject:token,authTime:Math.floor(Date.now()/1000)})}));
+ const ownerServer=createServer(ownerApp),payerServer=createServer(payerApp);
+ await Promise.all([new Promise(r=>ownerServer.listen(0,"127.0.0.1",r)),new Promise(r=>payerServer.listen(0,"127.0.0.1",r))]);
+ try{
+  const o="http://127.0.0.1:"+ownerServer.address().port+"/v1/securepay-completion";
+  const p="http://127.0.0.1:"+payerServer.address().port+"/v1/securepay/tenants/"+scope.tenantId+"/plans/";
+  const post=(url,body,token)=>fetch(url,{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+token},body:JSON.stringify(body)});
+  const own=(action,body={},token="assigned-owner",jobId=scope.jobId)=>post(o+"/"+jobId+"/"+action,body,token);
+  const page=await fetch(o+"/quotes");assert.equal(page.status,200);assert.match(await page.text(),/quotation manager/);
+  assert.equal((await own("quote-status",{},"foreign")).status,403);
+  assert.equal((await own("quote-status",{},"assigned-owner",randomUUID())).status,403);
+  const quotes=await own("publish-quote",{previousDigest:null,description:"Complete the agreed work.",totalCents:5000});assert.equal(quotes.status,201);const q=await quotes.json();
+  assert.equal((await own("offer-plan",{items,quoteDigest:"0".repeat(64)})).status,403);
+  const offered=await own("offer-plan",{items,quoteDigest:q.quote.quoteDigest});assert.equal(offered.status,201);const v=await offered.json();
+  const url=p+v.planId;
+  const viewed=await post(url+"/view",{},d.s.subject);assert.equal(viewed.status,200);const plan=await viewed.json();assert.equal(plan.quote.description,"Complete the agreed work.");assert.equal(plan.planDigest,v.planDigest);
+  assert.equal((await post(url+"/accept",{planDigest:v.planDigest,expectedTotalCents:4999},d.s.subject)).status,403);
+  assert.equal((await post(url+"/accept",{planDigest:v.planDigest,expectedTotalCents:5000},d.s.subject)).status,200);
+  assert.equal((await own("publish-quote",{previousDigest:q.quote.quoteDigest,description:"Amended",totalCents:6000})).status,403);
+ }finally{await Promise.all([new Promise(r=>ownerServer.close(r)),new Promise(r=>payerServer.close(r))]);}
 });
