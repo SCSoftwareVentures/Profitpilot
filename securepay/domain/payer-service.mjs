@@ -39,6 +39,20 @@ export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecov
  });
  const bad=()=>{throw Object.assign(new Error("Invalid request"),{status:400});};
  return Object.freeze({
+  async contract({identity,tenantId,planId,body}){
+   const ctx=context(identity,tenantId);if(typeof planId!=="string"||!uuid.test(planId)||!exact(body,[]))bad();
+   return authenticated(ctx,async c=>{
+    const {rows:[r]}=await c.query("SELECT securepay_private.payer_contract_view($1,$2) AS contract",[tenantId,planId]);
+    return r?.contract?{ok:true,contract:r.contract}:{ok:false};
+   });
+  },
+  async acceptChange({identity,tenantId,planId,body}){
+   const ctx=context(identity,tenantId);if(typeof planId!=="string"||!uuid.test(planId)||!exact(body,["changeId","changeDigest","expectedTotalCents"])||typeof body.changeId!=="string"||!uuid.test(body.changeId)||typeof body.changeDigest!=="string"||!/^[a-f0-9]{64}$/.test(body.changeDigest)||!Number.isSafeInteger(body.expectedTotalCents)||body.expectedTotalCents<0)bad();
+   return authenticated(ctx,async c=>{
+    const {rows:[r]}=await c.query("SELECT securepay_private.accept_contract_change($1,$2,$3,$4,$5) AS ok",[tenantId,planId,body.changeId,body.changeDigest,body.expectedTotalCents]);
+    return r?.ok?{ok:true,changeAccepted:body.changeId}:{ok:false};
+   });
+  },
   async plan({identity,tenantId,planId,body}){
    const ctx=context(identity,tenantId);if(typeof planId!=="string"||!uuid.test(planId)||!exact(body,[]))bad();
    return authenticated(ctx,async c=>{
