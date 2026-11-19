@@ -13,6 +13,8 @@ const expected=new Map([
   ["POST /v1/tenants/:tenantId/imports/:batchId/rows","role"],
   ["POST /v1/tenants/:tenantId/imports/:batchId/validate","role"],
   ["POST /v1/tenants/:tenantId/matches/:matchId/decision","role"],
+  ["GET /v1/tenants/:tenantId/invoice-credits/:lineId/orders/:orderId","step-up"],
+  ["POST /v1/tenants/:tenantId/invoice-credits/:lineId/orders/:orderId","step-up"],
   ["POST /v1/tenants/:tenantId/financial-coverage","step-up"],
   ["POST /v1/tenants/:tenantId/calculations","role"],
   ["GET /v1/tenants/:tenantId/calculations/:runId","member"],
