@@ -12,9 +12,12 @@ function wire(command){
  });
 }
 function frame(text){const b=Buffer.from(text),n=Buffer.alloc(4);n.writeUInt32BE(b.length);return Buffer.concat([Buffer.from("zINSTREAM\0"),n,b,Buffer.alloc(4)]);}
-test("real ClamAV daemon detects synthetic control and application denies stale or unversioned definitions",{skip:!path,timeout:15000},async()=>{
+test("real ClamAV daemon detects harmless EICAR and application denies stale definitions",{skip:!path,timeout:15000},async()=>{
  assert.match(await wire(Buffer.from("zVERSION\0")),/^ClamAV /);
  assert.equal(await wire(frame("ProfitPilot permitted clean synthetic control")),"stream: OK");
- assert.match(await wire(frame("ProfitPilot disposable scanner detection control 2026")),/^stream: .* FOUND$/);
- await assert.rejects(()=>scanClamav(Buffer.from("ProfitPilot clean"),{socketPath:path}),/definitions are not current/);
+ const eicar="X5O!P%@AP[4\\PZX54(P^)7CC)7}$"+"EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*";
+ assert.match(await wire(frame(eicar)),/^stream: .* FOUND$/);
+ assert.equal(await scanClamav(Buffer.from("ProfitPilot clean"),{socketPath:path}),"clean");
+ assert.equal(await scanClamav(Buffer.from(eicar),{socketPath:path}),"infected");
+ await assert.rejects(()=>scanClamav(Buffer.from("ProfitPilot clean"),{socketPath:path,now:()=>Date.now()+72*3600000}),/definitions are not current/);
 });
