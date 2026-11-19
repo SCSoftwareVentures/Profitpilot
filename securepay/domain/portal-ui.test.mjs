@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {Script,createContext} from "node:vm";
 import {createHash,randomUUID} from "node:crypto";
-import {customerPortalPage,ownerDashboardPage} from "../../server/securepay-portal-page.js";
+import {customerPortalPage,ownerDashboardPage,customerQuotePage,ownerQuotePage} from "../../server/securepay-portal-page.js";
 import {createPayerTokenVerifier} from "../../server/securepay-router.js";
 import {generateKeyPair,SignJWT} from "jose";
 function ui(page,responses){
@@ -60,4 +60,22 @@ test("customer cannot approve until all completion images load and review is ack
  await h.fire("approve-work");
  assert.deepEqual(JSON.parse(h.calls[3].opts.body),{completionId:z,manifestDigest:manifest,expectedAmountCents:5000,version:"1"});
  assert.equal(h.get("details").hidden,true);assert.equal(h.get("reserve").disabled,true);
+});
+
+test("customer agreement explicitly binds consent to loaded quote and exact cent amount",async()=>{
+ const t=randomUUID(),p=randomUUID(),digest="a".repeat(64),quote={mode:"sandbox",moneyMoved:false,planId:p,quote:{description:"Synthetic work scope",revision:2,totalCents:"5000"},totalCents:"5000",planDigest:digest,status:"offered",items:[{milestoneId:randomUUID(),description:"Full work",amountCents:5000,final:true}]};
+ const h=ui(customerQuotePage(),[{code:200,data:quote},{code:200,data:{mode:"sandbox",moneyMoved:false,planId:p,status:"plan_accepted"}}]);
+ h.get("tenant").value=t;h.get("plan").value=p;h.get("token").value="fixture";await h.fire("load");
+ assert.equal(h.get("total").textContent,"AUD $50.00");assert.equal(h.get("description").textContent,"Synthetic work scope");assert.equal(h.get("accept").disabled,true);
+ h.get("agree").checked=true;await h.fire("agree","change");assert.equal(h.get("accept").disabled,false);
+ await h.fire("accept");assert.deepEqual(JSON.parse(h.calls[1].opts.body),{planDigest:digest,expectedTotalCents:5000});assert.equal(h.get("accept").disabled,true);assert.equal(h.get("details").hidden,true);
+});
+test("owner quote screen refuses mismatched stage totals and locks accepted quote revisions",async()=>{
+ const job=randomUUID(),digest="b".repeat(64),planId=randomUUID(),view={jobId:job,quote:{quoteDigest:digest,revision:1,description:"Approved scope",totalCents:"5000"},plan:null};
+ const h=ui(ownerQuotePage(),[{code:200,data:{mode:"sandbox",moneyMoved:false,view}},{code:201,data:{mode:"sandbox",moneyMoved:false,planId}},{code:200,data:{mode:"sandbox",moneyMoved:false,view:{...view,plan:{planId,status:"accepted"}}}}]);
+ h.get("job").value=job;h.get("token").value="fixture";await h.fire("load");
+ h.get("stage-description").value="First stage";h.get("stage-amount").value="20.00";await h.fire("add");await h.fire("offer");assert.equal(h.calls.length,1);assert.match(h.get("message").textContent,/must equal/);
+ h.get("stage-description").value="Last stage";h.get("stage-amount").value="30";await h.fire("add");await h.fire("offer");assert.equal(h.calls.length,3);
+ const sent=JSON.parse(h.calls[1].opts.body);assert.equal(sent.quoteDigest,digest);assert.deepEqual(sent.items.map(x=>[x.amountCents,x.final]),[[2000,false],[3000,true]]);
+ assert.equal(h.get("publish").disabled,true);assert.equal(h.get("withdraw").disabled,true);
 });
