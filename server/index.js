@@ -23,7 +23,8 @@ import {jobReferenceSigner,issueJobReference} from "./core-job-reference.js";
 const coreReferenceKey=jobReferenceSigner();
 import {invoiceIntakeFields,invoiceDigest} from "../src/invoice-intake.js";
 import {supplierCostFields} from "../src/supplier-cost.js";
-import {supplierCostStepProof,supplierCostStatusProof} from "./sensitive-operation-proof.js";
+import {supplierCostStepProof,supplierCostStatusProof,sharedCostStepProof,sharedCostStatusProof} from "./sensitive-operation-proof.js";
+import {sharedCostFields} from "../src/shared-cost.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
 import {quarantineConfig,sealQuarantine,MAX_QUARANTINE_BYTES} from "./quarantine.js";
@@ -73,7 +74,7 @@ app.use("/v1/tenants/:tenantId/imports",importIntakeGate());
 app.use("/v1",express.json({limit:"100kb",inflate:false}));
 app.use("/v1",enforceJsonBudget);
 const uuidPattern=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-for(const param of ["batchId","matchId","runId","proposalId","orderId","caseId","reviewId","poolId","recordId","contractId","jobId"])app.param(param,(req,res,next,value)=>uuidPattern.test(value)?next():res.status(400).json({error:"Invalid resource ID"}));
+for(const param of ["batchId","matchId","runId","proposalId","orderId","caseId","reviewId","poolId","recordId","contractId","jobId","sourceId"])app.param(param,(req,res,next,value)=>uuidPattern.test(value)?next():res.status(400).json({error:"Invalid resource ID"}));
 const requestTenant=(req,tenantId,fn)=>withTenant(tenantId,req.identity.subject,fn,req.identity);
 
 async function membership(req,res,next){
@@ -646,6 +647,18 @@ app.post("/v1/tenants/:tenantId/supplier-costs/:batchId/orders/:orderId",members
 app.get("/v1/tenants/:tenantId/supplier-costs/:batchId/orders/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
  try{if(!emptyQuery(req))return res.status(400).json({error:"Invalid query"});return res.json(await sensitiveQuery(req,"SELECT private.api_supplier_cost_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) AS result",supplierCostStatusProof(...invoiceIntakeIds(req),req.identity)));}
  catch(e){return failSensitive(e,res,next);}
+});
+const sharedIds=req=>[req.membership.tenantId,req.params.kind,req.params.sourceId.toLowerCase(),req.params.orderId.toLowerCase()];
+app.post("/v1/tenants/:tenantId/shared-costs/:kind/:sourceId/orders/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{const b=req.body;const ids=sharedIds(req);if(!emptyQuery(req)||!exactBody(b,["shares","evidenceDigest","confirm","step"])||b.confirm!==true||!["request","approve","reject","consume"].includes(b.step))return res.status(400).json({error:"Explicit allocation action required"});
+ const {confirm,step,...input}=b;if(!sharedCostFields(ids[1],ids[2],input))return res.status(400).json({error:"Invalid ordered allocation shares"});
+ return res.json(await sensitiveQuery(req,"SELECT private.api_shared_cost_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) AS result",sharedCostStepProof(...ids,input,step,req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
+});
+app.get("/v1/tenants/:tenantId/shared-costs/:kind/:sourceId/orders/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
+ try{const ids=sharedIds(req);if(!emptyQuery(req)||!["payroll","overhead"].includes(ids[1]))return res.status(400).json({error:"Invalid source scope"});
+ return res.json(await sensitiveQuery(req,"SELECT private.api_shared_cost_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) AS result",sharedCostStatusProof(...ids,req.identity)));
+ }catch(e){return failSensitive(e,res,next);}
 });
 app.use((err,req,res,next)=>{if(res.destroyed||res.writableEnded)return;if(res.headersSent)return next(err);const id=randomUUID();const status=err.code==="P4501"?429:(err.code==="23505"||err.code==="P4502")?409:err.code==="54000"?413:err.code==="22P02"||err.code==="22P05"?400:err.status===503?503:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);if(status===503)res.set("Retry-After","5");if(err.code==="P4501")res.set("Retry-After","3600");process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:err.code==="P4501"?"Financial access limit reached; retry later":err.code==="P4502"?"Payroll evidence was corrected; recalculate before relying on this result":status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":status===503?"Request capacity temporarily unavailable":"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);

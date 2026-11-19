@@ -1216,6 +1216,50 @@ paths:
         '200': { description: "Reviewed disposition; no financial calculation or payment" }
         '403': { description: Authority denied }
         '409': { description: Conflicting classification }
+  /tenants/{tenantId}/shared-costs/{kind}/{sourceId}/orders/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: kind
+        in: path
+        required: true
+        schema: { enum: [payroll, overhead] }
+      - name: sourceId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read exact shared cost allocation review status
+      responses:
+        "200": { description: Review status and source scope }
+        "403": { description: Authority denied }
+    post:
+      summary: Request, independently approve, reject or record exact shared expense allocation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [shares, evidenceDigest, confirm, step]
+              properties:
+                shares:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  description: Ordered arrays of contract UUID, baseline UUID and positive exact decimal amount. Null contract and baseline represent a single explicit unallocated remainder at the end.
+                  items: { type: array, minItems: 3, maxItems: 3 }
+                evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                confirm: { const: true }
+                step: { enum: [request, approve, reject, consume] }
+      responses:
+        "200": { description: Reviewed disposition; no calculation or payment effected }
+        "403": { description: Authority denied }
+        "409": { description: Non-reconciled or already allocated source }
 components:
   schemas:
     ErrorResponse:
