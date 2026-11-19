@@ -54,6 +54,13 @@ export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecov
     return r?.ok?{ok:true,negotiatedCase:caseId}:{ok:false};
    });
   },
+  async appealNegotiated({identity,tenantId,planId,body}){
+   const ctx=context(identity,tenantId);if(typeof planId!=="string"||!uuid.test(planId)||!exact(body,["offerId","decisionId","reason","evidenceDigest"])||![body.offerId,body.decisionId].every(x=>typeof x==="string"&&uuid.test(x))||typeof body.reason!=="string"||body.reason.trim().length<10||body.reason.length>2000||body.reason.includes("\0")||typeof body.evidenceDigest!=="string"||!/^[a-f0-9]{64}$/.test(body.evidenceDigest))bad();
+   return authenticated(ctx,async c=>{
+    const {rows:[r]}=await c.query("SELECT securepay_private.payer_appeal_negotiated($1,$2,$3,$4,$5,$6,$7) AS ok",[tenantId,planId,body.offerId,randomUUID(),body.decisionId,body.reason,body.evidenceDigest]);
+    return r?.ok?{ok:true,negotiatedAppealed:true}:{ok:false};
+   });
+  },
   async acknowledgeNegotiated({identity,tenantId,planId,body}){
    const ctx=context(identity,tenantId);if(typeof planId!=="string"||!uuid.test(planId)||!exact(body,["offerId","decisionId","payoutCents","refundCents"])||![body.offerId,body.decisionId].every(x=>typeof x==="string"&&uuid.test(x))||![body.payoutCents,body.refundCents].every(x=>Number.isSafeInteger(x)&&x>=0))bad();
    return authenticated(ctx,async c=>{
