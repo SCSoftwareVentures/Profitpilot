@@ -2217,3 +2217,30 @@ test("reassessment approval fails if evidence or case state changes; previously 
  assert.equal((await g.admin.reassess({caseId:g.caseId,action:"request",reason:"Attempt reopening after authorization"})).ok,false);
  assert.equal((await g.d.confirm.dispatch({...g.d.settlement,settlementId:a.settlementId,kind:"refund"})).ok,false);
 });
+
+test("reassessment and self-conflict HTTP routes enforce role-specific permissions and exact request snapshot",async()=>{
+ const {createGovernanceRouter}=await import("../../server/securepay-governance.js"),{createReviewerRouter}=await import("../../server/securepay-reviewer.js"),{createServer}=await import("node:http"),{default:express}=await import("express");
+ const f=await governedFixture();await governedFinal(f);const second=await anotherGovernanceActor(f,"administrator");
+ const app=express(),verifyToken=async token=>({subject:token});
+ app.use("/one",createGovernanceRouter({enabled:true,role:"administrator",subject:"one",verifyToken,actor:f.admin}));
+ app.use("/two",createGovernanceRouter({enabled:true,role:"administrator",subject:"two",verifyToken,actor:second.service}));
+ app.use("/reviewer",createReviewerRouter({enabled:true,subject:"reviewer",verifyToken,reviewer:f.firstReview,governance:f.first}));
+ app.use("/settlement",createGovernanceRouter({enabled:true,role:"settlement",subject:"settlement",verifyToken,actor:f.authorizer}));
+ const s=createServer(app);await new Promise(r=>s.listen(0,"127.0.0.1",r));try{
+  const url="http://127.0.0.1:"+s.address().port;
+  const post=(role,action,body,token=role)=>fetch(url+"/"+role+"/"+action,{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+token},body:JSON.stringify(body)});
+  const caseId=f.caseId,requestId=randomUUID(),req={caseId,requestId,action:"request",reason:"Prior independent reviewer disclosed conflict",stateDigest:null};
+  assert.equal((await post("one","reassess",req)).status,403);
+  assert.equal((await post("reviewer","report-conflict",{caseId,reason:"Discovered prior professional relationship"},"one")).status,403);
+  assert.equal((await post("reviewer","report-conflict",{caseId,reason:"Discovered prior professional relationship"})).status,200);
+  assert.equal((await post("settlement","reassess",req)).status,404);
+  const request=await post("one","reassess",req);assert.equal(request.status,200);const {reassessment}=await request.json();
+  const approve={...req,action:"approve",reason:"Independent review of compromised adjudication",stateDigest:reassessment.stateDigest};
+  assert.equal((await post("one","reassess",approve)).status,403);
+  const q=await post("two","reassessments",{});assert.equal(q.status,200);assert.equal((await q.json()).requests[0].current,true);
+  assert.equal((await post("two","reassess",{...approve,stateDigest:"0".repeat(64)})).status,403);
+  assert.equal((await post("two","reassess",approve)).status,200);
+  assert.equal((await post("two","reassess",approve)).status,403);
+  assert.equal((await balanceFor(f.d.s)).remaining_cents,"5000");
+ }finally{await new Promise(r=>s.close(r));}
+});
