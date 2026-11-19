@@ -17,6 +17,7 @@ BEGIN
     'private.quarantine_status(uuid,uuid)','private.session_authorized(text,bigint,bigint,text,bigint,text,text,text)',
     'private.approve_quarantine_promotion_attested(uuid,uuid,bigint,bigint,text,bigint,text,text,text)',
     'private.site_invoice_credit_summary(uuid,uuid,uuid,date,date,uuid)',
+    'private.api_invoice_credit_reversal_step(uuid,uuid,uuid,uuid,text,text,text,text,text,bigint,bigint,text,bigint,text,text,text)',
     'private.api_invoice_credit_step(uuid,uuid,uuid,text,text,text,text,text,bigint,bigint,text,bigint,text,text,text)',
     'private.api_invoice_credit_status(uuid,uuid,text,text,bigint,bigint,text,bigint,text,text,text,uuid)',
     'private.api_financial_coverage(uuid,uuid,text,text,bigint,bigint,text,bigint,text,text,text,uuid,date,date)',
