@@ -7,7 +7,7 @@ import {request} from "node:http";
 import {createHash} from "node:crypto";
 import {isAbsolute} from "node:path";
 const uuid="[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
-const allowedPath=new RegExp("^/tenants/"+uuid+"/(?:pin(?:/grant)?|milestones/"+uuid+"/(?:reserve|view|completion|photo|approve))$");
+const allowedPath=new RegExp("^/tenants/"+uuid+"/(?:pin(?:/grant)?|milestones/"+uuid+"/(?:reserve|view|completion|photo|approve|reject|dispute))$");
 const uuidOnly=new RegExp("^"+uuid+"$");
 export const authoritySecrets=["SECUREPAY_DATABASE_URL","SECUREPAY_CONTEXT_HMAC_SECRET","SECUREPAY_PIN_PEPPER","SECUREPAY_RECOVERY_KEY","SECUREPAY_COMMAND_KEY","SECUREPAY_RATE_LIMIT_KEY"];
 function forward(socketPath,path,token,body){
@@ -55,6 +55,8 @@ export function createSecurePayGateway(env=process.env){
      const bytes=Buffer.from(body.content,"base64");
      if(bytes.length>=8&&bytes.length<=2097152&&bytes.toString("base64")===body.content&&bytes.subarray(0,8).toString("hex")==="89504e470d0a1a0a"&&createHash("sha256").update(bytes).digest("hex")===body.digest)return res.json({mode:"sandbox",moneyMoved:false,photoId:body.photoId,digest:body.digest,content:body.content});
     }
+    if(status===200&&body.moneyMoved===false&&req.path.endsWith("/reject")&&body.status==="work_rejected")return res.json({mode:"sandbox",moneyMoved:false,status:"work_rejected"});
+    if(status===200&&body.moneyMoved===false&&req.path.endsWith("/dispute")&&body.status==="dispute_opened"&&uuidOnly.test(body.caseId)&&body.caseId===req.body.caseId)return res.json({mode:"sandbox",moneyMoved:false,status:"dispute_opened",caseId:body.caseId});
     if(status===200&&body.moneyMoved===false&&req.path.endsWith("/approve")&&body.status==="work_approved")return res.json({mode:"sandbox",moneyMoved:false,status:"work_approved"});
     if(status===200&&req.path.endsWith("/view")&&body.moneyMoved===false&&uuidOnly.test(body.milestoneId)&&req.path.endsWith("/"+body.milestoneId+"/view")&&typeof body.amountCents==="string"&&/^[1-9][0-9]{0,18}$/.test(body.amountCents)&&["planned","submitted","approved","disputed","release_pending","released","settled"].includes(body.status)&&["unfunded","funded","held","released","settled"].includes(body.fundingStatus)&&typeof body.isFinal==="boolean"&&[null,"pending","submitted","confirmed","failed"].includes(body.requestStatus))
      return res.json({mode:"sandbox",moneyMoved:false,milestoneId:body.milestoneId,amountCents:body.amountCents,status:body.status,fundingStatus:body.fundingStatus,isFinal:body.isFinal,requestStatus:body.requestStatus});
