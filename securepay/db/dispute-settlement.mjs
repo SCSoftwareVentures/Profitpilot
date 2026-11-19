@@ -45,7 +45,7 @@ export function makeSettlementProvider({pool,key,keyId="primary"}){
   return r?{...response(true),legId:r.leg_id,idempotencyKey:r.leg_id,attempt:r.attempt,amountCents:Number(r.amount_cents),kind}:response(false);
  },async record({eventId=randomUUID(),settlementId,tenantId,milestoneId,caseId,legId,kind,amountCents,attempt,outcome,receipt=null}){
   checkIds(eventId,settlementId,tenantId,milestoneId,caseId,legId);
-  if(!["payout","refund"].includes(kind)||!Number.isSafeInteger(amountCents)||amountCents<=0||!Number.isInteger(attempt)||attempt<1||attempt>3||
+  if(!["payout","refund"].includes(kind)||!Number.isSafeInteger(amountCents)||amountCents<=0||!Number.isInteger(attempt)||attempt<1||attempt>4||
     !["unknown","not_executed","confirmed"].includes(outcome)||(outcome==="confirmed")!==(receipt!==null))throw Error("Invalid settlement receipt");
   if(receipt!==null)checkIds(receipt);
   const x=expiry(),args=[eventId,settlementId,tenantId,milestoneId,caseId,legId,kind,amountCents,attempt,outcome,receipt,x];
