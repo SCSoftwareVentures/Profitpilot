@@ -1883,3 +1883,36 @@ test("payer appeal prevents finalization until both sides give appeal evidence a
  assert.equal((await r.confirm.record({...final,...leg,outcome:"confirmed",receipt:randomUUID()})).ok,true);
  assert.equal((await balanceFor(f.s)).refund_cents,"2000");assert.equal((await state(f.s)).status,"settled");
 });
+
+test("funded cancellation customer and owner HTTP endpoints use scoped exact consent through gateway",async()=>{
+ const {mkdtemp,rm}=await import("node:fs/promises"),{tmpdir}=await import("node:os"),{join}=await import("node:path"),{createServer}=await import("node:http"),{default:express}=await import("express");
+ const {createCompletionRouter}=await import("../../server/securepay-completion.js"),{createSecurePayRouter}=await import("../../server/securepay-router.js"),{createSecurePayGateway}=await import("../../server/securepay-gateway.js");
+ const f=await fundedCancellationFixture(),{d,contract,s}=f;
+ const dir=await mkdtemp(join(tmpdir(),"sp-cancel-")),socketPath=join(dir,"authority.sock");
+ const ownerApp=express(),payerApp=express(),gateway=express();
+ ownerApp.use("/v1/securepay-completion",createCompletionRouter({enabled:true,tenantId:contract.tenantId,subject:"assigned-owner",verifyToken:async token=>({subject:token}),owner:d.owner}));
+ payerApp.use("/v1/securepay",createSecurePayRouter({enabled:true,service:d.svc,verifyToken:async token=>({subject:token,authTime:Math.floor(Date.now()/1000)})}));
+ gateway.use("/v1/securepay",createSecurePayGateway({NODE_ENV:"test",SECUREPAY_SANDBOX_ENABLED:"true",SECUREPAY_AUTHORITY_SOCKET:socketPath}));
+ const os=createServer(ownerApp),ps=createServer(payerApp),gs=createServer(gateway);
+ await Promise.all([new Promise(r=>os.listen(0,"127.0.0.1",r)),new Promise(r=>ps.listen(socketPath,r)),new Promise(r=>gs.listen(0,"127.0.0.1",r))]);
+ try{
+  const ob="http://127.0.0.1:"+os.address().port+"/v1/securepay-completion",pb="http://127.0.0.1:"+gs.address().port+"/v1/securepay";
+  const post=(url,body,token)=>fetch(url,{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+token},body:JSON.stringify(body)});
+  const own=(action,body={},token="assigned-owner")=>post(ob+"/"+contract.planId+"/"+action,body,token),payer=(action,body={},token=s.subject)=>post(pb+"/tenants/"+contract.tenantId+"/plans/"+contract.planId+"/"+action,body,token);
+  assert.equal((await fetch(ob+"/cancellations")).status,200);assert.equal((await fetch(pb+"/cancellation")).status,200);
+  assert.equal((await own("funded-cancellation-status",{},"wrong-owner")).status,403);
+  const status=await own("funded-cancellation-status");assert.equal(status.status,200);const v=(await status.json()).cancellation;
+  const req={milestoneId:s.milestoneId,payoutCents:500,refundCents:1500,reason:"Mutual cancellation and partial compensation",stateDigest:v.stages[0].stateDigest};
+  const proposal=await own("offer-funded-cancellation",req);assert.equal(proposal.status,201);const {offer}=await proposal.json();
+  const p=await payer("funded-cancellation");assert.equal(p.status,200);assert.equal((await p.json()).cancellation.offers[0].current,true);
+  const accept={offerId:offer.offerId,offerDigest:offer.offerDigest,payoutCents:500,refundCents:1500};
+  assert.equal((await payer("accept-funded-cancellation",{...accept,refundCents:1499})).status,403);
+  const accepted=await payer("accept-funded-cancellation",accept);assert.equal(accepted.status,200);const {caseId}=await accepted.json();
+  const r=await cancellationReview(f,caseId);await r.assign(r.one);await r.assign(r.two);assert.equal((await r.review(r.one,"decide")).ok,true);
+  const current=await payer("funded-cancellation");assert.equal(current.status,200);const o=(await current.json()).cancellation.offers[0];
+  const ack={offerId:o.offerId,decisionId:o.decision.eventId,payoutCents:500,refundCents:1500};
+  assert.equal((await payer("ack-negotiated",ack)).status,200);assert.equal((await own("ack-negotiated",ack)).status,200);
+  assert.equal((await r.review(r.two,"finalize")).ok,true);
+  assert.equal((await state(s)).status,"disputed");assert.equal((await balanceFor(s)).remaining_cents,"2000");
+ }finally{await Promise.all([new Promise(r=>os.close(r)),new Promise(r=>ps.close(r)),new Promise(r=>gs.close(r))]);await rm(dir,{recursive:true,force:true});}
+});
