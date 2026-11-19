@@ -1,0 +1,2 @@
+import test from "node:test";import assert from "node:assert/strict";import {invoiceCreditFields} from "../src/invoice-credit.js";
+test("credit accepts only canonical positive exact decimals and distinct explicit scope fields",()=>{const x={creditReferenceDigest:"a".repeat(64),amount:"0.01",evidenceDigest:"b".repeat(64)};assert.deepEqual(invoiceCreditFields(x),Object.values(x));for(const patch of [{amount:"0.00"},{amount:"-0.01"},{amount:0.01},{amount:"0.001"},{creditReferenceDigest:"0".repeat(64)},{extra:true}])assert.equal(invoiceCreditFields({...x,...patch}),null);});

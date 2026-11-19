@@ -1,6 +1,7 @@
 import {createHmac,createHash,randomBytes} from "node:crypto";
 import {hasRecentMfa} from "./auth.js";
 import {invoiceIntakeFields} from "../src/invoice-intake.js";
+import {invoiceCreditFields} from "../src/invoice-credit.js";
 import {supplierCostFields} from "../src/supplier-cost.js";
 import {sharedCostFields,sharedCostCorrectionFields} from "../src/shared-cost.js";
 import {workspaceJobFields} from "../src/workspace-jobs.js";
@@ -261,4 +262,15 @@ export function financialCoverageProof(t,c,s,starts,ends,identity,env=process.en
  if(![t,c,s].every(x=>typeof x==="string"&&uuid.test(x))||![starts,ends].every(x=>typeof x==="string"&&/^\d{4}-\d{2}-\d{2}$/.test(x)))denied();
  const scope=createHash("sha256").update(["financial-coverage-v1",s,starts,ends].join("\n")).digest("hex");
  return [...signedAction("profitpilot-sensitive-api-v1",[t,c,"financial_coverage",scope],identity,env,now),s,starts,ends];
+}
+
+export function invoiceCreditStepProof(t,l,o,input,step,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ const fields=invoiceCreditFields(input);if(![t,l,o].every(x=>typeof x==="string"&&uuid.test(x))||!fields)denied();
+ const scope=createHash("sha256").update(["invoice-credit-v1",l,...fields].join("\n")).digest("hex");
+ return [t,l,o,...fields,scope,step,...securityWorkProof(t,o,"privileged_operation",scope,step,identity,env,now).slice(5)];
+}
+export function invoiceCreditStatusProof(t,l,o,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ if(![t,l,o].every(x=>typeof x==="string"&&uuid.test(x)))denied();
+ const scope=createHash("sha256").update(["invoice-credit-status-v1",l].join("\n")).digest("hex");
+ return [...signedAction("profitpilot-sensitive-api-v1",[t,o,"invoice_credit_status",scope],identity,env,now),l];
 }

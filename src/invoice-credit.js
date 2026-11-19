@@ -1,0 +1,2 @@
+const digest=x=>typeof x==="string"&&/^[a-f0-9]{64}$/.test(x)&&!/^0+$/.test(x);
+export function invoiceCreditFields(x){if(!x||typeof x!=="object"||Array.isArray(x)||Object.keys(x).length!==3||!digest(x.creditReferenceDigest)||!digest(x.evidenceDigest)||typeof x.amount!=="string"||!/^(0|[1-9][0-9]{0,11})\.[0-9]{2}$/.test(x.amount)||x.amount==="0.00")return null;return [x.creditReferenceDigest,x.amount,x.evidenceDigest];}

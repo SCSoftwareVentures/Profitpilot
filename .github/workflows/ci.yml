@@ -208,6 +208,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/076_business_overhead_allocation.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/077_business_overhead_calculation.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/078_financial_coverage.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/079_reviewed_invoice_credits.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
@@ -374,6 +375,12 @@ jobs:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/financial-coverage-api.integration.test.js
+
+      - name: Verify reviewed invoice credits and net calculations
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
+        run: |
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/invoice-credit-api.integration.test.js
 
       - name: Verify real Firefox report workflow
         env:
