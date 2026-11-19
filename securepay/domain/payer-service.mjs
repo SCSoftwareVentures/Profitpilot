@@ -46,9 +46,13 @@ export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecov
     return r?.plan?{ok:true,plan:r.plan}:{ok:false};
    });
   },
-  async acceptPlan({identity,tenantId,planId,body}){
+  async acceptPlan({identity,tenantId,planId,body,requireQuote=false}){
    const ctx=context(identity,tenantId);if(typeof planId!=="string"||!uuid.test(planId)||!exact(body,["planDigest","expectedTotalCents"])||typeof body.planDigest!=="string"||!/^[a-f0-9]{64}$/.test(body.planDigest)||!Number.isSafeInteger(body.expectedTotalCents)||body.expectedTotalCents<=0)bad();
    return authenticated(ctx,async c=>{
+    if(requireQuote){
+     const {rows:[v]}=await c.query("SELECT securepay_private.payer_plan_view($1,$2) AS plan",[tenantId,planId]);
+     if(!v?.plan?.quote)return {ok:false};
+    }
     const {rows:[r]}=await c.query("SELECT securepay_private.accept_payment_plan($1,$2,$3,$4) AS ok",[tenantId,planId,body.planDigest,body.expectedTotalCents]);
     return r?.ok?{ok:true,planAccepted:planId}:{ok:false};
    });
