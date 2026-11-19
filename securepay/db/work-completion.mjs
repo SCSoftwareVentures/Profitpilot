@@ -7,6 +7,20 @@ export function makeWorkCompletionOwner({pool,actorId,key,scanner}){
  if(!pool?.query||!Buffer.isBuffer(key)||key.length!==32||typeof scanner?.attest!=="function")throw Error("Completion authority unavailable");
  const mac=args=>createHmac("sha256",key).update(args.join(":")).digest("hex");
  return Object.freeze({
+  async offerPlan({planId=randomUUID(),tenantId,jobId,items}){
+   ids(planId,tenantId,jobId);
+   if(!Array.isArray(items)||items.length<1||items.length>20||items.some(x=>!x||typeof x!=="object"||Object.keys(x).length!==4||!uuid.test(x.milestoneId)||!Number.isSafeInteger(x.amountCents)||x.amountCents<=0||typeof x.description!=="string"||!x.description.trim()||x.description.length>500||typeof x.final!=="boolean"))throw Error("Invalid milestone plan");
+   const terms=JSON.stringify(items),exp=expiry();
+   if(Buffer.byteLength(terms)>32768)throw Error("Plan exceeds size limit");
+   const args=[planId,tenantId,jobId,actorId,terms,exp];
+   const {rows:[r]}=await pool.query("SELECT securepay_private.offer_payment_plan($1,$2,$3,$4,$5,$6,$7) AS digest",[...args,mac(["sp-plan-offer-v1",planId,tenantId,jobId,actorId,Buffer.from(terms).toString("hex"),exp])]);
+   return r?.digest?{ok:true,planId,planDigest:r.digest}:{ok:false};
+  },
+  async withdrawPlan({tenantId,planId}){
+   ids(tenantId,planId);const exp=expiry(),args=[tenantId,planId,actorId,exp];
+   const {rows:[r]}=await pool.query("SELECT securepay_private.withdraw_payment_plan($1,$2,$3,$4,$5) AS ok",[...args,mac(["sp-plan-withdraw-v1",...args])]);
+   return {ok:r?.ok===true,moneyMoved:false};
+  },
   async status({tenantId,milestoneId}){
    ids(tenantId,milestoneId);const exp=expiry(),args=[tenantId,milestoneId,actorId,exp];
    const {rows:[r]}=await pool.query("SELECT securepay_private.owner_work_status($1,$2,$3,$4,$5) AS result",[...args,mac(["sp-work-status-v1",...args])]);
