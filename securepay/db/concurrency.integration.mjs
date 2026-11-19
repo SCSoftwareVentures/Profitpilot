@@ -2508,3 +2508,61 @@ test("verified customer can enter the dispute portal from a completion dispute w
  await assert.rejects(asPayer(s,c=>c.query("SELECT securepay_private.participant_command(NULL,NULL,NULL,NULL,NULL)")),e=>e.code==="42501");
  assert.equal((await balanceFor(s)).remaining_cents,"5000");
 });
+
+async function correctionFixture(){
+ const f=await participantFixture(),{d,t,caseId,customer,business,command}=f;
+ const {makeCorrectionActor,prepareCorrection,signCorrectionProvider,signCorrectionReconciler,endorseCorrection}=await import("./correction-assessment.mjs");
+ assert.equal((await f.action("enroll")).ok,true);for(const x of [d.reviewer,d.second,d.authorizer])assert.equal((await f.action("assign",x.actorId)).ok,true);
+ for(const x of [f.first,f.second,f.authorizer])assert.equal((await f.declare(x)).ok,true);
+ const review=async(x,action)=>{const v=await x.read(caseId);for(const p of [...v.case.photos,...v.case.linkedPhotos])if(!p.purged)assert.ok(await x.photo({caseId,photoId:p.photoId,source:p.source}));return x.decide({caseId,action,reason:"Independent documented allocation decision",payoutCents:3000,refundCents:2000,stateDigest:v.stateDigest});};
+ assert.equal((await review(f.firstReview,"decide")).ok,true);
+ const terms={decisionId:(await customer("view")).participant.case.decision.eventId,payoutCents:3000,refundCents:2000};
+ assert.equal((await command(customer,"ack",terms)).ok,true);assert.equal((await command(business,"ack",terms)).ok,true);
+ assert.equal((await review(f.secondReview,"finalize")).ok,true);
+ const v=await f.authorizer.read(caseId),a=await f.authorizer.authorize({caseId,payoutCents:3000,refundCents:2000,stateDigest:v.stateDigest});assert.equal(a.ok,true);
+ const s={...d.settlement,settlementId:a.settlementId},one=await reconciler(d),two=await reconciler(d);
+ for(const x of [one,two])await pool.query("INSERT INTO securepay_private.actor_person_registry VALUES($1,$2,$3)",[t,x.actorId,randomBytes(32).toString("hex")]);
+ const admin=makeCorrectionActor({pool:adminPool,tenantId:t,actorId:f.adminId,key:f.key,role:"administrator"});
+ const reader=makeCorrectionActor({pool:reconciliationPool,tenantId:t,actorId:one.actorId,key:one.key,role:"reconciler"});
+ const request=(extra={})=>admin.request({caseId,actorOne:one.actorId,actorTwo:two.actorId,payoutCents:1000,refundCents:4000,reason:"Documented proposed correction to original settlement",...extra});
+ const packet=async correctionId=>prepareCorrection(t,await reader.read(correctionId),randomBytes(32).toString("hex"));
+ const endorse=p=>endorseCorrection(reconciliationPool,p,signCorrectionProvider(p,providerKey),signCorrectionReconciler(p,one.actorId,one.key),signCorrectionReconciler(p,two.actorId,two.key));
+ return {...f,s,one,two,admin,reader,request,packet,endorse,endorseCorrection,signCorrectionProvider,signCorrectionReconciler};
+}
+test("correction assessment freezes new transfers and rejects stale state until existing receipt is reconciled",async()=>{
+ await pool.query(await readFile(new URL("securepay-correction-assessment-draft.sql",import.meta.url),"utf8"));
+ const f=await correctionFixture(),{d,s}=f;
+ assert.equal(await f.request({payoutCents:1000,refundCents:3999}),null);
+ assert.equal(await f.request({payoutCents:3000,refundCents:2000}),null);
+ const leg=await d.confirm.dispatch({...s,kind:"payout"});assert.equal(leg.ok,true);
+ const q=await f.request();assert.ok(q);assert.equal(q.snapshot.safeToEndorse,false);
+ assert.equal((await d.confirm.dispatch({...s,kind:"refund"})).ok,false);
+ await assert.rejects(f.packet(q.correctionId),/Current safe correction/);
+ assert.equal((await d.confirm.record({...s,...leg,outcome:"confirmed",receipt:randomUUID()})).ok,true);
+ assert.equal((await f.reader.read(q.correctionId)).current,false);
+ const fresh=await f.request();assert.ok(fresh);assert.equal((await f.reader.read(q.correctionId)).status,"superseded");
+ assert.equal(fresh.snapshot.possibleBusinessRecoveryCents,"2000");assert.equal(fresh.snapshot.outstandingCustomerAllocationCents,"4000");assert.equal(fresh.snapshot.remainingCents,"2000");
+ const p=await f.packet(fresh.correctionId);
+ const invalid=await f.endorseCorrection(reconciliationPool,p,f.signCorrectionProvider(p,providerKey),"0".repeat(64),f.signCorrectionReconciler(p,f.two.actorId,f.two.key));assert.equal(invalid.ok,false);
+ const result=await Promise.all([f.endorse(p),f.endorse(p)]);assert.equal(result.filter(x=>x.ok).length,1);
+ assert.equal((await f.admin.read(fresh.correctionId)).status,"endorsed");
+ assert.equal((await d.confirm.dispatch({...s,kind:"refund"})).ok,false);
+ assert.deepEqual(await balanceFor(d.s),{funded_cents:"5000",payout_cents:"3000",refund_cents:"0",remaining_cents:"2000"});
+ assert.equal((await verifyAuditChain(auditPool,f.t)).ok,true);
+});
+test("settled correction assessment records possible external recovery without rewriting receipts or financial history",async()=>{
+ const f=await correctionFixture(),{d,s,t,one,two}=f;
+ for(const kind of ["payout","refund"]){const l=await d.confirm.dispatch({...s,kind});assert.equal(l.ok,true);assert.equal((await d.confirm.record({...s,...l,outcome:"confirmed",receipt:randomUUID()})).ok,true);}
+ assert.equal((await state(d.s)).status,"settled");
+ const prior=await balanceFor(d.s),q=await f.request();assert.ok(q);
+ assert.equal(q.snapshot.possibleBusinessRecoveryCents,"2000");assert.equal(q.snapshot.outstandingCustomerAllocationCents,"2000");assert.equal(q.snapshot.remainingCents,"0");
+ const p=await f.packet(q.correctionId);
+ await pool.query("UPDATE securepay_private.actor_person_registry SET person_digest=(SELECT person_digest FROM securepay_private.actor_person_registry WHERE tenant_id=$1 AND actor_id=$2) WHERE tenant_id=$1 AND actor_id=$3",[t,one.actorId,two.actorId]);
+ assert.equal((await f.endorse(p)).ok,false);
+ await pool.query("UPDATE securepay_private.actor_person_registry SET person_digest=$1 WHERE tenant_id=$2 AND actor_id=$3",[randomBytes(32).toString("hex"),t,two.actorId]);
+ assert.equal((await f.endorse(p)).ok,true);
+ assert.deepEqual(await balanceFor(d.s),prior);assert.equal((await state(d.s)).status,"settled");
+ await assert.rejects(reconciliationPool.query("UPDATE securepay_private.settlement_correction_cases SET status='endorsed'"),e=>e.code==="42501");
+ await assert.rejects(adminPool.query("SELECT * FROM securepay_private.financial_journal"),e=>e.code==="42501");
+ assert.equal((await verifyAuditChain(auditPool,t)).ok,true);
+});
