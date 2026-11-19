@@ -39,6 +39,20 @@ export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecov
  });
  const bad=()=>{throw Object.assign(new Error("Invalid request"),{status:400});};
  return Object.freeze({
+  async plan({identity,tenantId,planId,body}){
+   const ctx=context(identity,tenantId);if(typeof planId!=="string"||!uuid.test(planId)||!exact(body,[]))bad();
+   return authenticated(ctx,async c=>{
+    const {rows:[r]}=await c.query("SELECT securepay_private.payer_plan_view($1,$2) AS plan",[tenantId,planId]);
+    return r?.plan?{ok:true,plan:r.plan}:{ok:false};
+   });
+  },
+  async acceptPlan({identity,tenantId,planId,body}){
+   const ctx=context(identity,tenantId);if(typeof planId!=="string"||!uuid.test(planId)||!exact(body,["planDigest","expectedTotalCents"])||typeof body.planDigest!=="string"||!/^[a-f0-9]{64}$/.test(body.planDigest)||!Number.isSafeInteger(body.expectedTotalCents)||body.expectedTotalCents<=0)bad();
+   return authenticated(ctx,async c=>{
+    const {rows:[r]}=await c.query("SELECT securepay_private.accept_payment_plan($1,$2,$3,$4) AS ok",[tenantId,planId,body.planDigest,body.expectedTotalCents]);
+    return r?.ok?{ok:true,planAccepted:planId}:{ok:false};
+   });
+  },
   async view({identity,tenantId,milestoneId,body}){
    const ctx=context(identity,tenantId);
    if(typeof milestoneId!=="string"||!uuid.test(milestoneId)||!exact(body,[]))bad();
