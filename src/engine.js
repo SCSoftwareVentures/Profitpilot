@@ -1,64 +1,192 @@
+import {createHash} from "node:crypto";
 // ProfitPilot prototype calculation and import engine.
 // Deterministic demo logic only. Do not use with real payroll/customer data.
-export const money = value => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
+function decimalCents(value){
+  if(typeof value!=="string"||value.length>16)return null;
+  const text=value;
+  if(!/^-?(?:0|[1-9]\d*)(?:\.\d{1,2})?$/.test(text))return null;
+  const negative=text.startsWith("-");
+  const unsigned=negative?text.slice(1):text;
+  const [whole,fraction=""]=unsigned.split(".");
+  const cents=BigInt(whole)*100n+BigInt((fraction+"00").slice(0,2));
+  // Match PostgreSQL numeric(14,2): twelve integer digits and two cents digits.
+  if(cents>99999999999999n)return null;
+  return negative?-cents:cents;
+}
+const fromCents=cents=>{
+  const negative=cents<0n,absolute=negative?-cents:cents;
+  return (negative?"-":"")+String(absolute/100n)+"."+String(absolute%100n).padStart(2,"0");
+};
+function sumCents(values){
+  let total=0n;
+  for(const value of values){const cents=decimalCents(value);if(cents===null)return null;total+=cents;}
+  return total;
+}
+function ratioCents(numerator,denominator){
+  if(denominator===0n)return null;
+  const negative=(numerator<0n)!==(denominator<0n);
+  const n=numerator<0n?-numerator:numerator;
+  const d=denominator<0n?-denominator:denominator;
+  const quotient=n/d,remainder=n%d;
+  const rounded=quotient+(remainder*2n>=d?1n:0n);
+  return negative?-rounded:rounded;
+}
+export const money=value=>{const cents=decimalCents(value);return cents===null?null:fromCents(cents);};
 export function isIsoDate(value){
   if(typeof value!=="string"||!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value))return false;
   const date=new Date(value+"T00:00:00.000Z");
   return Number.isFinite(date.getTime())&&date.toISOString().slice(0,10)===value;
 }
 export function parseCsv(text) {
-  const rows=[]; let row=[], cell="", quoted=false;
+  if(typeof text!=="string")throw new TypeError("CSV input must be text.");
+  if(text.charCodeAt(0)===0xFEFF)text=text.slice(1);
+  const rows=[]; let row=[],cell="",quoted=false,closedQuote=false;
+  const pushRecord=()=>{
+    row.push(cell);
+    if(row.some(v=>v.trim()!==""))rows.push(row);
+    row=[];cell="";closedQuote=false;
+  };
   for(let i=0;i<text.length;i++){
     const c=text[i], n=text[i+1];
-    if(c==='"' && quoted && n==='"'){cell+='"';i++;}
-    else if(c==='"'){quoted=!quoted;}
-    else if(c===',' && !quoted){row.push(cell);cell="";}
-    else if((c==="\n"||c==="\r")&&!quoted){if(c==="\r"&&n==="\n")i++;row.push(cell);if(row.some(v=>v.trim()!==""))rows.push(row);row=[];cell="";}
-    else cell+=c;
+    if(quoted){
+      if(c==='"'&&n==='"'){cell+='"';i++;}
+      else if(c==='"'){quoted=false;closedQuote=true;}
+      else cell+=c;
+      continue;
+    }
+    if(closedQuote){
+      if(c===","){row.push(cell);cell="";closedQuote=false;}
+      else if(c===" "||c==="\t"){cell+=c;}
+      else if(c==="\n"||c==="\r"){
+        if(c==="\r"&&n==="\n")i++;
+        pushRecord();
+      }else throw new Error("CSV contains unexpected characters after a closing quote.");
+      continue;
+    }
+    if(c==='"'){
+      if(cell.length!==0)throw new Error("CSV contains a quote inside an unquoted field.");
+      quoted=true;
+    }else if(c===","){row.push(cell);cell="";}
+    else if(c==="\n"||c==="\r"){
+      if(c==="\r"&&n==="\n")i++;
+      pushRecord();
+    }else cell+=c;
   }
-  if(quoted) throw new Error("CSV contains an unclosed quoted field.");
+  if(quoted)throw new Error("CSV contains an unclosed quoted field.");
   row.push(cell);if(row.some(v=>v.trim()!==""))rows.push(row);
-  if(!rows.length) return [];
+  if(!rows.length)return [];
   const headers=rows.shift().map(v=>v.trim());
-  if(headers.some(h=>!h)) throw new Error("CSV contains an empty column heading.");
-  if(new Set(headers).size!==headers.length) throw new Error("CSV contains duplicate column headings.");
+  if(headers.some(h=>!h))throw new Error("CSV contains an empty column heading.");
+  const normalised=headers.map(h=>h.toLocaleLowerCase("en"));
+  if(new Set(normalised).size!==headers.length)throw new Error("CSV contains duplicate column headings.");
   return rows.map((cells,index)=>{
-    if(cells.length!==headers.length) throw new Error("CSV row "+(index+2)+" has "+cells.length+" cells; expected "+headers.length+".");
+    if(cells.length!==headers.length)throw new Error("CSV row "+(index+2)+" has "+cells.length+" cells; expected "+headers.length+".");
     return Object.fromEntries(headers.map((h,i)=>[h,cells[i].trim()]).concat([["__rowNumber",String(index+2)]]));
   });
 }
 export function validateInvoiceRows(rows){
   return rows.map((r,i)=>{
-    const amount=Number(r.amount);
+    const amountText=typeof r.amount==="string"?r.amount:"";
     const errors=[];
-    if(!r.invoice_id)errors.push("Missing invoice_id");
-    if(!r.site)errors.push("Missing site");
+    if(typeof r.invoice_id!=="string"||!r.invoice_id.trim())errors.push("Missing invoice_id");
+    if(typeof r.site!=="string"||!r.site.trim())errors.push("Missing site");
     if(!isIsoDate(r.date))errors.push("Invalid date (expected a real YYYY-MM-DD date)");
-    if(!r.amount||!Number.isFinite(amount)||amount<=0)errors.push("Amount must be greater than zero");
+    const invoiceCents=decimalCents(amountText);
+    if(invoiceCents===null||invoiceCents<=0n)errors.push("Amount must be a positive canonical decimal within numeric(14,2) range");
     return {rowNumber:r.__rowNumber||i+2,record:r,errors,status:errors.length?"held":"pending_review"};
   });
 }
-export function allocatePayroll({pool,direct=[],approved=[],nonSite=0,excluded=0}){
-  const p=money(pool),d=money(direct.reduce((s,x)=>s+Number(x.amount||0),0)),a=money(approved.reduce((s,x)=>s+Number(x.amount||0),0)),n=money(nonSite),e=money(excluded);
-  const residual=money(p-d-a-n-e);
-  const siteTotals={};
-  for(const x of [...direct,...approved])siteTotals[x.site]=(siteTotals[x.site]||0)+Number(x.amount||0);
-  const valid=[p>=0,d>=0,a>=0,n>=0,e>=0,residual>=0,Object.values(siteTotals).every(v=>v>=0)];
-  return {pool:p,direct:d,approvedAllocated:a,nonSite:n,excluded:e,unallocated:residual,siteTotals:Object.fromEntries(Object.entries(siteTotals).map(([k,v])=>[k,money(v)])),reconciles:valid.every(Boolean)&&money(d+a+n+e+residual)===p,errors:valid.every(Boolean)?[]:["Negative pool, bucket or allocation exceeds eligible payroll pool"]};
+export function allocatePayroll({pool,direct,approved,nonSite,excluded}={}){
+  const directRows=Array.isArray(direct)?direct:null;
+  const approvedRows=Array.isArray(approved)?approved:null;
+  const rowAmounts=rows=>rows===null?null:sumCents(rows.map(x=>x&&typeof x==="object"&&!Array.isArray(x)?x.amount:null));
+  const p=decimalCents(pool),d=rowAmounts(directRows),a=rowAmounts(approvedRows),n=decimalCents(nonSite),e=decimalCents(excluded);
+  const validInputs=[p,d,a,n,e].every(x=>x!==null);
+  const residual=validInputs?p-d-a-n-e:null;
+  const siteCents=Object.create(null);
+  let sitesValid=directRows!==null&&approvedRows!==null;
+  for(const x of [...(directRows||[]),...(approvedRows||[])]){
+    if(!x||typeof x!=="object"||Array.isArray(x)){sitesValid=false;continue;}
+    const amount=decimalCents(x.amount);
+    const key=typeof x.site==="string"?x.site.trim():"";
+    if(amount===null||amount<0n||!key){sitesValid=false;continue;}
+    siteCents[key]=(siteCents[key]||0n)+amount;
+  }
+  const valid=validInputs&&p>=0n&&d>=0n&&a>=0n&&n>=0n&&e>=0n&&residual>=0n&&sitesValid&&Object.values(siteCents).every(v=>v>=0n);
+  const safe=v=>v===null?null:fromCents(v);
+  return {pool:safe(p),direct:safe(d),approvedAllocated:safe(a),nonSite:safe(n),excluded:safe(e),unallocated:safe(residual),siteTotals:Object.fromEntries(Object.entries(siteCents).map(([k,v])=>[k,fromCents(v)])),reconciles:valid&&d+a+n+e+residual===p,errors:valid?[]:["Invalid monetary input, missing site identity, negative bucket or allocation exceeds eligible payroll pool"]};
 }
 export function matchInvoice(row,contract){
-  const identity=!!row.site&&row.site===contract.site;
-  const period=!!row.date&&row.date>=contract.periodStart&&row.date<=contract.periodEnd;
-  const amount=Number.isFinite(Number(row.amount))&&Number(row.amount)>0;
-  const evidence=[identity,period,amount].filter(Boolean).length;
-  const confidence=identity&&period&&amount?"MEDIUM":identity&&amount?"LOW":"UNMATCHED";
-  return {contractId:contract.id,confidence,evidence:{identity,period,amount},requiresHumanConfirmation:true};
+  const customer=typeof row.customer_id==="string"&&row.customer_id.length>0&&row.customer_id===contract.customerId;
+  const contractIdentity=typeof row.contract_id==="string"&&row.contract_id.length>0&&row.contract_id===contract.id;
+  const site=typeof row.site_id==="string"&&row.site_id.length>0&&row.site_id===contract.siteId;
+  const period=isIsoDate(row.service_period_start)&&isIsoDate(row.service_period_end)&&isIsoDate(contract.periodStart)&&isIsoDate(contract.periodEnd)&&row.service_period_start>=contract.periodStart&&row.service_period_end<=contract.periodEnd&&row.service_period_end>=row.service_period_start;
+  const amountCents=decimalCents(row.amount);
+  const amount=amountCents!==null&&amountCents>0n;
+  const currency=typeof row.currency==="string"&&row.currency===contract.currency;
+  const taxBasis=["gst_inclusive","gst_exclusive","no_gst"].includes(row.tax_basis)&&row.tax_basis===contract.taxBasis;
+  const evidence={customer,contract:contractIdentity,site,servicePeriod:period,amount,currency,taxBasis};
+  const complete=Object.values(evidence).every(Boolean);
+  const coreIdentity=customer&&contractIdentity&&site&&period&&amount;
+  const confidence=complete?"HIGH":coreIdentity&&(currency||taxBasis)?"MEDIUM":Object.values(evidence).some(Boolean)?"LOW":"UNMATCHED";
+  return {contractId:contract.id,confidence,evidence,requiresHumanConfirmation:true,decision:"candidate"};
 }
 export function summariseContracts(contracts){
-  return contracts.map(c=>({...c,revenue:money(c.revenue),cost:money(c.cost),contribution:money(c.revenue-c.cost),margin:c.revenue?money((c.revenue-c.cost)/c.revenue*100):null}));
+  return contracts.map(c=>{
+    const revenue=decimalCents(c.revenue),cost=decimalCents(c.cost);
+    if(revenue===null||cost===null)return {...c,revenue:null,cost:null,contribution:null,margin:null};
+    const contribution=revenue-cost;
+    const margin=revenue?ratioCents(contribution*10000n,revenue):null;
+    return {...c,revenue:fromCents(revenue),cost:fromCents(cost),contribution:fromCents(contribution),margin:margin===null?null:fromCents(margin)};
+  });
 }
 export function aggregateMetrics(contracts){
+  if(!Array.isArray(contracts)||contracts.length===0||contracts.some(c=>!c||typeof c!=="object"||Array.isArray(c)))
+    return {revenue:null,cost:null,contribution:null,margin:null,contracts:[],aggregationValid:false,completeness:"unverified",errors:["At least one valid contract row is required for aggregation"]};
   const rows=summariseContracts(contracts);
-  const revenue=money(rows.reduce((s,r)=>s+r.revenue,0)),cost=money(rows.reduce((s,r)=>s+r.cost,0));
-  return {revenue,cost,contribution:money(revenue-cost),margin:revenue?money((revenue-cost)/revenue*100):null,contracts:rows};
+  // Reporting dimensions are mandatory even when every row omits them. Never
+  // infer that missing currency, tax basis or period values are comparable.
+  const dimensions=["currency","taxBasis","periodStart","periodEnd"];
+  const inconsistent=dimensions.some(key=>{
+    const values=contracts.map(c=>c[key]);
+    return values.some(v=>v===undefined||v===null||v==="")||new Set(values).size!==1;
+  });
+  if(inconsistent)return {revenue:null,cost:null,contribution:null,margin:null,contracts:rows,aggregationValid:false,completeness:"unverified",errors:["Cannot aggregate contracts across missing or mixed currency, tax basis or reporting periods"]};
+  const revenue=sumCents(rows.map(r=>r.revenue)),cost=sumCents(rows.map(r=>r.cost));
+  if(revenue===null||cost===null)return {revenue:null,cost:null,contribution:null,margin:null,contracts:rows,aggregationValid:false,completeness:"unverified",errors:["Cannot aggregate missing or invalid canonical monetary inputs"]};
+  const contribution=revenue-cost;
+  const margin=revenue?ratioCents(contribution*10000n,revenue):null;
+  return {revenue:fromCents(revenue),cost:fromCents(cost),contribution:fromCents(contribution),margin:margin===null?null:fromCents(margin),contracts:rows,aggregationValid:true,completeness:"unverified",errors:[]};
+}
+
+
+/**
+ * Normalize a deliberately minimal payroll source-row contract.
+ * Only opaque source keys, decimal amounts and ISO currency codes survive.
+ * Employee names, bank details, tax identifiers and arbitrary source columns
+ * are never copied into the normalized result.
+ */
+export function normalizePayrollRows(rows){
+  if(!Array.isArray(rows))throw new TypeError("Payroll rows must be an array.");
+  if(rows.length<1||rows.length>10000)throw new RangeError("Payroll batch must contain 1–10000 rows.");
+  const seen=new Set();
+  return rows.map((row,index)=>{
+    const errors=[];
+    if(!row||typeof row!=="object"||Array.isArray(row))return {rowNumber:index+1,status:"held",record:null,errors:["Row must be an object"]};
+    const key=typeof row.source_row_key==="string"?row.source_row_key.trim():"";
+    const amountText=typeof row.amount==="string"?row.amount:"";
+    const currency=typeof row.currency==="string"?row.currency.trim().toUpperCase():"";
+    if(!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(key))errors.push("source_row_key must be an opaque stable key (1–128 safe characters)");
+    const payrollCents=decimalCents(amountText);
+    if(payrollCents===null||payrollCents<0n)errors.push("amount must be a non-negative canonical decimal within numeric(14,2) range");
+    if(!/^[A-Z]{3}$/.test(currency))errors.push("currency must be a three-letter ISO-style code");
+    if(key&&seen.has(key))errors.push("Duplicate source_row_key within this batch");
+    if(key)seen.add(key);
+    if(errors.length)return {rowNumber:index+1,status:"held",record:null,errors};
+    const [whole,fraction=""]=amountText.split(".");
+    const canonicalAmount=String(BigInt(whole))+"."+fraction.padEnd(2,"0");
+    const canonical={sourceRowKey:key,amount:canonicalAmount,currency};
+    const rowSha256=createHash("sha256").update([key,canonicalAmount,currency].join("\n"),"utf8").digest("hex");
+    return {rowNumber:index+1,status:"pending_review",record:canonical,rowSha256,errors:[]};
+  });
 }

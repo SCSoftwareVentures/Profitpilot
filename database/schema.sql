@@ -41,6 +41,7 @@ CREATE TABLE contract_versions (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id uuid NOT NULL,
   contract_id uuid NOT NULL, version_no integer NOT NULL, effective_from date NOT NULL,
   effective_to date, price numeric(14,2) NOT NULL CHECK(price>=0), currency char(3) NOT NULL DEFAULT 'AUD',
+  tax_basis text NOT NULL DEFAULT 'unknown' CHECK(tax_basis IN ('gst_inclusive','gst_exclusive','no_gst','unknown')),
   billing_basis text NOT NULL, scope jsonb NOT NULL DEFAULT '{}'::jsonb, source_ref text,
   approved_by uuid REFERENCES users(id), approved_at timestamptz,
   FOREIGN KEY (tenant_id,contract_id) REFERENCES contracts(tenant_id,id),
@@ -49,7 +50,7 @@ CREATE TABLE contract_versions (
 CREATE TABLE import_batches (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(), tenant_id uuid NOT NULL REFERENCES tenants(id),
   source_type text NOT NULL, source_period_start date, source_period_end date,
-  permission_ref text NOT NULL, status text NOT NULL CHECK(status IN ('uploaded','validating','review','accepted','rejected','failed')),
+  permission_ref text NOT NULL, status text NOT NULL CHECK(status IN ('registered','validating','review','accepted','rejected','failed')),
   file_sha256 text NOT NULL, file_name text NOT NULL, created_by uuid NOT NULL REFERENCES users(id),
   created_at timestamptz NOT NULL DEFAULT now(), UNIQUE(tenant_id,file_sha256), UNIQUE(tenant_id,id)
 );

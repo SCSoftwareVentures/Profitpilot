@@ -9,26 +9,59 @@ servers:
 security:
   - bearerAuth: []
 paths:
+  /health:
+    get:
+      summary: Operational liveness and database connectivity check
+      security: []
+      responses:
+        "200": { description: API process and database are reachable }
+        "503": { description: Database unavailable }
   /me:
     get:
       summary: Resolve authenticated identity (membership discovery not exposed)
       responses:
-        "200": { description: Verified identity only; membership discovery requires a separately reviewed endpoint. }
+        "200":
+          description: Verified identity only; membership discovery requires a separately reviewed endpoint.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IdentityResponse' }
         "401": { description: Unauthenticated }
   /tenants/{tenantId}/contracts:
     parameters:
       - $ref: '#/components/parameters/TenantId'
     get:
       summary: List contracts visible to the verified tenant member
+      description: Stable UUID-ordered keyset pagination; cursor is an exclusive lower bound within the authenticated tenant. No total count. Concurrent changes may affect subsequent pages.
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 50 }
+        - name: cursor
+          in: query
+          schema: { type: string, format: uuid }
       responses:
-        "200": { description: Contract list }
-        "403": { description: Tenant membership or role not authorised }
+        "200":
+          description: Contract list
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, nextCursor]
+                properties:
+                  items:
+                    type: array
+                    maxItems: 100
+                    items: { $ref: '#/components/schemas/ContractSummary' }
+                  nextCursor: { type: [string, 'null'], format: uuid, description: Exclusive cursor for the next page or null at the end }
+        "400": { description: Invalid tenant ID }
+        "401": { description: Unauthenticated }
+        "403": { description: Tenant membership not authorised }
   /tenants/{tenantId}/imports:
     parameters:
       - $ref: '#/components/parameters/TenantId'
     post:
-      summary: Create an import batch from an authorised source file
-      description: Server must verify membership, permission basis, file checksum, limits and idempotency.
+      summary: Register import metadata for an authorised source (no binary file is uploaded or stored)
+      description: Synthetic non-production only. Production import intake is blocked. Records caller-supplied metadata and checksum only. It does not receive, verify or store file bytes; status is registered until a secure upload pipeline exists.
       requestBody:
         required: true
         content:
@@ -40,36 +73,120 @@ paths:
                 sourceType: { type: string, enum: [payroll, customer_invoice, supplier_invoice] }
                 fileName: { type: string, maxLength: 255 }
                 sha256: { type: string, pattern: '^[a-fA-F0-9]{64}$' }
-                permissionReference: { type: string, minLength: 1 }
+                permissionReference: { type: string, minLength: 1, maxLength: 256 }
                 periodStart: { type: string, format: date }
                 periodEnd: { type: string, format: date }
       responses:
-        "201": { description: Batch created or idempotent existing batch returned }
+        "201":
+          description: Import metadata registered; no binary object stored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportRegistrationResponse' }
+        "200":
+          description: Idempotent replay of identical import metadata
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ImportRegistrationResponse' }
         "400": { description: Invalid metadata }
+        "401": { description: Unauthenticated }
         "403": { description: Permission or role not sufficient }
-        "409": { description: Conflicting duplicate or period }
+        "409": { description: Conflicting duplicate metadata; existing source record is preserved }
+        "503": { description: Production intake not approved }
+  /tenants/{tenantId}/imports/{batchId}/file:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    post:
+      summary: Stage an encrypted file in private quarantine (synthetic non-production tests only)
+      description: Disabled in production, pending scanner and lifecycle acceptance. Requires owner/admin and recent MFA. Raw uncompressed UTF-8 text/csv only, 1 to 65536 bytes. Must match registered SHA-256. No file retrieval or public link. A stored receipt means pending quarantine, not clean status.
+      requestBody:
+        required: true
+        content:
+          text/csv:
+            schema: { type: string, format: binary }
+      responses:
+        "201": { description: Encrypted quarantine receipt; scan pending }
+        "400": { description: Invalid text or upload size }
+        "401": { description: Unauthenticated }
+        "403": { description: Insufficient authority or recent MFA }
+        "404": { description: Batch not found }
+        "409": { description: File already exists }
+        "413": { description: Upload exceeds 65536 bytes }
+        "415": { description: Unsupported media type or compression }
+        "422": { description: Checksum or batch eligibility mismatch }
+        "429": { description: Quarantine quota or rate limit exceeded }
+        "503": { description: Upload disabled or unavailable }
+  /tenants/{tenantId}/imports/{batchId}/file/approve:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    post:
+      summary: Approve scanned and validated quarantine manifest for processing
+      description: Synthetic non-production only. Active owner/admin and recent MFA required. Approval does not expose file bytes or accept financial records. The isolated worker decrypts, rescans and checks the canonical manifest digest before atomic persistence. Holds, revoked account authority and targeted revocation of the approving session block processing.
+      responses:
+        "202": { description: Approved for isolated processing }
+        "400": { description: Invalid approval request }
+        "401": { description: Unauthenticated }
+        "403": { description: Insufficient authority or recent MFA }
+        "404": { description: Batch not found }
+        "409": { description: Already approved or conflicting record }
+        "422": { description: File not eligible }
+        "503": { description: File processing disabled }
   /tenants/{tenantId}/imports/{batchId}/rows:
     parameters:
       - $ref: '#/components/parameters/TenantId'
       - $ref: '#/components/parameters/BatchId'
     post:
       summary: Persist parsed invoice row objects for a source batch
-      description: Accepts 1–200 JSON row objects per request. Client-side parsing only; raw file upload/storage is not implemented.
+      description: Synthetic non-production only. Production import intake is blocked. Accepts 1–200 privacy-screened invoice row objects per request. Unknown fields, nested values and suspicious identifiers reject the entire chunk before persistence. Invalid or missing financial fields that pass screening can be held for review. startRowNumber preserves original source row numbering across chunks. Identical retries are idempotent; conflicting content at an existing row number is rejected. This endpoint does not upload or store the original binary file.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rows]
+              properties:
+                startRowNumber: { type: integer, minimum: 1, maximum: 1000000000, default: 1 }
+                rows:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    $ref: '#/components/schemas/InvoiceSourceRow'
       responses:
-        "201": { description: Rows persisted; duplicates are idempotently ignored }
-        "400": { description: Invalid row payload }
+        "201":
+          description: Parsed row objects persisted; identical retries are idempotently ignored
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RowsIngestResponse' }
+        "400": { description: Invalid row payload or source row number }
+        "401": { description: Unauthenticated }
         "403": { description: Not authorised }
         "404": { description: Batch not found }
+        "409": { description: Conflicting source row content at an existing row number }
+        "413": { description: Request body exceeds the configured JSON payload limit }
+        "422": { description: Unsafe invoice payload or disabled payroll ingestion; no rows are accepted }
+        "503": { description: Production intake not approved }
+
   /tenants/{tenantId}/imports/{batchId}/validate:
     parameters:
       - $ref: '#/components/parameters/TenantId'
       - $ref: '#/components/parameters/BatchId'
     post:
       summary: Validate source rows and produce held/review candidates
+      description: Synthetic non-production only. Production import intake is blocked. Structural validation creates only new unreviewed proposals. Existing proposals and reviewed decisions remain unchanged. Structural counts describe validator results, not current review states.
       responses:
-        "202": { description: Invoice rows structurally validated into candidate/held states; payroll validation is not yet supported }
+        "200":
+          description: Invoice rows structurally validated into candidate/held states; no row is automatically accepted
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationResponse' }
+        "401": { description: Unauthenticated }
         "403": { description: Not authorised }
         "404": { description: Batch not found in this tenant }
+        "422": { description: Payroll validation is not yet supported or no source rows exist }
+        "503": { description: Production intake not approved }
   /tenants/{tenantId}/matches/{matchId}/decision:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -91,18 +208,31 @@ paths:
                 decision: { type: string, enum: [confirmed, rejected, held] }
                 reason: { type: string, minLength: 3, maxLength: 2000 }
       responses:
-        "201": { description: Decision appended }
+        "201":
+          description: Human decision recorded with reviewer and timestamp
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MatchDecisionResponse' }
+        "400": { description: Invalid decision or missing reason }
+        "401": { description: Unauthenticated }
         "403": { description: Reviewer role required }
-        "409": { description: Match state changed; refresh required }
+        "404": { description: Review candidate not found in this tenant or already finalised }
   /tenants/{tenantId}/calculations:
     parameters:
       - $ref: '#/components/parameters/TenantId'
     post:
       summary: Create a versioned contract/site/period calculation run
-      description: Server calculates from immutable input versions; no client-supplied output totals are trusted.
+      description: Server calculates from immutable input versions; no client-supplied output totals are trusted. The approved contract version tax basis must be explicit and must match every confirmed invoice source basis; unknown or mixed tax basis is blocked.
       responses:
-        "201": { description: Calculation run created }
-        "422": { description: Insufficient or unreconciled source evidence }
+        "201":
+          description: Incomplete management calculation run created with headline contribution and margin withheld
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CalculationRunResponse' }
+        "400": { description: Invalid period or request identifiers }
+        "401": { description: Unauthenticated }
+        "403": { description: Not authorised }
+        "422": { description: Insufficient, incomparable or unreconciled source evidence }
   /tenants/{tenantId}/calculations/{runId}:
     parameters:
       - $ref: '#/components/parameters/TenantId'
@@ -111,11 +241,203 @@ paths:
         required: true
         schema: { type: string, format: uuid }
     get:
-      summary: Retrieve immutable calculation output and coverage limitations
+      summary: Retrieve an allowlisted immutable calculation summary, excluding stored inputs and arbitrary notes
+      description: Access is audited and subject to shared per-identity and per-tenant financial read budgets.
       responses:
-        "200": { description: Calculation output }
+        "200":
+          description: Minimized financial summary with explicit completeness limitations; raw payroll records and inputs are excluded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CalculationRunRecord' }
+        "401": { description: Unauthenticated }
+        "403": { description: Tenant membership not authorised }
         "404": { description: Run not found in this tenant }
+        "429": { description: Financial read quota exceeded }
+  /tenants/{tenantId}/calculations/{runId}/export:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: runId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Export a single minimized management calculation
+      description: Requires an active owner or admin and issuer-attested MFA within five minutes. Returns only allowlisted financial summary fields, enforces shared per-identity and tenant export budgets, records an audit event, and creates no persistent download file or public link. Incomplete results remain explicitly incomplete; authoritative contribution and margin are withheld.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [purpose]
+              properties:
+                purpose: { type: string, enum: [internal_review, customer_reporting, accountant_review] }
+      responses:
+        "200":
+          description: Audited JSON summary attachment with no-store cache control
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [exportId, calculationId, contractId, siteId, periodStart, periodEnd, completeness, currency, revenue, deliveryCost, indicativeContribution, contribution, marginPercent, notice]
+                properties:
+                  exportId: { type: string, format: uuid }
+                  calculationId: { type: string, format: uuid }
+                  contractId: { type: string, format: uuid }
+                  siteId: { type: string, format: uuid }
+                  periodStart: { type: string, format: date }
+                  periodEnd: { type: string, format: date }
+                  completeness: { type: string, enum: [complete, incomplete] }
+                  currency: { type: [string, "null"] }
+                  revenue: { type: [string, "null"] }
+                  deliveryCost: { type: [string, "null"] }
+                  indicativeContribution: { type: [string, "null"] }
+                  contribution: { type: [string, "null"] }
+                  marginPercent: { type: [string, "null"] }
+                  notice: { type: string }
+        "400": { description: Invalid identifier or export purpose }
+        "401": { description: Unauthenticated }
+        "403": { description: Insufficient role, tenant membership or recent MFA }
+        "404": { description: Calculation unavailable in tenant }
+        "429": { description: Rate limit exceeded }
 components:
+  schemas:
+    ErrorResponse:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        code: { type: string, description: Stable machine-readable error code when supplied by the route }
+        reference: { type: string, format: uuid, description: Correlation reference; no SQL, token or source payload is returned }
+    IdentityResponse:
+      type: object
+      required: [subject, membershipsEndpoint]
+      properties:
+        subject: { type: string, maxLength: 255 }
+        email: { type: [string, "null"] }
+        membershipsEndpoint: { type: string }
+    ContractSummary:
+      type: object
+      required: [id, customer_name, status]
+      properties:
+        id: { type: string, format: uuid }
+        customer_name: { type: string }
+        status: { type: string }
+    MoneyDecimal:
+      type: string
+      maxLength: 16
+      pattern: '^-?(0|[1-9][0-9]{0,11})(\.[0-9]{1,2})?$'
+      description: Exact decimal string only; no JSON number, exponent notation or implicit rounding. PostgreSQL numeric(14,2) bound.
+      examples: ["1234.50", "-110.00", "0.00"]
+    InvoiceSourceRow:
+      type: object
+      description: Use opaque business identifiers. Only approved invoice fields are accepted; no payroll, contact, tax-file, banking, payment-card or access-code values.
+      additionalProperties: false
+      properties:
+        invoice_id: { type: string, maxLength: 128 }
+        site: { type: string, maxLength: 160 }
+        date: { type: string, maxLength: 32 }
+        amount: { type: string, pattern: '^([+-]?[0-9]{1,12}([.][0-9]{1,2})?)?$' }
+        customer_id: { type: string, maxLength: 128 }
+        contract_id: { type: string, maxLength: 128 }
+        site_id: { type: string, maxLength: 128 }
+        service_period_start: { type: string, maxLength: 32 }
+        service_period_end: { type: string, maxLength: 32 }
+        currency: { type: string, pattern: '^([A-Z]{3})?$' }
+        tax_basis: { type: string, enum: ['', gst_inclusive, gst_exclusive, no_gst, unknown] }
+    ImportRegistrationResponse:
+      type: object
+      required: [batch]
+      properties:
+        batch:
+          type: object
+          required: [id, status]
+          properties:
+            id: { type: string, format: uuid }
+            status: { type: string, enum: [registered, review, validating, accepted, rejected, failed] }
+        idempotent: { type: boolean }
+    RowsIngestResponse:
+      type: object
+      required: [batchId, inserted, received, duplicates, startRowNumber]
+      properties:
+        batchId: { type: string, format: uuid }
+        inserted: { type: integer, minimum: 0 }
+        received: { type: integer, minimum: 1 }
+        duplicates: { type: integer, minimum: 0 }
+        startRowNumber: { type: integer, minimum: 1 }
+    ValidationResponse:
+      type: object
+      required: [batchId, total, validCandidateRows, heldRows, newProposals, preservedProposals, automaticallyAccepted]
+      properties:
+        batchId: { type: string, format: uuid }
+        total: { type: integer, minimum: 0 }
+        validCandidateRows: { type: integer, minimum: 0 }
+        heldRows: { type: integer, minimum: 0 }
+        newProposals: { type: integer, minimum: 0 }
+        preservedProposals: { type: integer, minimum: 0 }
+        automaticallyAccepted: { const: 0 }
+    MatchDecisionResponse:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: object
+          required: [id, decision, reviewed_at]
+          properties:
+            id: { type: string, format: uuid }
+            decision: { type: string, enum: [confirmed, rejected, held] }
+            reviewed_at: { type: string, format: date-time }
+    CalculationOutputs:
+      type: object
+      required: [revenue, deliveryCost, contribution, marginPercent, indicativeContribution, currency, completeness, limitations]
+      properties:
+        revenue: { $ref: '#/components/schemas/MoneyDecimal' }
+        deliveryCost: { $ref: '#/components/schemas/MoneyDecimal' }
+        contribution: { type: [string, "null"] }
+        marginPercent: { type: [string, "null"] }
+        indicativeContribution: { $ref: '#/components/schemas/MoneyDecimal' }
+        currency: { type: string, pattern: '^[A-Z]{3}$' }
+        taxBasis: { type: string }
+        invoiceLineCount: { type: integer, minimum: 0 }
+        allocationLineCount: { type: integer, minimum: 0 }
+        taxBasisCount: { type: integer, minimum: 0 }
+        completeness: { type: string, enum: [incomplete] }
+        limitations: { type: array, items: { type: string } }
+    CalculationRunResponse:
+      type: object
+      required: [id, createdAt, outputs]
+      properties:
+        id: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        outputs: { $ref: '#/components/schemas/CalculationOutputs' }
+    CalculationRunRecord:
+      type: object
+      additionalProperties: false
+      required: [id, contract_id, site_id, period_start, period_end, formula_version, outputs, completeness, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        contract_id: { type: string, format: uuid }
+        site_id: { type: string, format: uuid }
+        period_start: { type: string, format: date }
+        period_end: { type: string, format: date }
+        formula_version: { type: [string, "null"] }
+        outputs:
+          type: object
+          additionalProperties: false
+          required: [revenue, deliveryCost, indicativeContribution, contribution, marginPercent, currency, completeness, limitations]
+          properties:
+            revenue: { type: [string, "null"] }
+            deliveryCost: { type: [string, "null"] }
+            indicativeContribution: { type: [string, "null"] }
+            contribution: { type: [string, "null"] }
+            marginPercent: { type: [string, "null"] }
+            currency: { type: [string, "null"] }
+            completeness: { type: string, enum: [complete, incomplete] }
+            limitations: { type: array, items: { type: string } }
+        completeness: { type: string, enum: [complete, incomplete] }
+        created_at: { type: string, format: date-time }
   securitySchemes:
     bearerAuth:
       type: http
