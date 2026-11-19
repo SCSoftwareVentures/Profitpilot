@@ -155,7 +155,7 @@ async function action(name){
     const [periodStart,periodEnd]=range(value("invoice-start"),value("invoice-end")),bytes=await f.arrayBuffer();
     const sha256=[...new Uint8Array(await crypto.subtle.digest("SHA-256",bytes))].map(x=>x.toString(16).padStart(2,"0")).join("");
     if(start!==epoch)throw Error("Session changed.");
-    const d=await read("/imports",{sourceType:"customer_invoice",fileName:"synthetic-invoice.csv",sha256,permissionReference:"reviewed-invoice-authority",periodStart,periodEnd});
+    const sourceType=value("invoice-direction");if(!["customer_invoice","supplier_invoice"].includes(sourceType))throw Error("Choose the exact invoice direction.");acceptedInvoice=null;const d=await read("/imports",{sourceType,fileName:"synthetic-invoice.csv",sha256,permissionReference:"reviewed-invoice-authority",periodStart,periodEnd});
     set("invoice-batch",d.batch.id);show("invoice-source-result",d);break;
    }
    case "invoice-upload":{
@@ -183,7 +183,7 @@ async function action(name){
      else{confirmed("invoice-review-confirm");d=await read(path,{...body,scopeDigest:evidence("invoice-scope"),step:value("invoice-step"),confirm:true});}
     }
     set("invoice-total",d.controlTotal);set("invoice-count",d.rowCount);set("invoice-evidence",d.evidenceDigest);set("invoice-scope",d.scopeDigest);
-    if(d.status==="accepted"&&Array.isArray(d.lines)&&d.lines.length>0){acceptedInvoice={batchId:uid("invoice-batch"),orderId:uid("invoice-order"),lines:d.lines};options("invoice-report-line",d.lines.map(x=>({id:x.rawRowId,label:"Row "+x.rowNumber+" · "+x.amount+" AUD"})),"Choose accepted source line");}
+    if(d.status==="accepted"&&d.sourceType!=="supplier_invoice"&&Array.isArray(d.lines)&&d.lines.length>0){acceptedInvoice={batchId:uid("invoice-batch"),orderId:uid("invoice-order"),lines:d.lines};options("invoice-report-line",d.lines.map(x=>({id:x.rawRowId,label:"Row "+x.rowNumber+" · "+x.amount+" AUD"})),"Choose accepted source line");}
     show("invoice-review-result",d);break;
    }
    default:throw Error("Unsupported action.");
