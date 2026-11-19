@@ -9,6 +9,7 @@ import {withPayer} from "./with-payer.mjs";
 import {deriveCommandKey,reserveSigned,changePinSigned} from "./signed-commands.mjs";
 import {createRecoveryVerifier,issueRecoveryGrant} from "./recovery-grant.mjs";
 import {makeNotificationWorker} from "./notification-worker.mjs";
+import {makeSandboxProvider} from "./sandbox-provider.mjs";
 import {verifyPinCredential} from "../domain/pin-credential.mjs";
 import {readFile} from "node:fs/promises";
 import pg from "pg";
@@ -24,9 +25,10 @@ const pool=new pg.Pool({connectionString:url.href,max:8,connectionTimeoutMillis:
   statement_timeout:10000});
 const payerSigningKey=randomBytes(32);
 const recoveryKey=randomBytes(32);
-let payerPool, notificationPool;
+const providerKey=randomBytes(32);
+let payerPool, notificationPool, providerPool, provider;
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(key_id,secret) VALUES('primary',$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(key_id,secret) VALUES('primary',$1)",[deriveCommandKey(pepper)]);
@@ -39,13 +41,19 @@ before(async()=>{
   await pool.query("ALTER ROLE securepay_notification_runtime LOGIN PASSWORD '"+notificationPassword+"'");
   const notificationUrl=new URL(url);notificationUrl.username="securepay_notification_runtime";notificationUrl.password=notificationPassword;
   notificationPool=new pg.Pool({connectionString:notificationUrl.href,max:4,connectionTimeoutMillis:5000,statement_timeout:10000});
+  const providerPassword=randomBytes(32).toString("hex");
+  await pool.query("ALTER ROLE securepay_provider_runtime LOGIN PASSWORD '"+providerPassword+"'");
+  const providerUrl=new URL(url);providerUrl.username="securepay_provider_runtime";providerUrl.password=providerPassword;
+  providerPool=new pg.Pool({connectionString:providerUrl.href,max:4,connectionTimeoutMillis:5000,statement_timeout:10000});
+  await pool.query("INSERT INTO securepay_private.provider_key(key_id,secret) VALUES('primary',$1)",[providerKey]);
+  provider=makeSandboxProvider({pool:providerPool,key:providerKey});
   await pool.query("CREATE TABLE securepay_ci_staff_only(secret text); INSERT INTO securepay_ci_staff_only VALUES ('fixture')");
   // Fixture admin bypasses RLS solely to exercise transaction semantics.
   // No permissive policies are installed; restricted role tested below.
   await pool.query("CREATE ROLE securepay_ci_restricted NOLOGIN NOBYPASSRLS");
   await pool.query("GRANT SELECT, INSERT, UPDATE ON securepay_milestones, securepay_release_requests, securepay_release_proofs, securepay_customer_pins, securepay_payer_identities, securepay_pin_change_grants TO securepay_ci_restricted");
 });
-after(async()=>{if(notificationPool)await notificationPool.end();if(payerPool)await payerPool.end();await pool.end();});
+after(async()=>{if(providerPool)await providerPool.end();if(notificationPool)await notificationPool.end();if(payerPool)await payerPool.end();await pool.end();});
 async function fixture(status="approved",tenantId=randomUUID()) {
   const milestoneId=randomUUID(), customerId=randomUUID();
   await pool.query("INSERT INTO securepay_milestones(id,tenant_id,job_id,amount_cents,status) VALUES($1,$2,$3,5000,$4)",
@@ -205,10 +213,12 @@ async function tx(fn){
  catch(e){await c.query("ROLLBACK");throw e;}
  finally{c.release();}
 }
-async function identityFixture(){
+async function identityFixture({funded=true}={}){
  const s=await fixture(), subject=randomUUID();
  await pool.query("INSERT INTO securepay_payer_identities(tenant_id,customer_id,auth_subject) VALUES($1,$2,$3)",[s.tenantId,s.customerId,subject]);
- return {...s,subject,pin:"012345"};
+ const fundingRef=randomUUID();
+ if(funded)assert.equal((await provider.event({...s,kind:"funded",fundingRef,amountCents:5000})).status,"applied");
+ return {...s,subject,pin:"012345",fundingRef};
 }
 async function changeGrant(s,purpose="enroll",expired=false){
  const grantRef=randomUUID();
@@ -642,4 +652,73 @@ test("recovery signing key rotation rejects retired key and cross-purpose key ma
  }finally{
   await pool.query("UPDATE securepay_private.recovery_key SET active=true WHERE key_id='primary'; DELETE FROM securepay_private.recovery_key WHERE key_id='next'");
  }
+});
+
+async function providerPayer({funded=false}={}){
+ const s=await identityFixture({funded});
+ await pool.query("UPDATE securepay_milestones SET payer_customer_id=$2 WHERE id=$1",[s.milestoneId,s.customerId]);
+ const g=await changeGrant(s);
+ assert.equal((await asPayer(s,c=>changePin(c,g,pepper))).ok,true);
+ const scope={...s,expectedAmountCents:5000,requestId:randomUUID(),idempotencyKey:randomUUID()};
+ return {...s,scope};
+}
+const reserveProvider=s=>asPayer(s,c=>authorizePayerInTransaction(c,s.scope,pepper));
+const providerEvent=(s,kind,extra={})=>provider.event({...s,kind,amountCents:5000,...extra});
+test("valid customer PIN cannot reserve unfunded or held milestone; only verified exact provider funding allows reserve",async()=>{
+ const s=await providerPayer();
+ assert.equal((await reserveProvider(s)).ok,false);
+ assert.equal((await state(s)).requests,0);
+ const forged=makeSandboxProvider({pool:providerPool,key:randomBytes(32)});
+ assert.equal((await forged.event({...s,kind:"funded",amountCents:5000})).status,"denied");
+ assert.equal((await providerEvent(s,"funded",{amountCents:4999})).status,"denied");
+ assert.equal((await providerEvent(s,"funded",{tenantId:randomUUID()})).status,"denied");
+ await assert.rejects(asPayer(s,c=>c.query("SELECT * FROM securepay_private.provider_funding")),e=>e.code==="42501");
+ await assert.rejects(providerPool.query("SELECT * FROM public.securepay_customer_pins"),e=>e.code==="42501");
+ assert.equal((await providerEvent(s,"funded")).status,"applied");
+ assert.equal((await providerEvent(s,"held")).status,"applied");
+ assert.equal((await reserveProvider(s)).ok,false);
+ assert.equal((await state(s)).requests,0);
+ const valid=await providerPayer();
+ assert.equal((await providerEvent(valid,"funded")).status,"applied");
+ assert.equal((await reserveProvider(valid)).ok,true);
+});
+test("synthetic provider confirmation requires prior dispatch and exact scope; duplicate receipts apply once",async()=>{
+ const s=await providerPayer({funded:true});
+ const reserved=await reserveProvider(s);assert.equal(reserved.ok,true);
+ const requestId=reserved.releaseRequestId, transactionRef=randomUUID(),eventId=randomUUID();
+ const receipt={requestId,transactionRef,eventId};
+ assert.equal((await providerEvent(s,"released",receipt)).status,"denied");
+ assert.equal((await state(s)).status,"release_pending");
+ const dispatch={...s,requestId};
+ const results=await Promise.all([provider.beginDispatch(dispatch),provider.beginDispatch(dispatch)]);
+ assert.equal(results.filter(x=>x.ok).length,1);
+ assert.equal((await providerEvent(s,"released",{...receipt,requestId:randomUUID()})).status,"denied");
+ assert.equal((await providerEvent(s,"released",{...receipt,amountCents:4999})).status,"denied");
+ assert.equal((await providerEvent(s,"released",{...receipt,fundingRef:randomUUID()})).status,"denied");
+ const answers=await Promise.all([providerEvent(s,"released",receipt),providerEvent(s,"released",receipt)]);
+ assert.deepEqual(answers.map(x=>x.status).sort(),["applied","duplicate"]);
+ assert.ok(answers.every(x=>x.moneyMoved===false));
+ assert.equal((await providerEvent(s,"released",{...receipt,transactionRef:randomUUID()})).status,"denied");
+ const {rows:[r]}=await pool.query("SELECT status,provider_transaction_ref FROM securepay_release_requests WHERE id=$1",[requestId]);
+ assert.deepEqual(r,{status:"confirmed",provider_transaction_ref:transactionRef});
+ assert.equal((await state(s)).status,"released");
+ assert.equal((await state(s)).version,"2");
+});
+test("provider hold blocks pending dispatch; failed provider operation freezes reservation for reconciliation",async()=>{
+ const s=await providerPayer({funded:true});
+ const reserved=await reserveProvider(s);assert.equal(reserved.ok,true);
+ assert.equal((await providerEvent(s,"held")).status,"applied");
+ assert.equal((await provider.beginDispatch({...s,requestId:reserved.releaseRequestId})).ok,false);
+ assert.equal((await state(s)).status,"release_pending");
+ const other=await providerPayer({funded:true});
+ const r=await reserveProvider(other);assert.equal(r.ok,true);
+ const req={...other,requestId:r.releaseRequestId};
+ assert.equal((await provider.beginDispatch(req)).ok,true);
+ assert.equal((await providerEvent(other,"held")).status,"reconcile");
+ assert.equal((await providerEvent(other,"failed",{requestId:r.releaseRequestId})).status,"applied");
+ assert.equal((await provider.beginDispatch(req)).ok,false);
+ assert.equal((await providerEvent(other,"released",{requestId:r.releaseRequestId,transactionRef:randomUUID()})).status,"denied");
+ const {rows:[record]}=await pool.query("SELECT r.status,f.status AS funding_status FROM securepay_release_requests r JOIN securepay_private.provider_funding f ON f.milestone_id=r.milestone_id WHERE r.id=$1",[r.releaseRequestId]);
+ assert.deepEqual(record,{status:"failed",funding_status:"held"});
+ assert.equal((await state(other)).status,"release_pending");
 });
