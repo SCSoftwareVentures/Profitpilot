@@ -27,6 +27,7 @@ CREATE FUNCTION securepay_private.recovery_state(s uuid,t uuid,m uuid,d uuid) RE
  SELECT encode(public.digest(convert_to(jsonb_build_array(
   t,m,d,s,c.status,f.status,f.funding_ref,f.amount_cents,st.status,
   (SELECT jsonb_agg(to_jsonb(l) ORDER BY l.leg_id) FROM securepay_private.settlement_legs l WHERE l.settlement_id=s),
+  (SELECT jsonb_agg(to_jsonb(e) ORDER BY e.event_id) FROM securepay_private.settlement_leg_events e WHERE e.case_id=d),
   (SELECT jsonb_agg(to_jsonb(x) ORDER BY x.event_id) FROM securepay_private.settlement_leg_conflicts x WHERE x.case_id=d),
   (SELECT jsonb_agg(to_jsonb(x) ORDER BY x.event_id) FROM securepay_private.provider_reconciliation x WHERE x.tenant_id=t AND x.milestone_id=m),
   (SELECT jsonb_agg(to_jsonb(j) ORDER BY j.journal_id) FROM securepay_private.financial_journal j WHERE j.tenant_id=t AND j.milestone_id=m)
@@ -104,6 +105,13 @@ BEGIN
  ELSIF op IN ('confirm','clear_conflict') THEN
   IF op='confirm' THEN
    INSERT INTO securepay_private.provider_receipts(receipt) VALUES(r) ON CONFLICT DO NOTHING;
+   IF NOT FOUND AND (NOT EXISTS(SELECT 1 FROM securepay_private.settlement_leg_events e JOIN securepay_private.settlement_leg_conflicts x ON x.event_id=e.event_id WHERE e.leg_id=l AND e.receipt=r)
+    OR EXISTS(SELECT 1 FROM securepay_private.settlement_leg_events WHERE receipt=r AND leg_id<>l)
+    OR EXISTS(SELECT 1 FROM securepay_private.settlement_legs WHERE receipt=r)
+    OR EXISTS(SELECT 1 FROM securepay_private.provider_events WHERE transaction_ref=r)
+    OR EXISTS(SELECT 1 FROM securepay_private.dispute_settlements WHERE provider_receipt=r)) THEN
+    RAISE EXCEPTION 'Receipt already allocated' USING ERRCODE='23505';
+   END IF;
    UPDATE securepay_private.settlement_legs SET status='confirmed',receipt=r WHERE leg_id=l;
   END IF;
   UPDATE securepay_private.settlement_leg_conflicts x SET resolved_at=clock_timestamp(),resolution_id=id
@@ -196,6 +204,7 @@ BEGIN
  INSERT INTO securepay_private.settlement_leg_events(event_id,case_id,leg_id,outcome,attempt,receipt) VALUES(e,d,l,op,n,r);
  IF funding_status='funded' AND NOT EXISTS(SELECT 1 FROM securepay_private.settlement_legs WHERE settlement_id=s AND status<>'confirmed')
  AND NOT EXISTS(SELECT 1 FROM securepay_private.settlement_leg_conflicts WHERE case_id=d AND resolved_at IS NULL) THEN
+  IF (SELECT remaining_cents FROM securepay_private.financial_balance(t,m))<>0 THEN RAISE EXCEPTION 'Unbalanced settlement'; END IF;
   UPDATE securepay_private.dispute_settlements SET status='confirmed',confirmed_at=clock_timestamp() WHERE settlement_id=s;
   UPDATE securepay_private.dispute_cases SET status='settled' WHERE case_id=d;
   UPDATE securepay_private.provider_funding SET status='settled' WHERE tenant_id=t AND milestone_id=m;
