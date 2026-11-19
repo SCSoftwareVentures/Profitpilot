@@ -4,6 +4,9 @@ import rateLimit from "express-rate-limit";
 import pg from "pg";
 import {createRemoteJWKSet,jwtVerify} from "jose";
 import {makeSharedCustomerBudget} from "../securepay/db/shared-budget.mjs";
+import {validParticipantRequest,participantOps} from "../securepay/db/participant.mjs";
+import {makeEvidenceScanner,clamavScanner,jpegNormalizer} from "../securepay/db/evidence-scanner.mjs";
+import {projectParticipant} from "./securepay-participant-view.js";
 import {makePayerService} from "../securepay/domain/payer-service.mjs";
 import {validKeyId} from "../securepay/db/key-envelope.mjs";
 import {createRecoveryVerifier} from "../securepay/db/recovery-grant.mjs";
@@ -45,7 +48,15 @@ export function createSecurePayRouter({enabled=false,verifyToken,service,takeBud
   try{if(!await takeBudget(req.payerIdentity))return res.status(429).json({error:"Too many requests"});next();}
   catch{return res.status(503).json({error:"SecurePay unavailable"});}
  });
- router.use(express.json({limit:"8kb",strict:true}));
+ let participantUploading=false;
+ router.use((req,res,next)=>{
+  if(!req.path.endsWith("/case-upload"))return express.json({limit:"8kb",strict:true})(req,res,next);
+  if(!/^\/tenants\/[a-f0-9-]{36}\/milestones\/[a-f0-9-]{36}\/case-upload$/.test(req.path)||req.method!=="POST")return res.status(404).json({error:"Not found"});
+  if(participantUploading)return res.status(429).json({error:"Upload busy"});
+  participantUploading=true;let released=false,processing=false,closed=false;const release=()=>{if(!released){released=true;participantUploading=false;}};
+  res.on("close",()=>{closed=true;if(!processing)release();});
+  express.json({limit:2800000,strict:true})(req,res,e=>{if(e||closed){release();if(e)next(e);return;}processing=true;res.locals.finishParticipantUpload=release;next();});
+ });
  const handle=fn=>async(req,res)=>{
   try{
    if(!req.is("application/json"))return res.status(415).json({error:"JSON required"});
@@ -84,6 +95,13 @@ export function createSecurePayRouter({enabled=false,verifyToken,service,takeBud
  router.post("/tenants/:tenantId/plans/:planId/accept",handle(req=>service.acceptPlan({identity:req.payerIdentity,tenantId:req.params.tenantId,planId:req.params.planId,body:req.body,requireQuote:true})));
  router.post("/tenants/:tenantId/pin/grant",handle(req=>service.issueGrant({identity:req.payerIdentity,tenantId:req.params.tenantId,body:req.body})));
  router.post("/tenants/:tenantId/pin",handle(req=>service.setPin({identity:req.payerIdentity,tenantId:req.params.tenantId,body:req.body})));
+ for(const op of participantOps)router.post("/tenants/:tenantId/milestones/:milestoneId/case-"+op,async(req,res)=>{
+  try{if(req.originalUrl.includes("?")||!req.is("application/json")||!validParticipantRequest(op,req.body))return res.status(400).json({error:"Invalid request"});
+   const {tenantId,milestoneId}=req.params,r=await service.participant({identity:req.payerIdentity,tenantId,milestoneId,op,body:req.body});
+   if(!r?.ok)return res.status(403).json({error:"Authorization denied"});
+   return res.json({mode:"sandbox",moneyMoved:false,participant:projectParticipant(op,r.participant,milestoneId,"customer",req.body)});
+  }catch(e){return res.status(e.status===400?400:503).json({error:e.status===400?"Invalid request":"SecurePay unavailable"});}finally{res.locals.finishParticipantUpload?.();}
+ });
  for(const action of ["completion","photo","approve","reject","dispute"])router.post("/tenants/:tenantId/milestones/:milestoneId/"+action,handle(req=>service[action]({identity:req.payerIdentity,tenantId:req.params.tenantId,milestoneId:req.params.milestoneId,body:req.body})));
  router.post("/tenants/:tenantId/milestones/:milestoneId/view",handle(req=>service.view({identity:req.payerIdentity,tenantId:req.params.tenantId,milestoneId:req.params.milestoneId,body:req.body})));
  router.post("/tenants/:tenantId/milestones/:milestoneId/reserve",handle(req=>service.reserve({identity:req.payerIdentity,tenantId:req.params.tenantId,milestoneId:req.params.milestoneId,body:req.body})));
@@ -120,6 +138,8 @@ export function createSecurePayRouterFromEnv(env=process.env){
   recovery.recoveryKey=Buffer.from(env.SECUREPAY_RECOVERY_KEY,"hex");
   recovery.verifyRecovery=createRecoveryVerifier({issuer:recoveryIssuer,audience:recoveryAudience,requiredAcr:recoveryAcr,keyResolver:createRemoteJWKSet(recoveryJwks)});
  }
- const service=makePayerService({pool,signingKey:Buffer.from(env.SECUREPAY_CONTEXT_HMAC_SECRET,"hex"),pepper:Buffer.from(env.SECUREPAY_PIN_PEPPER,"hex"),contextKeyId:env.SECUREPAY_CONTEXT_KEY_ID??"primary",commandAuthority:{id:env.SECUREPAY_COMMAND_KEY_ID??"primary",key:Buffer.from(env.SECUREPAY_COMMAND_KEY,"hex")},...recovery});
+ let disputeScanner;
+ if(env.SECUREPAY_DISPUTE_SCAN_KEY!==undefined){if(!hex.test(env.SECUREPAY_DISPUTE_SCAN_KEY)||[env.SECUREPAY_CONTEXT_HMAC_SECRET,env.SECUREPAY_PIN_PEPPER,env.SECUREPAY_COMMAND_KEY,env.SECUREPAY_RATE_LIMIT_KEY,env.SECUREPAY_RECOVERY_KEY,env.TENANT_CONTEXT_HMAC_SECRET].some(k=>k?.toLowerCase()===env.SECUREPAY_DISPUTE_SCAN_KEY.toLowerCase()))throw Error("Independent dispute scan key required");disputeScanner=makeEvidenceScanner({key:Buffer.from(env.SECUREPAY_DISPUTE_SCAN_KEY,"hex"),keyId:env.SECUREPAY_DISPUTE_SCAN_KEY_ID??"primary",scan:clamavScanner({timeoutMs:7000}),normalizeJPEG:jpegNormalizer({timeoutMs:4000})});}
+ const service=makePayerService({pool,disputeScanner,signingKey:Buffer.from(env.SECUREPAY_CONTEXT_HMAC_SECRET,"hex"),pepper:Buffer.from(env.SECUREPAY_PIN_PEPPER,"hex"),contextKeyId:env.SECUREPAY_CONTEXT_KEY_ID??"primary",commandAuthority:{id:env.SECUREPAY_COMMAND_KEY_ID??"primary",key:Buffer.from(env.SECUREPAY_COMMAND_KEY,"hex")},...recovery});
  return createSecurePayRouter({enabled:true,service,takeBudget:makeSharedCustomerBudget({pool,key:Buffer.from(env.SECUREPAY_RATE_LIMIT_KEY,"hex"),issuer}),verifyToken:createPayerTokenVerifier({issuer,audience,requiredAcr,keyResolver:createRemoteJWKSet(jwksUrl)})});
 }
