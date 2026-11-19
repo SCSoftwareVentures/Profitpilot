@@ -11,7 +11,12 @@ const mac=(key,parts)=>createHmac("sha256",key).update(parts.join(":")).digest("
 const response=ok=>({ok:ok===true,mode:"sandbox",moneyMoved:false});
 export function makeDisputeActor({pool,key,actorId}){
  checkKey(pool,key);checkIds(actorId);
- return Object.freeze({async action({eventId=randomUUID(),tenantId,milestoneId,caseId,action,details,evidenceDigest=null,payoutCents=null,refundCents=null}){
+ return Object.freeze({async linkedEvidence({tenantId,milestoneId,caseId,photoId=null}){
+  checkIds(tenantId,milestoneId,caseId);if(photoId!==null)checkIds(photoId);
+  const x=expiry(),args=[tenantId,milestoneId,caseId,actorId,photoId,x];
+  const {rows:[r]}=await pool.query("SELECT securepay_private.dispute_work_evidence($1,$2,$3,$4,$5,$6,$7) AS result",[...args,mac(key,["sp-linked-work-v1",...args.map(v=>v??"-")])]);
+  return r?.result??null;
+ },async action({eventId=randomUUID(),tenantId,milestoneId,caseId,action,details,evidenceDigest=null,payoutCents=null,refundCents=null}){
   checkIds(eventId,tenantId,milestoneId,caseId);
   if(!["open","evidence","decide","finalize","ack","appeal"].includes(action)||typeof details!=="string"||details.length>4000||details.includes("\0")||
      !(evidenceDigest===null||/^[a-f0-9]{64}$/.test(evidenceDigest))||!cents(payoutCents)||!cents(refundCents))throw Error("Invalid dispute action");
