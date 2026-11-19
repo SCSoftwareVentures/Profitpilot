@@ -2,11 +2,17 @@ import {createHmac,createHash,randomUUID} from "node:crypto";
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const ids=(...x)=>{if(!x.every(v=>typeof v==="string"&&uuid.test(v)))throw Error("Invalid completion scope");};
 const expiry=()=>Math.floor(Date.now()/1000)+15;
-export function makeWorkCompletionOwner({pool,actorId,key,scanner}){
+export function makeWorkCompletionOwner({pool,actorId,key,scanner,disputeScanner}){
  ids(actorId);
  if(!pool?.query||!Buffer.isBuffer(key)||key.length!==32||typeof scanner?.attest!=="function")throw Error("Completion authority unavailable");
  const mac=args=>createHmac("sha256",key).update(args.join(":")).digest("hex");
  return Object.freeze({
+  async participant({tenantId,milestoneId,op,body}){
+   ids(tenantId,milestoneId);
+   const invoke=async(action,payload)=>{const raw=JSON.stringify(payload),exp=expiry(),args=[tenantId,milestoneId,actorId,action,raw,exp],sig=mac(["sp-participant-v1",tenantId,milestoneId,actorId,action,createHash("sha256").update(raw).digest("hex"),exp]);return (await pool.query("SELECT securepay_private.owner_participant($1,$2,$3,$4,$5,$6,$7) AS result",[...args,sig])).rows[0]?.result;};
+   const result=await participantRequest({invoke,scanner:disputeScanner,tenantId,milestoneId,actorId,op,body});
+   return result?{ok:true,participant:result}:{ok:false};
+  },
   async acknowledgeFundedCancellation({tenantId,planId,offerId,decisionId,payoutCents,refundCents}){
    const eventId=randomUUID();ids(tenantId,planId,offerId,eventId,decisionId);
    if(![payoutCents,refundCents].every(x=>Number.isSafeInteger(x)&&x>=0))throw Error("Invalid decision amount");
