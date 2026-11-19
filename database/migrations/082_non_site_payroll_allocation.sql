@@ -529,7 +529,8 @@ BEGIN
   result:=jsonb_build_object('format','profitpilot-financial-coverage-v1','contractId',c,'siteId',s,'baselineId',baseline,'periodStart',starts,'periodEnd',ends,'status',CASE WHEN blockers='[]'::jsonb THEN 'indicative_only' ELSE 'blocked' END,'canAttemptCalculation',blockers='[]'::jsonb,'definitiveProfitAvailable',false,'blockers',blockers,'gaps',gaps,
    'scopeInvoices',invoices,'recordedCredits',credits-'lines','sharedOverheadCredits',overhead_credits-'lines','nonSitePayroll',non_site-'lines','canAttemptNonSiteCalculation',blockers='[]'::jsonb AND NOT (non_site->>'invalid')::boolean AND (non_site->>'missingCount')::integer=0,'creditReview',credit_review,'tenantImports',imports,'tenantPayroll',payroll,'tenantSupplier',pending,
    'shared',shared-'lines','businessOverhead',business-'lines'-'businessId',
-   'missingSharedSources',(SELECT coalesce(jsonb_agg(jsonb_build_object('kind',x->>0,'sourceId',x->>1,'amount',x->2->>'amount')),'[]'::jsonb) FROM (SELECT x FROM jsonb_array_elements((shared->'lines')||(business->'lines')||(non_site->'lines')) x WHERE x->>3 IS NULL LIMIT 100) q));
+   'missingNonSiteSources',(SELECT coalesce(jsonb_agg(jsonb_build_object('kind',x->>0,'sourceId',x->>1,'amount',x->2->>'amount')),'[]'::jsonb) FROM (SELECT x FROM jsonb_array_elements(non_site->'lines') x WHERE x->>3 IS NULL LIMIT 100) q),
+   'missingSharedSources',(SELECT coalesce(jsonb_agg(jsonb_build_object('kind',x->>0,'sourceId',x->>1,'amount',x->2->>'amount')),'[]'::jsonb) FROM (SELECT x FROM jsonb_array_elements((shared->'lines')||(business->'lines')) x WHERE x->>3 IS NULL LIMIT 100) q));
  END IF;
  INSERT INTO public.audit_events(tenant_id,actor_user_id,action,object_type,object_id,metadata) VALUES(t,actor,'financial_coverage_read','contract',c,jsonb_build_object('siteId',s,'periodStart',starts,'periodEnd',ends,'status',result->>'status'));
  PERFORM private.sensitive_api_fresh(auth,expiry);
