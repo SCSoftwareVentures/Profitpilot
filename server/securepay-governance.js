@@ -7,7 +7,7 @@ import {createServer} from "node:http";
 import {fileURLToPath} from "node:url";
 import {createPayerTokenVerifier} from "./securepay-router.js";
 import {authoritySecrets} from "./securepay-gateway.js";
-import {disputeAdminPage,settlementAuthorizationPage,postAuthorizationPage,administratorSuccessionPage,sendPortalPage} from "./securepay-portal-page.js";
+import {disputeAdminPage,settlementAuthorizationPage,postAuthorizationPage,administratorSuccessionPage,correctionAssessmentPage,sendPortalPage} from "./securepay-portal-page.js";
 import {makeGovernanceActor,independenceAttestation} from "../securepay/db/governance.mjs";
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const id=x=>typeof x==="string"&&uuid.test(x);
@@ -15,8 +15,9 @@ const exact=(x,keys)=>x&&typeof x==="object"&&!Array.isArray(x)&&Object.keys(x).
 export function createGovernanceRouter({enabled=false,role,subject,verifyToken,actor}={}){
  const router=express.Router();router.use((req,res,next)=>{res.set("Cache-Control","no-store");if(!enabled)return res.status(404).json({error:"Not found"});next();});if(!enabled)return router;
  if(!["administrator","settlement"].includes(role)||!subject||!actor||typeof verifyToken!=="function")throw Error("Governance unavailable");
- const admin=role==="administrator",allowed=admin?["queue","action","reassessments","reassess","post-auth-start","successions","succession"]:["queue","declare","read","authorize","report-conflict","post-auth-read","post-auth-vote"];
+ const admin=role==="administrator",allowed=admin?["queue","action","reassessments","reassess","post-auth-start","successions","succession","correction-request","correction-read"]:["queue","declare","read","authorize","report-conflict","post-auth-read","post-auth-vote"];
  router.use(rateLimit({windowMs:60000,limit:60,standardHeaders:true,legacyHeaders:false}));
+ router.get("/correction",(req,res)=>!admin||req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,correctionAssessmentPage()));
  router.get("/succession",(req,res)=>!admin||req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,administratorSuccessionPage()));
  router.get("/post-auth",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,postAuthorizationPage(role)));
  router.get("/dashboard",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,admin?disputeAdminPage():settlementAuthorizationPage()));
@@ -26,6 +27,8 @@ export function createGovernanceRouter({enabled=false,role,subject,verifyToken,a
  },express.json({limit:"8kb",strict:true}),async(req,res)=>{
   const a=req.params.action,b=req.body;let result;
   try{
+   if(a==="correction-read"){if(!exact(b,["correctionId"])||!id(b.correctionId))return res.status(400).json({error:"Invalid request"});result=await actor.readCorrection(b.correctionId);if(!result)return res.status(403).json({error:"Authorization denied"});return res.json({mode:"sandbox",moneyMoved:false,correction:result});}
+   if(a==="correction-request"){if(!exact(b,["caseId","actorOne","actorTwo","payoutCents","refundCents","reason","correctionId"])||![b.caseId,b.actorOne,b.actorTwo,b.correctionId].every(id)||b.actorOne===b.actorTwo||![b.payoutCents,b.refundCents].every(x=>Number.isSafeInteger(x)&&x>=0)||typeof b.reason!=="string"||b.reason.trim().length<10||b.reason.length>1000||b.reason.includes("\0"))return res.status(400).json({error:"Invalid request"});result=await actor.requestCorrection(b);if(!result)return res.status(403).json({error:"Authorization denied"});return res.json({mode:"sandbox",moneyMoved:false,correction:result});}
    if(a==="successions"){if(!exact(b,[]))return res.status(400).json({error:"Invalid request"});result=await actor.successions();if(result===null)return res.status(403).json({error:"Authorization denied"});return res.json({mode:"sandbox",moneyMoved:false,cases:result});}
    if(a==="succession"){if(!exact(b,["caseId","requestId","nominee","action","reason","stateDigest"])||![b.caseId,b.requestId,b.nominee].every(id)||!["request","approve","withdraw"].includes(b.action)||typeof b.reason!=="string"||b.reason.trim().length<10||b.reason.length>1000||b.reason.includes("\0")||(b.action==="request")!==(b.stateDigest===null)||(b.stateDigest!==null&&(typeof b.stateDigest!=="string"||!/^[a-f0-9]{64}$/.test(b.stateDigest))))return res.status(400).json({error:"Invalid request"});result=await actor.succession(b);if(!result?.ok)return res.status(403).json({error:"Authorization denied"});return res.json({mode:"sandbox",moneyMoved:false,succession:result.succession});}
    if(a==="reassessments"){if(!exact(b,[]))return res.status(400).json({error:"Invalid request"});result=await actor.reassessments();if(result===null)return res.status(403).json({error:"Authorization denied"});return res.json({mode:"sandbox",moneyMoved:false,requests:result});}
