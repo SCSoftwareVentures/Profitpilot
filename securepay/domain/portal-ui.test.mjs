@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {Script,createContext} from "node:vm";
 import {createHash,randomUUID} from "node:crypto";
-import {customerPortalPage,ownerDashboardPage,customerQuotePage,ownerQuotePage,customerContractPage,ownerContractPage,customerCancellationPage} from "../../server/securepay-portal-page.js";
+import {customerPortalPage,ownerDashboardPage,customerQuotePage,ownerQuotePage,customerContractPage,ownerContractPage,customerCancellationPage,reviewerPage} from "../../server/securepay-portal-page.js";
 import {createPayerTokenVerifier} from "../../server/securepay-router.js";
 import {generateKeyPair,SignJWT} from "jose";
 function ui(page,responses){
@@ -117,4 +117,19 @@ test("funded cancellation customer consent resets on selection and never describ
  h.get("offer-ref").value=o;await h.fire("offer-ref","input");assert.equal(h.get("agree").checked,false);assert.equal(h.get("accept").disabled,true);
  h.get("agree").checked=true;await h.fire("agree","change");assert.equal(h.get("accept").disabled,false);
  await h.fire("accept");assert.deepEqual(JSON.parse(h.calls[1].opts.body),{offerId:o,offerDigest:digest,payoutCents:500,refundCents:1500});assert.match(h.get("message").textContent,/No payment moved/);assert.equal(h.get("confirmed").textContent,"AUD $0.00");
+});
+
+test("reviewer page requires photo loading and explicit acknowledgement before binding exact decision snapshot",async()=>{
+ const caseId=randomUUID(),photoId=randomUUID(),digest="a".repeat(64),stateDigest="b".repeat(64);
+ const review={stateDigest,case:{caseId,severity:"moderate",status:"open",repairPhase:"none",amountCents:"5000",customerEvidence:true,ownerEvidence:true,firstReviewByMe:false,responseDueAt:"2026-11-20T06:00:00Z",events:[{at:"2026-11-19T06:00:00Z",role:"owner",action:"evidence",details:"<script>synthetic</script>",digest}],deadlines:[],photos:[{photoId,digest,purged:false,source:"dispute"}],linkedPhotos:[],linkedCompletions:[]}};
+ const reply=x=>({code:200,data:{mode:"sandbox",moneyMoved:false,...x}});
+ const h=ui(reviewerPage(),[reply({cases:[{caseId,severity:"moderate",status:"open",repairPhase:"none",dueAt:review.case.responseDueAt}]}),reply({review}),reply({photo:{photoId,digest,content:"aGVsbG8="}}),reply({status:"decision_recorded"}),reply({cases:[]})]);
+ h.get("token").value="fixture";await h.fire("load");h.get("case-ref").value=caseId;await h.fire("open");
+ assert.match(h.get("events").children[0].textContent,/<script>synthetic<\/script>/);
+ h.get("action").value="decide";await h.fire("action","change");h.get("ack").checked=true;await h.fire("ack","change");assert.equal(h.get("submit").disabled,true);
+ await h.fire("load-photos");assert.equal(h.get("ack").checked,false);assert.equal(h.get("submit").disabled,true);
+ h.get("ack").checked=true;await h.fire("ack","change");assert.equal(h.get("submit").disabled,false);
+ h.get("payout").value="30";h.get("refund").value="19.99";h.get("reason").value="Reasoned review of evidence";await h.fire("submit");assert.equal(h.calls.length,3);
+ h.get("refund").value="20";await h.fire("submit");assert.deepEqual(JSON.parse(h.calls[3].opts.body),{caseId,action:"decide",reason:"Reasoned review of evidence",payoutCents:3000,refundCents:2000,stateDigest});
+ assert.equal(h.get("details").hidden,true);assert.match(h.get("message").textContent,/No payment authorised/);
 });
