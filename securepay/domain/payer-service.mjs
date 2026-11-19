@@ -48,6 +48,33 @@ export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecov
     return {ok:true,view:{milestoneId:r.milestone_id,amountCents:r.amount_cents,status:r.status,fundingStatus:r.funding_status,isFinal:r.is_final,requestStatus:r.request_status}};
    });
   },
+  async completion({identity,tenantId,milestoneId,body}){
+   const ctx=context(identity,tenantId);
+   if(typeof milestoneId!=="string"||!uuid.test(milestoneId)||!exact(body,[]))bad();
+   return authenticated(ctx,async c=>{
+    const {rows:[r]}=await c.query("SELECT securepay_private.payer_completion_view($1,$2) AS completion",[tenantId,milestoneId]);
+    return r?.completion?{ok:true,completion:r.completion}:{ok:false};
+   });
+  },
+  async photo({identity,tenantId,milestoneId,body}){
+   const ctx=context(identity,tenantId);
+   if(!uuid.test(milestoneId)||!exact(body,["photoId"])||typeof body.photoId!=="string"||!uuid.test(body.photoId))bad();
+   return authenticated(ctx,async c=>{
+    const {rows:[r]}=await c.query("SELECT * FROM securepay_private.payer_work_photo($1,$2,$3)",[tenantId,milestoneId,body.photoId]);
+    if(!r)return {ok:false};
+    return {ok:true,photo:{photoId:body.photoId,digest:r.digest,content:r.content.toString("base64")}};
+   });
+  },
+  async approve({identity,tenantId,milestoneId,body}){
+   const ctx=context(identity,tenantId);
+   if(!uuid.test(milestoneId)||!exact(body,["completionId","manifestDigest","expectedAmountCents","version"])||
+    typeof body.completionId!=="string"||!uuid.test(body.completionId)||typeof body.manifestDigest!=="string"||!/^[a-f0-9]{64}$/.test(body.manifestDigest)||
+    !Number.isSafeInteger(body.expectedAmountCents)||body.expectedAmountCents<=0||typeof body.version!=="string"||!/^(0|[1-9][0-9]{0,18})$/.test(body.version)||BigInt(body.version)>=9223372036854775807n)bad();
+   return authenticated(ctx,async c=>{
+    const {rows:[r]}=await c.query("SELECT securepay_private.approve_work_completion($1,$2,$3,$4,$5,$6) AS ok",[tenantId,milestoneId,body.completionId,body.manifestDigest,body.expectedAmountCents,body.version]);
+    return r?.ok?{ok:true,workApproved:true}:{ok:false};
+   });
+  },
   async reserve({identity,tenantId,milestoneId,body}){
    const ctx=context(identity,tenantId);
    if(typeof milestoneId!=="string"||!uuid.test(milestoneId)||
