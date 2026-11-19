@@ -1941,9 +1941,11 @@ test("assigned reviewer queue, immutable evidence read and state-bound decision 
  assert.equal(await reviewer.photo({caseId:d.scope.caseId,photoId:randomUUID(),source:"dispute"}),null);
  const cmd={caseId:d.scope.caseId,action:"decide",reason:"Reviewed the evidence and proportional remedy",payoutCents:3000,refundCents:2000,stateDigest:snap.stateDigest};
  assert.equal((await reviewer.decide({...cmd,refundCents:1999})).ok,false);
- assert.equal((await photo(d,d.owner)).ok,true);
+ const extra=await photo(d,d.owner);assert.equal(extra.ok,true);
  assert.equal((await reviewer.decide(cmd)).ok,false);
  const current=await reviewer.read(d.scope.caseId);
+ assert.equal((await reviewer.decide({...cmd,stateDigest:current.stateDigest})).ok,false);
+ assert.ok(await reviewer.photo({caseId:d.scope.caseId,photoId:extra.photoId,source:"dispute"}));
  assert.equal((await reviewer.decide({...cmd,stateDigest:current.stateDigest})).ok,true);
  assert.equal((await d.approval.authorize(d.settlement)).ok,false);
  assert.equal((await d.call(d.customer,"ack","Customer acknowledged")).ok,true);
@@ -1951,6 +1953,8 @@ test("assigned reviewer queue, immutable evidence read and state-bound decision 
  const same=await reviewer.read(d.scope.caseId);
  assert.equal((await reviewer.decide({...cmd,action:"finalize",stateDigest:same.stateDigest})).ok,false);
  const independent=await second.read(d.scope.caseId);
+ assert.equal((await second.decide({...cmd,action:"finalize",stateDigest:independent.stateDigest})).ok,false);
+ for(const p of independent.case.photos)assert.ok(await second.photo({caseId:d.scope.caseId,photoId:p.photoId,source:p.source}));
  assert.equal((await second.decide({...cmd,action:"finalize",stateDigest:independent.stateDigest})).ok,true);
  assert.equal((await state(d.s)).status,"disputed");
  for(const sql of ["SELECT * FROM securepay_private.dispute_cases","SELECT * FROM securepay_private.dispute_photos","SELECT * FROM securepay_private.dispute_actors","SELECT securepay_private.authorize_settlement(NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)"]){await assert.rejects(reviewerPool.query(sql),e=>e.code==="42501");}
