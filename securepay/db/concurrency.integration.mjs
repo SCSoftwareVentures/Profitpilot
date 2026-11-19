@@ -11,7 +11,9 @@ import {createRecoveryVerifier,issueRecoveryGrant} from "./recovery-grant.mjs";
 import {makeNotificationWorker} from "./notification-worker.mjs";
 import {makeSandboxProvider} from "./sandbox-provider.mjs";
 import {makeDisputeActor,makeSettlementAuthorizer,makeSettlementProvider} from "./dispute-settlement.mjs";
-import {makeRectificationActor,scanDisputeDeadlines} from "./rectification.mjs";
+import {makeRectificationActor,scanDisputeDeadlines,purgeExpiredEvidence} from "./rectification.mjs";
+import {makeEvidenceScanner,crc32,validEvidencePNG} from "./evidence-scanner.mjs";
+import {deflateSync} from "node:zlib";
 import {verifyAuditChain} from "./audit-chain.mjs";
 import {verifyPinCredential} from "../domain/pin-credential.mjs";
 import {readFile} from "node:fs/promises";
@@ -29,9 +31,11 @@ const pool=new pg.Pool({connectionString:url.href,max:8,connectionTimeoutMillis:
 const payerSigningKey=randomBytes(32);
 const recoveryKey=randomBytes(32);
 const providerKey=randomBytes(32);
-let payerPool, notificationPool, providerPool, provider, disputePool, settlementPool, escalationPool, auditPool;
+let payerPool, notificationPool, providerPool, provider, disputePool, settlementPool, escalationPool, auditPool, retentionPool;
+const scanKey=randomBytes(32);
+const scanner=makeEvidenceScanner({key:scanKey,scan:async()=>"clean"});
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(key_id,secret) VALUES('primary',$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(key_id,secret) VALUES('primary',$1)",[deriveCommandKey(pepper)]);
@@ -60,6 +64,8 @@ before(async()=>{
   settlementPool=await rolePool("securepay_settlement_runtime");
   escalationPool=await rolePool("securepay_escalation_runtime");
   auditPool=await rolePool("securepay_audit_runtime");
+  retentionPool=await rolePool("securepay_retention_runtime");
+  await pool.query("INSERT INTO securepay_private.evidence_scan_keys(key_id,secret) VALUES('primary',$1)",[scanKey]);
   await pool.query("INSERT INTO securepay_private.evidence_keys(key_id,secret,write_enabled) VALUES('primary',$1,true)",[randomBytes(32)]);
   await pool.query("CREATE TABLE securepay_ci_staff_only(secret text); INSERT INTO securepay_ci_staff_only VALUES ('fixture')");
   // Fixture admin bypasses RLS solely to exercise transaction semantics.
@@ -67,7 +73,7 @@ before(async()=>{
   await pool.query("CREATE ROLE securepay_ci_restricted NOLOGIN NOBYPASSRLS");
   await pool.query("GRANT SELECT, INSERT, UPDATE ON securepay_milestones, securepay_release_requests, securepay_release_proofs, securepay_customer_pins, securepay_payer_identities, securepay_pin_change_grants TO securepay_ci_restricted");
 });
-after(async()=>{if(auditPool)await auditPool.end();if(escalationPool)await escalationPool.end();if(disputePool)await disputePool.end();if(settlementPool)await settlementPool.end();if(providerPool)await providerPool.end();if(notificationPool)await notificationPool.end();if(payerPool)await payerPool.end();await pool.end();});
+after(async()=>{if(retentionPool)await retentionPool.end();if(auditPool)await auditPool.end();if(escalationPool)await escalationPool.end();if(disputePool)await disputePool.end();if(settlementPool)await settlementPool.end();if(providerPool)await providerPool.end();if(notificationPool)await notificationPool.end();if(payerPool)await payerPool.end();await pool.end();});
 async function fixture(status="approved",tenantId=randomUUID()) {
   const milestoneId=randomUUID(), customerId=randomUUID();
   await pool.query("INSERT INTO securepay_milestones(id,tenant_id,job_id,amount_cents,status) VALUES($1,$2,$3,5000,$4)",
@@ -745,7 +751,7 @@ async function disputeFixture(){
  async function actor(role,actorId=randomUUID()){
   const key=randomBytes(32);
   await pool.query("INSERT INTO securepay_private.dispute_actors(tenant_id,actor_id,role,secret) VALUES($1,$2,$3,$4)",[s.tenantId,actorId,role,key]);
-  return {actorId,key,service:makeDisputeActor({pool:disputePool,key,actorId}),repairService:makeRectificationActor({pool:disputePool,key,actorId})};
+  return {actorId,key,service:makeDisputeActor({pool:disputePool,key,actorId}),repairService:makeRectificationActor({pool:disputePool,key,actorId,scanner})};
  }
  const customer=await actor("customer",s.customerId),owner=await actor("owner"),reviewer=await actor("reviewer"),second=await actor("reviewer"),authorizer=await actor("settlement");
  await pool.query("INSERT INTO securepay_private.dispute_parties(tenant_id,milestone_id,owner_id) VALUES($1,$2,$3)",[s.tenantId,s.milestoneId,owner.actorId]);
@@ -831,7 +837,12 @@ test("provider hold cannot be overridden by dispute finality; cross-tenant and r
  assert.equal((await state(d.s)).status,"disputed");
 });
 
-const pngFixture=()=>Buffer.concat([Buffer.from("89504e470d0a1a0a","hex"),randomBytes(32)]);
+function pngFixture(){
+ const chunk=(type,data)=>{const name=Buffer.from(type),body=Buffer.concat([name,data]),size=Buffer.alloc(4),crc=Buffer.alloc(4);size.writeUInt32BE(data.length);crc.writeUInt32BE(crc32(body));return Buffer.concat([size,body,crc]);};
+ const header=Buffer.alloc(13);header.writeUInt32BE(4,0);header.writeUInt32BE(4,4);header[8]=8;header[9]=2;
+ const pixels=Buffer.concat(Array.from({length:4},()=>Buffer.concat([Buffer.from([0]),randomBytes(12)])));
+ return Buffer.concat([Buffer.from("89504e470d0a1a0a","hex"),chunk("IHDR",header),chunk("IDAT",deflateSync(pixels)),chunk("IEND",Buffer.alloc(0))]);
+}
 const repair=(d,actor,action,extra={})=>actor.repairService.repair({...d.scope,action,details:"Documented repair action",...extra});
 const photo=(d,actor,content=pngFixture())=>actor.repairService.storePhoto({...d.scope,mediaType:"image/png",content});
 const repairState=async d=>(await pool.query("SELECT status,repair_phase,repair_photo_id,owner_responded_at,response_escalated_at FROM securepay_private.dispute_cases WHERE case_id=$1",[d.scope.caseId])).rows[0];
@@ -955,4 +966,61 @@ test("independent verifier detects altered rows, deleted entries and rewritten h
  await pool.query("UPDATE securepay_private.audit_chain_heads SET last_seq=$2,last_hash=$3 WHERE tenant_id=$1",[t,prior.seq,prior.entry_hash]);
  assert.equal((await verifyAuditChain(auditPool,t)).ok,true);
  assert.deepEqual(await verifyAuditChain(auditPool,t,{checkpoint:original.checkpoint}),{ok:false,reason:"truncated_history"});
+});
+
+test("strict evidence validation rejects malformed, oversized, trailing and unscreened bytes; scanner failures deny storage",async()=>{
+ const d=await disputeFixture();assert.equal((await openCase(d)).ok,true);
+ const content=pngFixture();assert.equal(validEvidencePNG(content),true);
+ assert.equal(validEvidencePNG(Buffer.concat([content,Buffer.from("trailing")])),false);
+ assert.equal(validEvidencePNG(content.subarray(0,-1)),false);
+ const corrupted=Buffer.from(content);corrupted[corrupted.length-1]^=1;assert.equal(validEvidencePNG(corrupted),false);
+ assert.equal(validEvidencePNG(Buffer.alloc(2097153)),false);
+ const scope={...d.scope,mediaType:"image/png",content};
+ for(const result of ["infected","unavailable",undefined]){
+  const actor=makeRectificationActor({pool:disputePool,actorId:d.owner.actorId,key:d.owner.key,scanner:makeEvidenceScanner({key:scanKey,scan:async()=>result})});
+  assert.equal((await actor.storePhoto(scope)).ok,false);
+ }
+ const fake=makeRectificationActor({pool:disputePool,actorId:d.owner.actorId,key:d.owner.key,scanner:makeEvidenceScanner({key:randomBytes(32),scan:async()=>"clean"})});
+ assert.equal((await fake.storePhoto(scope)).ok,false);
+ const bypass=makeRectificationActor({pool:disputePool,actorId:d.owner.actorId,key:d.owner.key});
+ assert.equal((await bypass.storePhoto(scope)).ok,false);
+ await assert.rejects(disputePool.query("SELECT securepay_private.store_dispute_photo(NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)"),e=>e.code==="42501");
+ const p=await d.owner.repairService.storePhoto(scope);assert.equal(p.ok,true);
+ const r=(await pool.query("SELECT scan_key_id,screened_at FROM securepay_private.dispute_photos WHERE photo_id=$1",[p.photoId])).rows[0];
+ assert.equal(r.scan_key_id,"primary");assert.ok(r.screened_at);
+});
+test("scanner attestation is bound to exact content and scope, with revoked or expired key rejection",async()=>{
+ const d=await disputeFixture();assert.equal((await openCase(d)).ok,true);
+ const photoId=randomUUID(),content=pngFixture(),scope={...d.scope,photoId,mediaType:"image/png",content};
+ const proof=await scanner.attest({...scope,actorId:d.owner.actorId});assert.ok(proof);
+ const stale=makeRectificationActor({pool:disputePool,actorId:d.owner.actorId,key:d.owner.key,scanner:{attest:async()=>proof}});
+ assert.equal((await stale.storePhoto({...scope,photoId:randomUUID()})).ok,false);
+ assert.equal((await stale.storePhoto({...scope,content:pngFixture()})).ok,false);
+ await pool.query("UPDATE securepay_private.evidence_scan_keys SET active=false WHERE key_id='primary'");
+ try{assert.equal((await stale.storePhoto(scope)).ok,false);}finally{await pool.query("UPDATE securepay_private.evidence_scan_keys SET active=true WHERE key_id='primary'");}
+ assert.equal((await stale.storePhoto(scope)).ok,true);
+ assert.equal((await stale.storePhoto(scope)).ok,false);
+});
+test("evidence retention requires explicit expired policy, settled case and lifted hold; purge preserves audit and tombstone",async()=>{
+ const d=await disputeFixture();assert.equal((await openCase(d)).ok,true);
+ const p=await photo(d,d.owner);assert.equal(p.ok,true);
+ assert.equal(await purgeExpiredEvidence(retentionPool),0);
+ await pool.query("INSERT INTO securepay_private.evidence_retention_policy(case_id,tenant_id,retain_until,legal_hold,reason) VALUES($1,$2,clock_timestamp()-interval '1 day',false,'Synthetic approved retention test')",[d.scope.caseId,d.scope.tenantId]);
+ assert.equal(await purgeExpiredEvidence(retentionPool),0);
+ assert.equal((await evidence(d)).ok,true);assert.equal((await decide(d)).ok,true);
+ assert.equal((await d.call(d.customer,"ack","Accepted")).ok,true);assert.equal((await d.call(d.owner,"ack","Accepted")).ok,true);
+ assert.equal((await finalize(d)).ok,true);assert.equal((await d.approval.authorize(d.settlement)).ok,true);
+ assert.equal((await d.confirm.dispatch(d.settlement)).ok,true);assert.equal((await d.confirm.confirm({...d.settlement,receipt:randomUUID()})).ok,true);
+ await pool.query("UPDATE securepay_private.evidence_retention_policy SET legal_hold=true WHERE case_id=$1",[d.scope.caseId]);
+ assert.equal(await purgeExpiredEvidence(retentionPool),0);
+ await pool.query("UPDATE securepay_private.evidence_retention_policy SET legal_hold=false,retain_until=clock_timestamp()+interval '1 day' WHERE case_id=$1",[d.scope.caseId]);
+ assert.equal(await purgeExpiredEvidence(retentionPool),0);
+ await pool.query("UPDATE securepay_private.evidence_retention_policy SET retain_until=clock_timestamp()-interval '1 second' WHERE case_id=$1",[d.scope.caseId]);
+ const runs=await Promise.all([purgeExpiredEvidence(retentionPool),purgeExpiredEvidence(retentionPool)]);assert.equal(runs[0]+runs[1],1);
+ assert.equal(await d.customer.repairService.readPhoto({...d.scope,photoId:p.photoId}),null);
+ const r=(await pool.query("SELECT content,digest,purged_at FROM securepay_private.dispute_photos WHERE photo_id=$1",[p.photoId])).rows[0];
+ assert.equal(r.content,null);assert.equal(r.digest,p.digest);assert.ok(r.purged_at);
+ assert.equal((await verifyAuditChain(auditPool,d.scope.tenantId)).ok,true);
+ await assert.rejects(retentionPool.query("SELECT * FROM securepay_private.dispute_photos"),e=>e.code==="42501");
+ await assert.rejects(disputePool.query("UPDATE securepay_private.evidence_retention_policy SET legal_hold=false"),e=>e.code==="42501");
 });
