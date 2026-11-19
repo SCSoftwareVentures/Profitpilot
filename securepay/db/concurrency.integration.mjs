@@ -998,6 +998,8 @@ test("scanner attestation is bound to exact content and scope, with revoked or e
  assert.equal((await stale.storePhoto({...scope,content:pngFixture()})).ok,false);
  await pool.query("UPDATE securepay_private.evidence_scan_keys SET active=false WHERE key_id='primary'");
  try{assert.equal((await stale.storePhoto(scope)).ok,false);}finally{await pool.query("UPDATE securepay_private.evidence_scan_keys SET active=true WHERE key_id='primary'");}
+ await pool.query("UPDATE securepay_private.evidence_scan_keys SET valid_until=clock_timestamp()-interval '1 second' WHERE key_id='primary'");
+ try{assert.equal((await stale.storePhoto(scope)).ok,false);}finally{await pool.query("UPDATE securepay_private.evidence_scan_keys SET valid_until=NULL WHERE key_id='primary'");}
  assert.equal((await stale.storePhoto(scope)).ok,true);
  assert.equal((await stale.storePhoto(scope)).ok,false);
 });
