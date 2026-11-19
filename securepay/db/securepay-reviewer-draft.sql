@@ -211,4 +211,56 @@ BEGIN
  RETURN true;
 EXCEPTION WHEN unique_violation THEN RETURN false;
 END $$;
+-- Durable operational notifications, no external addresses or provider secrets.
+CREATE TABLE securepay_private.escalation_outbox(
+ notification_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+ tenant_id uuid NOT NULL,case_id uuid NOT NULL,kind text NOT NULL,due_at timestamptz NOT NULL,
+ attempt_count integer NOT NULL DEFAULT 0 CHECK(attempt_count BETWEEN 0 AND 8),
+ next_attempt_at timestamptz NOT NULL DEFAULT clock_timestamp(),lease_id uuid,lease_until timestamptz,
+ delivered_at timestamptz,dead_lettered_at timestamptz,delivery_ref text CHECK(length(delivery_ref) BETWEEN 1 AND 200),
+ FOREIGN KEY(case_id,kind,due_at) REFERENCES securepay_private.dispute_deadline_events(case_id,kind,due_at),
+ UNIQUE(case_id,kind,due_at),CHECK((lease_id IS NULL)=(lease_until IS NULL)),CHECK(delivered_at IS NULL OR dead_lettered_at IS NULL)
+);
+ALTER TABLE securepay_private.escalation_outbox OWNER TO securepay_context_owner;
+REVOKE ALL ON securepay_private.escalation_outbox FROM PUBLIC,securepay_reviewer_runtime,securepay_notification_runtime,securepay_escalation_runtime;
+CREATE INDEX sp_escalation_pending ON securepay_private.escalation_outbox(next_attempt_at,notification_id) WHERE delivered_at IS NULL AND dead_lettered_at IS NULL;
+CREATE FUNCTION securepay_private.enqueue_escalation() RETURNS trigger
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+BEGIN
+ INSERT INTO securepay_private.escalation_outbox(tenant_id,case_id,kind,due_at)
+ SELECT tenant_id,NEW.case_id,NEW.kind,NEW.due_at FROM securepay_private.dispute_cases WHERE case_id=NEW.case_id ON CONFLICT DO NOTHING;
+ RETURN NEW;
+END $$;
+ALTER FUNCTION securepay_private.enqueue_escalation() OWNER TO securepay_context_owner;
+REVOKE ALL ON FUNCTION securepay_private.enqueue_escalation() FROM PUBLIC;
+CREATE TRIGGER sp_enqueue_escalation AFTER INSERT ON securepay_private.dispute_deadline_events FOR EACH ROW EXECUTE FUNCTION securepay_private.enqueue_escalation();
+INSERT INTO securepay_private.escalation_outbox(tenant_id,case_id,kind,due_at)
+ SELECT c.tenant_id,e.case_id,e.kind,e.due_at FROM securepay_private.dispute_deadline_events e JOIN securepay_private.dispute_cases c ON c.case_id=e.case_id ON CONFLICT DO NOTHING;
+CREATE FUNCTION securepay_private.claim_escalation(l uuid) RETURNS TABLE(notification_id bigint,tenant_id uuid,case_id uuid,kind text,due_at timestamptz,attempt_count integer)
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+BEGIN
+ IF l IS NULL THEN RETURN; END IF;
+ UPDATE securepay_private.escalation_outbox o SET dead_lettered_at=clock_timestamp(),lease_id=NULL,lease_until=NULL
+ WHERE o.notification_id IN(SELECT q.notification_id FROM securepay_private.escalation_outbox q WHERE q.delivered_at IS NULL AND q.dead_lettered_at IS NULL AND q.attempt_count>=8 AND (q.lease_until IS NULL OR q.lease_until<=clock_timestamp()) ORDER BY q.notification_id LIMIT 100 FOR UPDATE SKIP LOCKED);
+ RETURN QUERY WITH candidate AS (
+ SELECT o.notification_id FROM securepay_private.escalation_outbox o WHERE o.delivered_at IS NULL AND o.dead_lettered_at IS NULL AND o.attempt_count<8
+ AND o.next_attempt_at<=clock_timestamp() AND (o.lease_until IS NULL OR o.lease_until<=clock_timestamp())
+ ORDER BY o.next_attempt_at,o.notification_id LIMIT 1 FOR UPDATE SKIP LOCKED)
+ UPDATE securepay_private.escalation_outbox o SET lease_id=l,lease_until=clock_timestamp()+interval '60 seconds',attempt_count=o.attempt_count+1
+ FROM candidate c WHERE o.notification_id=c.notification_id RETURNING o.notification_id,o.tenant_id,o.case_id,o.kind,o.due_at,o.attempt_count;
+END $$;
+CREATE FUNCTION securepay_private.finish_escalation(n bigint,l uuid,success boolean,ref text) RETURNS boolean
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+BEGIN
+ IF n IS NULL OR l IS NULL OR success IS NULL OR (success AND (ref IS NULL OR ref !~ '^[a-zA-Z0-9._:-]{1,200}$')) OR (NOT success AND ref IS NOT NULL) THEN RETURN false; END IF;
+ UPDATE securepay_private.escalation_outbox o SET delivered_at=CASE WHEN success THEN clock_timestamp() ELSE NULL END,delivery_ref=CASE WHEN success THEN ref ELSE NULL END,
+ dead_lettered_at=CASE WHEN NOT success AND o.attempt_count>=8 THEN clock_timestamp() ELSE NULL END,
+ next_attempt_at=CASE WHEN success THEN o.next_attempt_at ELSE clock_timestamp()+make_interval(secs=>least(3600,15*(1 << (o.attempt_count-1)))) END,lease_id=NULL,lease_until=NULL
+ WHERE o.notification_id=n AND o.lease_id=l AND o.lease_until>clock_timestamp() AND o.delivered_at IS NULL AND o.dead_lettered_at IS NULL;
+ RETURN FOUND;
+END $$;
+ALTER FUNCTION securepay_private.claim_escalation(uuid) OWNER TO securepay_context_owner;
+ALTER FUNCTION securepay_private.finish_escalation(bigint,uuid,boolean,text) OWNER TO securepay_context_owner;
+REVOKE ALL ON FUNCTION securepay_private.claim_escalation(uuid),securepay_private.finish_escalation(bigint,uuid,boolean,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION securepay_private.claim_escalation(uuid),securepay_private.finish_escalation(bigint,uuid,boolean,text) TO securepay_notification_runtime;
 COMMIT;
