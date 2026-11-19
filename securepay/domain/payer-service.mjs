@@ -5,18 +5,20 @@ import {randomUUID} from "node:crypto";
 import {withPayer} from "../db/with-payer.mjs";
 import {authorizePayerInTransaction} from "../db/authorize-with-pin.mjs";
 import {changePin,resolvePayer} from "../db/change-pin.mjs";
+import {validKeyId} from "../db/key-envelope.mjs";
 import {issueRecoveryGrant} from "../db/recovery-grant.mjs";
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 function exact(body,keys){
  return body!==null&&typeof body==="object"&&!Array.isArray(body)&&
  Object.keys(body).length===keys.length&&keys.every(k=>Object.hasOwn(body,k));
 }
-export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecovery}){
- if(!pool?.connect||!Buffer.isBuffer(signingKey)||signingKey.length<32||
+export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecovery,contextKeyId="primary",commandAuthority,recoveryKeyId="primary"}){
+ if(!pool?.connect||!Buffer.isBuffer(signingKey)||signingKey.length!==32||!validKeyId(contextKeyId)||
     !Buffer.isBuffer(pepper)||pepper.length<32||signingKey.equals(pepper))
   throw new Error("SecurePay service unavailable");
+ if(commandAuthority&&(!Buffer.isBuffer(commandAuthority.key)||commandAuthority.key.length!==32||!validKeyId(commandAuthority.id)||commandAuthority.key.equals(signingKey)||commandAuthority.key.equals(pepper)))throw Error("SecurePay command authority unavailable");
  const recoveryEnabled=recoveryKey!==undefined||verifyRecovery!==undefined;
- if(recoveryEnabled&&(!Buffer.isBuffer(recoveryKey)||recoveryKey.length!==32||recoveryKey.equals(signingKey)||recoveryKey.equals(pepper)||typeof verifyRecovery!=="function"))
+ if(recoveryEnabled&&(!Buffer.isBuffer(recoveryKey)||recoveryKey.length!==32||recoveryKey.equals(signingKey)||recoveryKey.equals(pepper)||!validKeyId(recoveryKeyId)||(commandAuthority&&recoveryKey.equals(commandAuthority.key))||typeof verifyRecovery!=="function"))
   throw new Error("SecurePay recovery unavailable");
  function context(identity,tenantId){
   const now=Math.floor(Date.now()/1000);
@@ -24,7 +26,7 @@ export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecov
    throw Object.assign(new Error("Authentication required"),{status:401});
   if(typeof tenantId!=="string"||!uuid.test(tenantId))
    throw Object.assign(new Error("Invalid request"),{status:400});
-  return {subject:identity.subject,tenantId,signingKey,authTime:identity.authTime};
+  return {subject:identity.subject,tenantId,signingKey,contextKeyId,authTime:identity.authTime};
  }
  // Hold the same identity lock as PIN recovery, so a concurrent reset
  // cannot race an authenticated request past the revocation cutoff.
@@ -45,7 +47,7 @@ export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecov
       !Number.isSafeInteger(body.expectedAmountCents)||body.expectedAmountCents<=0||
       typeof body.idempotencyKey!=="string"||!uuid.test(body.idempotencyKey))bad();
    return authenticated(ctx,c=>authorizePayerInTransaction(c,{tenantId,subject:ctx.subject,milestoneId,
-      pin:body.pin,expectedAmountCents:body.expectedAmountCents,idempotencyKey:body.idempotencyKey,requestId:randomUUID()},pepper));
+      pin:body.pin,expectedAmountCents:body.expectedAmountCents,idempotencyKey:body.idempotencyKey,requestId:randomUUID()},pepper,commandAuthority));
   },
   async issueGrant({identity,tenantId,body}){
    const ctx=context(identity,tenantId);
@@ -55,7 +57,7 @@ export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecov
    let assertion;
    try{assertion=await verifyRecovery(body.stepUpToken,{subject:ctx.subject,tenantId,purpose:body.purpose});}
    catch{return {ok:false};}
-   return authenticated(ctx,c=>issueRecoveryGrant(c,{tenantId,subject:ctx.subject,purpose:body.purpose,assertion},recoveryKey),assertion.authTime);
+   return authenticated(ctx,c=>issueRecoveryGrant(c,{tenantId,subject:ctx.subject,purpose:body.purpose,assertion},recoveryKey,recoveryKeyId),assertion.authTime);
   },
   async setPin({identity,tenantId,body}){
    const ctx=context(identity,tenantId);
@@ -63,7 +65,7 @@ export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecov
       typeof body.pin!=="string"||!/^[0-9]{6}$/.test(body.pin)||
       typeof body.grantRef!=="string"||!uuid.test(body.grantRef))bad();
    return authenticated(ctx,c=>changePin(c,{tenantId,subject:ctx.subject,
-     pin:body.pin,purpose:body.purpose,grantRef:body.grantRef},pepper));
+     pin:body.pin,purpose:body.purpose,grantRef:body.grantRef},pepper,commandAuthority));
   }
  });
 }
