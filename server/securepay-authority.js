@@ -2,7 +2,7 @@
 // secrets and a dedicated database login. Never launch from the staff API.
 import express from "express";
 import {createServer} from "node:http";
-import {lstat,chmod,unlink} from "node:fs/promises";
+import {lstat,chmod} from "node:fs/promises";
 import {isAbsolute,dirname} from "node:path";
 import {fileURLToPath} from "node:url";
 import {createSecurePayRouterFromEnv} from "./securepay-router.js";
@@ -22,7 +22,7 @@ export async function startAuthority(env=process.env){
  // Do not remove an existing socket at startup: a live authority may own it.
  await new Promise((resolve,reject)=>{server.once("error",reject);server.listen(path,resolve);});
  try{await chmod(path,0o660);}catch(e){server.close();throw e;}
- const close=async()=>{await new Promise((resolve,reject)=>server.close(e=>e?reject(e):resolve()));try{await unlink(path);}catch(e){if(e.code!=="ENOENT")throw e;}};
+ const close=async()=>{await new Promise((resolve,reject)=>server.close(e=>e?reject(e):resolve()));};
  return {server,close};
 }
 if(process.argv[1]===fileURLToPath(import.meta.url)){
