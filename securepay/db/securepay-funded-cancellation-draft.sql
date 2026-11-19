@@ -223,4 +223,25 @@ BEGIN
  RETURN true;
 EXCEPTION WHEN unique_violation THEN RETURN false;
 END $$;
+CREATE FUNCTION securepay_private.payer_appeal_negotiated(t uuid,z uuid,v uuid,e uuid,decision uuid,reason text,digest text) RETURNS boolean
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE c uuid;o securepay_private.funded_cancellation_offers%ROWTYPE;d securepay_private.dispute_cases%ROWTYPE;
+BEGIN
+ c:=securepay_private.current_payer(t);
+ IF c IS NULL OR e IS NULL OR decision IS NULL OR reason IS NULL OR length(btrim(reason)) NOT BETWEEN 10 AND 2000 OR digest IS NULL OR digest !~ '^[a-f0-9]{64}$' THEN RETURN false; END IF;
+ SELECT * INTO o FROM securepay_private.funded_cancellation_offers WHERE tenant_id=t AND plan_id=z AND offer_id=v AND customer_id=c AND status='accepted';
+ IF NOT FOUND THEN RETURN false; END IF;
+ PERFORM 1 FROM public.securepay_milestones WHERE tenant_id=t AND id=o.milestone_id AND status='disputed' FOR UPDATE;
+ IF NOT FOUND THEN RETURN false; END IF;
+ SELECT * INTO d FROM securepay_private.dispute_cases WHERE case_id=o.case_id AND tenant_id=t AND customer_id=c AND status='decided' FOR UPDATE;
+ IF NOT FOUND OR NOT EXISTS(SELECT 1 FROM securepay_private.dispute_events WHERE case_id=d.case_id AND event_id=decision AND action='decide') THEN RETURN false; END IF;
+ UPDATE securepay_private.dispute_cases SET status='appealed',customer_appeal_evidence=true,owner_appeal_evidence=false WHERE case_id=d.case_id;
+ INSERT INTO securepay_private.dispute_events(event_id,case_id,actor_id,action,details,evidence_digest) VALUES(e,d.case_id,c,'appeal',reason,digest);
+ RETURN true;
+EXCEPTION WHEN unique_violation THEN RETURN false;
+END $$;
+ALTER FUNCTION securepay_private.payer_appeal_negotiated(uuid,uuid,uuid,uuid,uuid,text,text) OWNER TO securepay_context_owner;
+REVOKE ALL ON FUNCTION securepay_private.payer_appeal_negotiated(uuid,uuid,uuid,uuid,uuid,text,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION securepay_private.payer_appeal_negotiated(uuid,uuid,uuid,uuid,uuid,text,text) TO securepay_payer_runtime;
+
 COMMIT;
