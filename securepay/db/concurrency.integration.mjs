@@ -40,7 +40,7 @@ let payerPool, notificationPool, providerPool, provider, disputePool, settlement
 const scanKey=randomBytes(32);
 const scanner=makeEvidenceScanner({key:scanKey,scan:async()=>"clean"});
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql","securepay-reporting-draft.sql","securepay-portal-draft.sql","securepay-work-completion-draft.sql","securepay-work-revision-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql","securepay-reporting-draft.sql","securepay-portal-draft.sql","securepay-work-completion-draft.sql","securepay-work-revision-draft.sql","securepay-payment-plan-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(key_id,secret) VALUES('primary',$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(key_id,secret) VALUES('primary',$1)",[deriveCommandKey(pepper)]);
@@ -1542,4 +1542,66 @@ test("dedicated completion HTTP service verifies owner audience, tenant assignme
   assert.equal((await post("submit",{completionId,comments:"Completed"})).status,200);
   const v=await post("status");assert.equal(v.status,200);assert.equal((await v.json()).view.current.status,"submitted");
  }finally{if(service)await service.close();await new Promise(r=>jwks.close(r));}
+});
+
+async function planFixture(){
+ const d=await completionFixture(),jobId=randomUUID(),quoteDigest=randomBytes(32).toString("hex"),planId=randomUUID();
+ await pool.query("INSERT INTO securepay_private.quote_assignments(tenant_id,job_id,owner_id,customer_id,quote_digest,total_cents) VALUES($1,$2,$3,$4,$5,5000)",[d.s.tenantId,jobId,d.actorId,d.s.customerId,quoteDigest]);
+ const items=[{milestoneId:randomUUID(),amountCents:2000,description:"First stage",final:false},{milestoneId:randomUUID(),amountCents:3000,description:"Final completed work",final:true}];
+ const scope={tenantId:d.s.tenantId,jobId,planId,items};
+ return {d,scope,quoteDigest};
+}
+test("owner offer and exact customer acceptance materialize bilateral milestone plan once, with no pre-acceptance work or funding",async()=>{
+ const {d,scope,quoteDigest}=await planFixture(),{tenantId,planId,items}=scope;
+ assert.equal((await d.owner.offerPlan({...scope,items:[{...items[0],final:true},items[1]]})).ok,false);
+ assert.equal((await d.owner.offerPlan({...scope,items:[{...items[0],amountCents:1000},items[1]]})).ok,false);
+ assert.equal((await d.owner.offerPlan({...scope,items:[{...items[0]}, {...items[1],milestoneId:items[0].milestoneId}]})).ok,false);
+ const offer=await d.owner.offerPlan(scope);assert.equal(offer.ok,true);
+ assert.equal((await d.owner.start({tenantId,milestoneId:items[0].milestoneId})).ok,false);
+ assert.equal((await provider.event({tenantId,milestoneId:items[0].milestoneId,kind:"funded",fundingRef:randomUUID(),amountCents:2000})).status,"denied");
+ const request={...d.payer,planId,body:{}},view=(await d.svc.plan(request)).plan;
+ assert.equal(view.quoteDigest,quoteDigest);assert.equal(view.planDigest,offer.planDigest);assert.deepEqual(view.items,items);
+ const accept=body=>d.svc.acceptPlan({...request,body});
+ assert.equal((await accept({planDigest:offer.planDigest,expectedTotalCents:4999})).ok,false);
+ assert.equal((await accept({planDigest:"0".repeat(64),expectedTotalCents:5000})).ok,false);
+ const foreign=await completionFixture();assert.equal((await foreign.svc.plan({...foreign.payer,planId,body:{}})).ok,false);
+ const body={planDigest:view.planDigest,expectedTotalCents:5000};
+ const results=await Promise.all([accept(body),accept(body)]);assert.equal(results.filter(r=>r.ok).length,1);
+ assert.equal((await d.owner.withdrawPlan({tenantId,planId})).ok,false);
+ const rows=(await pool.query("SELECT id,amount_cents,is_final,payer_customer_id,status FROM securepay_milestones WHERE tenant_id=$1 AND job_id=$2 ORDER BY amount_cents",[tenantId,scope.jobId])).rows;
+ assert.deepEqual(rows,items.map(x=>({id:x.milestoneId,amount_cents:String(x.amountCents),is_final:x.final,payer_customer_id:d.s.customerId,status:"planned"})));
+ assert.equal((await verifyAuditChain(auditPool,tenantId)).ok,true);
+});
+test("withdrawn or stale quote offer cannot be accepted; a single final milestone is supported",async()=>{
+ const {d,scope}=await planFixture(),offer=await d.owner.offerPlan(scope);assert.equal(offer.ok,true);
+ assert.equal((await d.owner.withdrawPlan(scope)).ok,true);
+ assert.equal((await d.svc.acceptPlan({...d.payer,planId:scope.planId,body:{planDigest:offer.planDigest,expectedTotalCents:5000}})).ok,false);
+ const single={...scope,planId:randomUUID(),items:[{milestoneId:randomUUID(),amountCents:5000,description:"Entire agreed work",final:true}]};
+ const next=await d.owner.offerPlan(single);assert.equal(next.ok,true);
+ await pool.query("UPDATE securepay_private.quote_assignments SET quote_digest=$3 WHERE tenant_id=$1 AND job_id=$2",[scope.tenantId,scope.jobId,randomBytes(32).toString("hex")]);
+ assert.equal((await d.svc.acceptPlan({...d.payer,planId:single.planId,body:{planDigest:next.planDigest,expectedTotalCents:5000}})).ok,false);
+});
+test("final stage submission requires confirmed and balanced preceding stages",async()=>{
+ const {d,scope}=await planFixture(),offer=await d.owner.offerPlan(scope);
+ assert.equal((await d.svc.acceptPlan({...d.payer,planId:scope.planId,body:{planDigest:offer.planDigest,expectedTotalCents:5000}})).ok,true);
+ const [one,two]=scope.items;
+ const finalScope={tenantId:scope.tenantId,milestoneId:two.milestoneId,completionId:randomUUID()};
+ assert.equal((await d.owner.start(finalScope)).ok,true);
+ assert.equal((await d.owner.upload({...finalScope,mediaType:"image/png",content:pngFixture()})).ok,true);
+ await assert.rejects(d.owner.submit(finalScope),/Prior milestones require confirmed reconciliation/);
+ const s={...d.s,milestoneId:one.milestoneId,fundingRef:randomUUID()},payer={...d.payer,milestoneId:one.milestoneId},work={tenantId:s.tenantId,milestoneId:s.milestoneId,completionId:randomUUID()};
+ assert.equal((await provider.event({...s,kind:"funded",amountCents:2000})).status,"applied");
+ assert.equal((await d.owner.start(work)).ok,true);
+ const photo=await d.owner.upload({...work,mediaType:"image/png",content:pngFixture()});assert.equal(photo.ok,true);
+ assert.equal((await d.owner.submit(work)).ok,true);
+ const w=(await d.svc.completion({...payer,body:{}})).completion;
+ assert.equal((await d.svc.photo({...payer,body:{photoId:photo.photoId}})).ok,true);
+ assert.equal((await d.svc.approve({...payer,body:{completionId:w.completionId,manifestDigest:w.manifestDigest,expectedAmountCents:2000,version:w.version}})).ok,true);
+ const g=await changeGrant(s);assert.equal((await asPayer(s,c=>changePin(c,g,pepper))).ok,true);
+ const reserve=await d.svc.reserve({...payer,body:{pin:s.pin,expectedAmountCents:2000,idempotencyKey:randomUUID()}});assert.equal(reserve.ok,true);
+ await assert.rejects(d.owner.submit(finalScope),/Prior milestones require confirmed reconciliation/);
+ assert.equal((await provider.beginDispatch({...s,requestId:reserve.releaseRequestId})).ok,true);
+ assert.equal((await provider.event({...s,kind:"released",amountCents:2000,requestId:reserve.releaseRequestId,transactionRef:randomUUID()})).status,"applied");
+ assert.equal((await d.owner.submit(finalScope)).ok,true);
+ assert.equal((await state({milestoneId:two.milestoneId})).status,"submitted");
 });
