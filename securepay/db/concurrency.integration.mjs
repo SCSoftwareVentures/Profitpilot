@@ -1984,3 +1984,31 @@ test("overdue case events atomically queue metadata-only notifications with stab
  await assert.rejects(notificationPool.query("SELECT * FROM securepay_private.escalation_outbox"),e=>e.code==="42501");
  await assert.rejects(reviewerPool.query("SELECT * FROM securepay_private.claim_escalation(NULL)"),e=>e.code==="42501");
 });
+
+test("separate reviewer HTTP service enforces distinct MFA audience, assigned cases and no payment endpoint",async()=>{
+ const {startReviewerService}=await import("../../server/securepay-reviewer.js");
+ const {generateKeyPair,exportJWK,SignJWT}=await import("jose"),{createServer}=await import("node:http");
+ const d=await disputeFixture(),foreign=await disputeFixture();assert.equal((await openCase(d)).ok,true);assert.equal((await evidence(d)).ok,true);assert.equal((await openCase(foreign)).ok,true);
+ const {privateKey,publicKey}=await generateKeyPair("ES256"),jwk=await exportJWK(publicKey);jwk.kid="reviewer";jwk.alg="ES256";
+ const jwks=createServer((req,res)=>{res.setHeader("content-type","application/json");res.end(JSON.stringify({keys:[jwk]}));});await new Promise(r=>jwks.listen(0,"127.0.0.1",r));
+ const issuer="https://reviewer-fixture.invalid",audience="securepay-reviewer",subject="assigned-reviewer",acr="reviewer-mfa",env={NODE_ENV:"test",SECUREPAY_REVIEWER_SANDBOX_ENABLED:"true",SECUREPAY_REVIEWER_PORT:"0",SECUREPAY_REVIEWER_ISSUER:issuer,SECUREPAY_REVIEWER_AUDIENCE:audience,SECUREPAY_REVIEWER_REQUIRED_ACR:acr,SECUREPAY_REVIEWER_SUBJECT:subject,SECUREPAY_AUTH_AUDIENCE:"securepay-payer",SECUREPAY_OWNER_AUDIENCE:"securepay-owner",SECUREPAY_COMPLETION_AUDIENCE:"securepay-completion",SECUREPAY_REVIEWER_JWKS_URL:"http://127.0.0.1:"+jwks.address().port+"/jwks",SECUREPAY_REVIEWER_DATABASE_URL:reviewerPool.options.connectionString,SECUREPAY_REVIEWER_TENANT_ID:d.s.tenantId,SECUREPAY_REVIEWER_ACTOR_ID:d.reviewer.actorId,SECUREPAY_REVIEWER_ACTOR_KEY:d.reviewer.key.toString("hex")};
+ let service;
+ try{
+  await assert.rejects(startReviewerService({...env,SECUREPAY_PIN_PEPPER:"forbidden"}),/secrets forbidden/);
+  await assert.rejects(startReviewerService({...env,SECUREPAY_REVIEWER_AUDIENCE:"securepay-owner"}),/configuration incomplete/);
+  service=await startReviewerService(env);const base="http://127.0.0.1:"+service.server.address().port+"/v1/securepay-reviewer";
+  const token=(aud=audience,sub=subject)=>new SignJWT({acr,auth_time:Math.floor(Date.now()/1000)}).setProtectedHeader({alg:"ES256",kid:"reviewer"}).setIssuer(issuer).setAudience(aud).setSubject(sub).setIssuedAt().setExpirationTime("5m").sign(privateKey);
+  const post=async(a,body,bearer=null)=>fetch(base+"/"+a,{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+(bearer??await token())},body:JSON.stringify(body)});
+  const html=await fetch(base+"/dashboard");assert.equal(html.status,200);assert.match(await html.text(),/independent reviewer/);
+  assert.equal((await post("queue",{},await token("securepay-owner"))).status,401);assert.equal((await post("queue",{},await token(audience,"other"))).status,403);
+  const queue=await post("queue",{});assert.equal(queue.status,200);assert.deepEqual((await queue.json()).cases.map(x=>x.caseId),[d.scope.caseId]);
+  assert.equal((await post("case",{caseId:foreign.scope.caseId})).status,403);
+  const p=await photo(d,d.owner);assert.equal(p.ok,true);
+  const read=await post("case",{caseId:d.scope.caseId});assert.equal(read.status,200);const {review}=await read.json();
+  const cmd={caseId:d.scope.caseId,action:"decide",reason:"Reasoned and proportionate resolution",payoutCents:3000,refundCents:2000,stateDigest:review.stateDigest};
+  assert.equal((await post("decision",cmd)).status,403);
+  const image=await post("photo",{caseId:d.scope.caseId,photoId:p.photoId,source:"dispute"});assert.equal(image.status,200);assert.equal((await image.json()).photo.digest,p.digest);
+  assert.equal((await post("decision",cmd)).status,200);
+  assert.equal((await post("authorize",{})).status,404);assert.equal((await d.approval.authorize(d.settlement)).ok,false);
+ }finally{if(service)await service.close();await new Promise(r=>jwks.close(r));}
+});
