@@ -114,6 +114,9 @@ CREATE POLICY payer_request_insert ON public.securepay_release_requests FOR INSE
   AND m.amount_cents=securepay_release_requests.amount_cents AND m.status='approved'
   AND p.proof_ref=securepay_release_requests.authorization_ref AND p.consumed_request_id=securepay_release_requests.id
   AND p.consumed_at IS NOT NULL AND p.amount_cents=m.amount_cents));
+-- One ordinary release request per milestone, even if distinct idempotency keys are used.
+CREATE UNIQUE INDEX securepay_one_ordinary_request_per_milestone
+ ON public.securepay_release_requests(tenant_id,milestone_id);
 COMMIT;
 -- Provision the separate signing key out-of-band. Runtime login/bootstrap,
 -- trusted API credential isolation and production security review are outstanding.
