@@ -47,7 +47,7 @@ BEGIN
    AND NOT EXISTS(SELECT 1 FROM private.invoice_credit_receipts rv WHERE rv.tenant_id=t AND rv.reverses_order_id=x.order_id);
   IF step<>'reject' AND prior+amount>cap THEN RAISE EXCEPTION 'Credit exceeds original target share' USING ERRCODE='23514'; END IF;
   total:=total+amount;
-  canonical:=canonical||E'\n'||sort_key||','||coalesce(item->>2,'~')||','||item->>3;
+  canonical:=canonical||E'\n'||sort_key||','||coalesce(item->>2,'~')||','||(item->>3);
  END LOOP;
  IF total IS DISTINCT FROM amount_text::numeric THEN RAISE EXCEPTION 'Credit shares must reconcile exactly' USING ERRCODE='23514'; END IF;
  IF scope IS DISTINCT FROM encode(public.digest(convert_to(canonical,'UTF8'),'sha256'),'hex') THEN RAISE EXCEPTION 'Credit scope denied' USING ERRCODE='42501'; END IF;
@@ -461,7 +461,7 @@ BEGIN
    JOIN private.security_work_orders w ON w.tenant_id=q.tenant_id AND w.id=q.order_id
    LEFT JOIN private.security_work_decisions d ON d.tenant_id=q.tenant_id AND d.order_id=q.order_id
    LEFT JOIN private.invoice_credit_receipts r ON r.tenant_id=q.tenant_id AND r.order_id=q.order_id
-   WHERE q.tenant_id=t AND q.source_snapshot->>'contractId'=c::text AND q.source_snapshot->>'siteId'=s::text
+   WHERE q.tenant_id=t AND ((q.allocation_order_id IS NULL AND q.source_snapshot->>'contractId'=c::text AND q.source_snapshot->>'siteId'=s::text) OR (q.allocation_order_id IS NOT NULL AND ((q.source_snapshot->>'kind'='overhead' AND q.source_snapshot->>'siteId'=s::text) OR (q.source_snapshot->>'kind'='business_overhead' AND q.source_snapshot->>'businessId'=(SELECT si.business_id::text FROM public.sites si WHERE si.tenant_id=t AND si.id=s)))))
    AND (q.source_snapshot->>'periodStart')::date<=ends AND (q.source_snapshot->>'periodEnd')::date>=starts
    AND r.order_id IS NULL AND (d.order_id IS NULL AND w.requested_at+interval '24 hours'>clock_timestamp() OR d.decision='approved' AND d.expires_at>clock_timestamp())
    ORDER BY q.order_id LIMIT 10001
