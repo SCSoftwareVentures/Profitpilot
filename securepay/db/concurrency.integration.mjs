@@ -6,6 +6,7 @@ import {createPinCredential} from "../domain/pin-credential.mjs";
 import {authorizeWithPin,authorizePayerInTransaction} from "./authorize-with-pin.mjs";
 import {changePin,resolvePayer} from "./change-pin.mjs";
 import {withPayer} from "./with-payer.mjs";
+import {deriveCommandKey,reserveSigned,changePinSigned} from "./signed-commands.mjs";
 import {verifyPinCredential} from "../domain/pin-credential.mjs";
 import {readFile} from "node:fs/promises";
 import pg from "pg";
@@ -22,9 +23,10 @@ const pool=new pg.Pool({connectionString:url.href,max:8,connectionTimeoutMillis:
 const payerSigningKey=randomBytes(32);
 let payerPool;
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(singleton,secret) VALUES(true,$1)",[payerSigningKey]);
+  await pool.query("INSERT INTO securepay_private.command_key(singleton,secret) VALUES(true,$1)",[deriveCommandKey(pepper)]);
   const password=randomBytes(32).toString("hex");
   await pool.query("ALTER ROLE securepay_payer_runtime LOGIN PASSWORD '"+password+"'");
   const payerUrl=new URL(url);payerUrl.username="securepay_payer_runtime";payerUrl.password=password;
@@ -269,8 +271,8 @@ test("signed payer runtime isolates same-tenant and cross-tenant customers and e
  await asPayer(s,async c=>{
   const x=await c.query("SELECT id FROM securepay_milestones");
   assert.deepEqual(x.rows,[{id:s.milestoneId}]);
-  assert.equal((await c.query("UPDATE securepay_milestones SET status='release_pending' WHERE id=$1",[other.milestoneId])).rowCount,0);
  });
+ await assert.rejects(asPayer(s,c=>c.query("UPDATE securepay_milestones SET status='release_pending' WHERE id=$1",[other.milestoneId])),e=>e.code==="42501");
  await assert.rejects(asPayer(s,c=>c.query("UPDATE securepay_milestones SET amount_cents=1 WHERE id=$1",[s.milestoneId])),e=>e.code==="42501");
  await assert.rejects(asPayer(s,c=>c.query("UPDATE securepay_milestones SET status='released' WHERE id=$1",[s.milestoneId])),e=>e.code==="42501");
  const grant=await changeGrant(s);
@@ -336,4 +338,40 @@ test("sandbox HTTP routes require customer audience, recent MFA and real PIN; de
   assert.equal((await post(releasePath,releaseBody,bearer)).status,403);
   assert.equal((await state(s)).requests,1);
  }finally{await new Promise(resolve=>api.close(resolve));}
+});
+
+test("even with valid signed payer context, raw SQL cannot fabricate proofs, requests, PINs or grant consumption",async()=>{
+ const s=await identityFixture();
+ await pool.query("UPDATE securepay_milestones SET payer_customer_id=$2 WHERE id=$1",[s.milestoneId,s.customerId]);
+ const g=await changeGrant(s);
+ const deny=(sql,args)=>assert.rejects(asPayer(s,c=>c.query(sql,args)),e=>e.code==="42501");
+ await deny("INSERT INTO securepay_customer_pins(tenant_id,customer_id,salt,pin_hash) VALUES($1,$2,$3,$4)",[s.tenantId,s.customerId,"0".repeat(32),"0".repeat(64)]);
+ await deny("UPDATE securepay_pin_change_grants SET consumed_at=clock_timestamp() WHERE grant_ref=$1",[g.grantRef]);
+ assert.equal((await asPayer(s,c=>changePin(c,g,pepper))).ok,true);
+ await deny("UPDATE securepay_customer_pins SET pin_hash=$3 WHERE tenant_id=$1 AND customer_id=$2",[s.tenantId,s.customerId,"0".repeat(64)]);
+ await deny("UPDATE securepay_customer_pins SET failed_attempts=0,locked_until=NULL WHERE tenant_id=$1 AND customer_id=$2",[s.tenantId,s.customerId]);
+ await deny("UPDATE securepay_milestones SET status='release_pending' WHERE id=$1",[s.milestoneId]);
+ await deny("INSERT INTO securepay_release_proofs(proof_ref,tenant_id,milestone_id,customer_id,amount_cents,expires_at) VALUES($1,$2,$3,$4,5000,now()+interval '1 minute')",[randomUUID(),s.tenantId,s.milestoneId,s.customerId]);
+ await deny("INSERT INTO securepay_release_requests(id,tenant_id,milestone_id,idempotency_key,amount_cents,authorization_ref,status) VALUES($1,$2,$3,$4,5000,$5,'pending')",[randomUUID(),s.tenantId,s.milestoneId,randomUUID(),randomUUID()]);
+ await deny("SELECT secret FROM securepay_private.command_key",[]);
+ assert.equal((await state(s)).requests,0);
+});
+test("signed database commands reject counterfeit authority and stale credentials, genuine PIN still reserves exactly once",async()=>{
+ const s=await identityFixture();
+ await pool.query("UPDATE securepay_milestones SET payer_customer_id=$2 WHERE id=$1",[s.milestoneId,s.customerId]);
+ const g=await changeGrant(s);
+ const fake=randomBytes(32);
+ const cred=await createPinCredential({...s,pin:s.pin,pepper:fake});
+ const forged=await asPayer(s,c=>changePinSigned(c,{...s,grantRef:g.grantRef,purpose:"enroll",salt:cred.salt,pinHash:cred.pinHash},fake));
+ assert.equal(forged.ok,false);
+ assert.equal((await asPayer(s,c=>changePin(c,g,pepper))).ok,true);
+ const {rows:[k]}=await pool.query("SELECT salt,pin_hash FROM securepay_customer_pins WHERE tenant_id=$1 AND customer_id=$2",[s.tenantId,s.customerId]);
+ const args={...s,amountCents:5000,version:0,requestId:randomUUID(),idempotencyKey:randomUUID(),salt:k.salt,pinHash:k.pin_hash};
+ assert.equal((await asPayer(s,c=>reserveSigned(c,args,fake))).ok,false);
+ assert.equal((await asPayer(s,c=>reserveSigned(c,{...args,version:1},pepper))).ok,false);
+ assert.equal((await asPayer(s,c=>reserveSigned(c,{...args,pinHash:"0".repeat(64)},pepper))).ok,false);
+ assert.equal((await state(s)).requests,0);
+ assert.equal((await asPayer(s,c=>authorizePayerInTransaction(c,{...s,expectedAmountCents:5000,requestId:randomUUID(),idempotencyKey:randomUUID()},pepper))).ok,true);
+ assert.equal((await asPayer(s,c=>reserveSigned(c,args,pepper))).ok,false);
+ assert.equal((await state(s)).requests,1);
 });
