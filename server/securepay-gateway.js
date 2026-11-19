@@ -5,7 +5,7 @@ import rateLimit from "express-rate-limit";
 import {request} from "node:http";
 import {isAbsolute} from "node:path";
 const uuid="[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
-const allowedPath=new RegExp("^/tenants/"+uuid+"/(?:pin(?:/grant)?|milestones/"+uuid+"/reserve)$");
+const allowedPath=new RegExp("^/tenants/"+uuid+"/(?:pin(?:/grant)?|milestones/"+uuid+"/(?:reserve|view))$");
 const uuidOnly=new RegExp("^"+uuid+"$");
 export const authoritySecrets=["SECUREPAY_DATABASE_URL","SECUREPAY_CONTEXT_HMAC_SECRET","SECUREPAY_PIN_PEPPER","SECUREPAY_RECOVERY_KEY","SECUREPAY_COMMAND_KEY","SECUREPAY_RATE_LIMIT_KEY"];
 function forward(socketPath,path,token,body){
@@ -46,6 +46,8 @@ export function createSecurePayGateway(env=process.env){
    const errors={400:"Invalid request",401:"Customer authentication required",403:"Authorization denied",404:"Not found",409:"Conflicting request",413:"Invalid request",415:"JSON required",429:"Too many requests",503:"SecurePay unavailable"};
    if(Object.hasOwn(errors,status))return res.status(status).json({error:errors[status]});
    if(body?.mode==="sandbox"){
+    if(status===200&&req.path.endsWith("/view")&&body.moneyMoved===false&&uuidOnly.test(body.milestoneId)&&req.path.endsWith("/"+body.milestoneId+"/view")&&typeof body.amountCents==="string"&&/^[1-9][0-9]{0,18}$/.test(body.amountCents)&&["planned","submitted","approved","disputed","release_pending","released","settled"].includes(body.status)&&["unfunded","funded","held","released","settled"].includes(body.fundingStatus)&&typeof body.isFinal==="boolean"&&[null,"pending","submitted","confirmed","failed"].includes(body.requestStatus))
+     return res.json({mode:"sandbox",moneyMoved:false,milestoneId:body.milestoneId,amountCents:body.amountCents,status:body.status,fundingStatus:body.fundingStatus,isFinal:body.isFinal,requestStatus:body.requestStatus});
     if(status===200&&body.status==="pin_updated"&&req.path.endsWith("/pin"))return res.status(200).json({mode:"sandbox",status:"pin_updated"});
     if(status===201&&body.status==="grant_issued"&&req.path.endsWith("/pin/grant")&&uuidOnly.test(body.grantRef))return res.status(201).json({mode:"sandbox",status:"grant_issued",grantRef:body.grantRef});
     if(status===202&&body.status==="reserved"&&body.moneyMoved===false&&uuidOnly.test(body.releaseRequestId)&&uuidOnly.test(body.milestoneId)&&req.path.includes("/milestones/"+body.milestoneId+"/reserve")&&typeof body.amountCents==="string"&&/^[1-9][0-9]{0,15}$/.test(body.amountCents)&&body.amountCents===String(req.body.expectedAmountCents))
