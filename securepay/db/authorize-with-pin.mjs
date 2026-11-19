@@ -6,6 +6,7 @@ import {verifyPinCredential} from "../domain/pin-credential.mjs";
 import {reserveRelease} from "./reserve-release.mjs";
 import {consumeReleaseProof} from "./consume-release-proof.mjs";
 import {resolvePayer} from "./change-pin.mjs";
+import {reserveSigned} from "./signed-commands.mjs";
 const denied=()=>({ok:false,code:"AUTHORIZATION_DENIED"});
 // Only use with a transaction whose caller commits returned denials, so failed
 // attempt counters persist. Throwing errors must roll back the entire transaction.
@@ -15,23 +16,31 @@ async function authorizeInTransaction(c,scope,pepper) {
      ![tenantId,milestoneId,customerId,requestId,idempotencyKey].every(x=>typeof x==="string"&&x.length>0)||
      !Number.isSafeInteger(expectedAmountCents)||expectedAmountCents<=0)
      throw new Error("PIN authorization unavailable");
-    // Acquire milestone before credential/attempt lock to keep a fixed lock order.
-    const {rows:[m]}=await c.query("SELECT status,amount_cents,payer_customer_id FROM securepay_milestones WHERE tenant_id=$1 AND id=$2 FOR UPDATE",[tenantId,milestoneId]);
+    const {rows:[runtime]}=await c.query("SELECT current_user AS role");
+    const restricted=runtime.role==="securepay_payer_runtime";
+    // Restricted runtime holds the payer identity lock; the signed procedure locks
+    // and rechecks the milestone and credential before performing any mutation.
+    const {rows:[m]}=await c.query("SELECT status,amount_cents,payer_customer_id,version FROM securepay_milestones WHERE tenant_id=$1 AND id=$2"+(restricted?"":" FOR UPDATE"),[tenantId,milestoneId]);
     if(!m||m.status!=="approved"||m.payer_customer_id!==customerId||String(m.amount_cents)!==String(expectedAmountCents)){
       return denied();
     }
-    const {rows:[k]}=await c.query("SELECT salt,pin_hash,failed_attempts,locked_until FROM securepay_customer_pins WHERE tenant_id=$1 AND customer_id=$2 FOR UPDATE",[tenantId,customerId]);
+    const {rows:[k]}=await c.query("SELECT salt,pin_hash,failed_attempts,locked_until FROM securepay_customer_pins WHERE tenant_id=$1 AND customer_id=$2"+(restricted?"":" FOR UPDATE"),[tenantId,customerId]);
     if(!k){return denied();}
     // Read time after taking the lock (a preceding transaction may have just locked the account).
     const {rows:[t]}=await c.query("SELECT clock_timestamp() AS ts");
     if(k.locked_until&&k.locked_until>t.ts){return denied();}
     const valid=await verifyPinCredential({tenantId,customerId,pin,pepper},{salt:k.salt,pinHash:k.pin_hash});
     if(!valid){
+      if(restricted){
+        await c.query("SELECT securepay_private.record_pin_failure($1::uuid,$2::uuid)",[tenantId,customerId]);
+        return denied();
+      }
       const count=k.locked_until?1:k.failed_attempts+1;
       await c.query("UPDATE securepay_customer_pins SET failed_attempts=$3,locked_until=CASE WHEN $3>=5 THEN clock_timestamp()+interval '15 minutes' ELSE NULL END WHERE tenant_id=$1 AND customer_id=$2",[tenantId,customerId,count]);
       // Failed attempts MUST survive denial.
       return denied();
     }
+    if(restricted)return reserveSigned(c,{tenantId,customerId,milestoneId,amountCents:m.amount_cents,version:m.version,requestId,idempotencyKey,salt:k.salt,pinHash:k.pin_hash},pepper);
     await c.query("UPDATE securepay_customer_pins SET failed_attempts=0,locked_until=NULL WHERE tenant_id=$1 AND customer_id=$2",[tenantId,customerId]);
     const authorizationRef=randomUUID();
     await c.query("INSERT INTO securepay_release_proofs(proof_ref,tenant_id,milestone_id,customer_id,amount_cents,expires_at) VALUES($1,$2,$3,$4,$5,clock_timestamp()+interval '5 minutes')",[authorizationRef,tenantId,milestoneId,customerId,String(expectedAmountCents)]);
