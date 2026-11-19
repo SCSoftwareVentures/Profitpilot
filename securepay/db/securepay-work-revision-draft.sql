@@ -28,7 +28,7 @@ BEGIN
  IF c IS NULL THEN RETURN; END IF;
  PERFORM 1 FROM public.securepay_milestones WHERE tenant_id=t AND id=m AND payer_customer_id=c FOR UPDATE;
  IF NOT FOUND THEN RETURN; END IF;
- SELECT * INTO w FROM securepay_private.work_completion WHERE tenant_id=t AND milestone_id=m AND customer_id=c AND status IN ('submitted','approved') FOR UPDATE;
+ SELECT * INTO w FROM securepay_private.work_completion WHERE tenant_id=t AND milestone_id=m AND customer_id=c AND status IN ('submitted','approved','rejected') AND EXISTS(SELECT 1 FROM securepay_private.work_photos q WHERE q.completion_id=work_completion.completion_id AND q.photo_id=p) FOR UPDATE;
  IF NOT FOUND THEN RETURN; END IF;
  SELECT * INTO photo FROM securepay_private.work_photos WHERE photo_id=p AND completion_id=w.completion_id AND tenant_id=t;
  IF NOT FOUND OR photo.purged_at IS NOT NULL THEN RETURN; END IF;
@@ -39,6 +39,14 @@ BEGIN
  INSERT INTO securepay_private.work_photo_views(tenant_id,completion_id,photo_id,customer_id) VALUES(t,w.completion_id,p,c) ON CONFLICT DO NOTHING;
  RETURN QUERY SELECT photo.digest,plain;
 END $$;
+CREATE OR REPLACE FUNCTION securepay_private.payer_completion_view(t uuid,m uuid) RETURNS jsonb
+ LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
+ SELECT jsonb_build_object('completionId',w.completion_id,'manifestDigest',w.manifest_digest,'comments',w.comments,'version',x.version::text,'amountCents',w.amount_cents::text,'status',w.status,
+ 'photos',(SELECT coalesce(jsonb_agg(jsonb_build_object('photoId',p.photo_id,'digest',p.digest) ORDER BY p.photo_id),'[]'::jsonb) FROM securepay_private.work_photos p WHERE p.completion_id=w.completion_id))
+ FROM securepay_private.work_completion w JOIN public.securepay_milestones x ON x.tenant_id=w.tenant_id AND x.id=w.milestone_id
+ WHERE w.tenant_id=t AND w.milestone_id=m AND w.customer_id=securepay_private.current_payer(t) AND x.payer_customer_id=w.customer_id AND w.status IN ('submitted','approved','rejected')
+ ORDER BY (w.status<>'rejected') DESC,w.rejected_at DESC NULLS LAST LIMIT 1
+$$;
 CREATE FUNCTION securepay_private.reject_work_completion(t uuid,m uuid,z uuid,manifest text,ver bigint,reason text) RETURNS boolean
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE c uuid;x public.securepay_milestones%ROWTYPE;w securepay_private.work_completion%ROWTYPE;
