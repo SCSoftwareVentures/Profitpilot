@@ -7,7 +7,7 @@ import {createServer} from "node:http";
 import {fileURLToPath} from "node:url";
 import {createPayerTokenVerifier} from "./securepay-router.js";
 import {authoritySecrets} from "./securepay-gateway.js";
-import {disputeAdminPage,settlementAuthorizationPage,sendPortalPage} from "./securepay-portal-page.js";
+import {disputeAdminPage,settlementAuthorizationPage,postAuthorizationPage,sendPortalPage} from "./securepay-portal-page.js";
 import {makeGovernanceActor,independenceAttestation} from "../securepay/db/governance.mjs";
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const id=x=>typeof x==="string"&&uuid.test(x);
@@ -17,6 +17,7 @@ export function createGovernanceRouter({enabled=false,role,subject,verifyToken,a
  if(!["administrator","settlement"].includes(role)||!subject||!actor||typeof verifyToken!=="function")throw Error("Governance unavailable");
  const admin=role==="administrator",allowed=admin?["queue","action","reassessments","reassess","post-auth-start"]:["queue","declare","read","authorize","report-conflict","post-auth-read","post-auth-vote"];
  router.use(rateLimit({windowMs:60000,limit:60,standardHeaders:true,legacyHeaders:false}));
+ router.get("/post-auth",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,postAuthorizationPage(role)));
  router.get("/dashboard",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,admin?disputeAdminPage():settlementAuthorizationPage()));
  router.post("/:action",async(req,res,next)=>{
   if(req.originalUrl.includes("?")||!allowed.includes(req.params.action))return res.status(404).json({error:"Not found"});
