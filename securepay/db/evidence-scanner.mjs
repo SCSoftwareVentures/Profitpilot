@@ -75,8 +75,8 @@ export function jpegNormalizer({executable="/usr/bin/python3",timeoutMs=8000}={}
  });
 }
 
-export function makeEvidenceScanner({key,keyId="primary",scan,normalizeJPEG}){
- if(!Buffer.isBuffer(key)||key.length!==32||!validKeyId(keyId)||typeof scan!=="function")throw Error("Evidence scanner unavailable");
+export function makeEvidenceScanner({key,keyId="primary",scan,normalizeJPEG,purpose="dispute"}){
+ if(!Buffer.isBuffer(key)||key.length!==32||!validKeyId(keyId)||typeof scan!=="function"||!["dispute","completion"].includes(purpose))throw Error("Evidence scanner unavailable");
  return Object.freeze({async attest({photoId,tenantId,milestoneId,caseId,actorId,mediaType,content}){
   if(!Buffer.isBuffer(content)||content.length<8||content.length>2097152||!["image/png","image/jpeg"].includes(mediaType))return null;
   const original=Buffer.from(content),originalDigest=createHash("sha256").update(original).digest("hex");
@@ -94,6 +94,6 @@ export function makeEvidenceScanner({key,keyId="primary",scan,normalizeJPEG}){
   }catch{return null;}
   const digest=createHash("sha256").update(normalized).digest("hex"),exp=Math.floor(Date.now()/1000)+30;
   return {digest,originalDigest,originalMediaType:mediaType,content:Buffer.from(normalized),exp,
-   signature:signEnvelope(key,keyId,["sp-evidence-scan-v2",photoId,tenantId,milestoneId,caseId,actorId,"image/png",digest,mediaType,originalDigest,exp].join(":"))};
+   signature:signEnvelope(key,keyId,[purpose==="completion"?"sp-work-scan-v1":"sp-evidence-scan-v2",photoId,tenantId,milestoneId,caseId,actorId,"image/png",digest,mediaType,originalDigest,exp].join(":"))};
  }});
 }
