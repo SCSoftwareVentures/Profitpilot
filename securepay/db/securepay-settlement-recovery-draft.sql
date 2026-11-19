@@ -118,7 +118,7 @@ BEGIN
    WHERE x.resolved_at IS NULL AND x.event_id IN (SELECT e.event_id FROM securepay_private.settlement_leg_events e WHERE e.leg_id=l);
  ELSE
   UPDATE securepay_private.provider_funding SET status='funded' WHERE tenant_id=t AND milestone_id=m;
-  UPDATE securepay_private.provider_reconciliation SET resolved_at=clock_timestamp(),resolution_id=rid WHERE tenant_id=t AND milestone_id=m AND reason='hold_after_dispatch' AND resolved_at IS NULL;
+  UPDATE securepay_private.provider_reconciliation SET resolved_at=clock_timestamp(),resolution_id=rid WHERE tenant_id=t AND milestone_id=m AND provider_reconciliation.reason='hold_after_dispatch' AND resolved_at IS NULL;
  END IF;
  IF c.status='authorized' AND (f.status='funded' OR op='lift_hold')
  AND NOT EXISTS(SELECT 1 FROM securepay_private.settlement_legs WHERE settlement_id=s AND status<>'confirmed')
