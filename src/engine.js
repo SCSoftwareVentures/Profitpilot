@@ -62,3 +62,50 @@ export function aggregateMetrics(contracts){
   const revenue=money(rows.reduce((s,r)=>s+r.revenue,0)),cost=money(rows.reduce((s,r)=>s+r.cost,0));
   return {revenue,cost,contribution:money(revenue-cost),margin:revenue?money((revenue-cost)/revenue*100):null,contracts:rows};
 }
+
+export function payrollCents(value){
+  if(typeof value!=="string"||!/^\d{1,12}(?:\.\d{1,2})?$/.test(value))return null;
+  const [whole,fraction=""]=value.split(".");
+  return Number(whole)*100+Number(fraction.padEnd(2,"0"));
+}
+export function centsDecimal(cents){
+  if(!Number.isSafeInteger(cents)||cents<0||cents>99999999999999)throw new RangeError("Payroll amount out of range");
+  return Math.floor(cents/100)+"."+String(cents%100).padStart(2,"0");
+}
+export function validatePayrollRows(rows,{periodStart,periodEnd}={}){
+  const counts=new Map();
+  for(const r of rows)if(typeof r.source_ref==="string")counts.set(r.source_ref,(counts.get(r.source_ref)||0)+1);
+  return rows.map((r,i)=>{
+    const errors=[],cents=payrollCents(r.amount);
+    if(typeof r.source_ref!=="string"||!r.source_ref.trim()||r.source_ref!==r.source_ref.trim()||r.source_ref.length>200)errors.push("Stable source_ref required");
+    else if(counts.get(r.source_ref)>1)errors.push("Duplicate source_ref in batch");
+    if(cents===null||cents<=0)errors.push("Positive decimal amount string required");
+    if(typeof r.currency!=="string"||!/^[A-Z]{3}$/.test(r.currency))errors.push("Explicit three-letter currency required");
+    if(!isIsoDate(r.period_start)||!isIsoDate(r.period_end)||r.period_start!==periodStart||r.period_end!==periodEnd)errors.push("Payroll period must match batch");
+    return {rowNumber:i+1,record:r,cents,errors,status:errors.length?"held":"pending_review"};
+  });
+}
+export function reconcilePayroll(rows,assignments,controlTotal,currency){
+  const expected=payrollCents(controlTotal);
+  if(expected===null||expected<=0||typeof currency!=="string"||!/^[A-Z]{3}$/.test(currency))throw new Error("Valid control total and currency required");
+  const byRow=new Map(),buckets={direct:0,approved_allocated:0,non_site:0,excluded:0,unallocated:0};
+  for(const a of assignments){
+    if(!a||!Number.isSafeInteger(a.rowNumber)||a.rowNumber<1||a.rowNumber>rows.length||byRow.has(a.rowNumber))throw new Error("Duplicate or invalid allocation row");
+    if(!Object.hasOwn(buckets,a.bucket)||a.bucket==="unallocated")throw new Error("Invalid allocation bucket");
+    if(typeof a.reason!=="string"||a.reason.trim().length<3||a.reason.length>500)throw new Error("Allocation evidence or reason required");
+    const siteBucket=a.bucket==="direct"||a.bucket==="approved_allocated";
+    if(siteBucket?typeof a.siteId!=="string"||!a.siteId:a.siteId!=null)throw new Error("Site ID required only for site allocations");
+    byRow.set(a.rowNumber,{bucket:a.bucket,siteId:a.siteId?.toLowerCase()??null,reason:a.reason.trim()});
+  }
+  let total=0;
+  const lines=rows.map((r,i)=>{
+    if(r.errors.length||r.record.currency!==currency)throw new Error("Held or currency-mismatched payroll row");
+    total+=r.cents;
+    if(!Number.isSafeInteger(total)||total>99999999999999)throw new Error("Payroll total exceeds supported precision");
+    const a=byRow.get(i+1)||{bucket:"unallocated",siteId:null,reason:"No supported assignment"};
+    buckets[a.bucket]+=r.cents;
+    return {rowNumber:i+1,sourceRef:r.record.source_ref,amount:centsDecimal(r.cents),...a};
+  });
+  if(total!==expected)throw new Error("Imported payroll does not reconcile to control total");
+  return {total:centsDecimal(total),buckets:Object.fromEntries(Object.entries(buckets).map(([k,v])=>[k,centsDecimal(v)])),lines};
+}

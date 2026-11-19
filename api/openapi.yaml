@@ -78,13 +78,49 @@ paths:
       - $ref: '#/components/parameters/TenantId'
       - $ref: '#/components/parameters/BatchId'
     post:
-      summary: Validate source rows and produce held/review candidates
+      summary: Validate invoice or payroll source rows and produce held/review candidates
       responses:
         "200": { description: Structural validation results; existing human decisions preserved }
         "409": { description: Invalid batch state or inconsistent row numbering }
         "422": { description: No rows or unsupported source type }
         "403": { description: Not authorised }
         "404": { description: Batch not found in this tenant }
+  /tenants/{tenantId}/imports/{batchId}/reconcile-payroll:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    post:
+      summary: Human-confirm payroll against a reviewer-attested control total
+      description: Owner, admin or reviewer only. Source rows require stable tenant-unique source_ref, decimal amount string, currency and exact batch period_start/period_end. One bucket per whole source row; omitted rows remain unallocated.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [controlTotal, currency, controlReference, reason]
+              properties:
+                controlTotal: { type: string }
+                currency: { type: string }
+                controlReference: { type: string, maxLength: 200 }
+                reason: { type: string, minLength: 3, maxLength: 2000 }
+                assignments:
+                  type: array
+                  maxItems: 2000
+                  items:
+                    type: object
+                    required: [rowNumber, bucket, reason]
+                    properties:
+                      rowNumber: { type: integer, minimum: 1 }
+                      bucket: { type: string, enum: [direct, approved_allocated, non_site, excluded] }
+                      siteId: { type: string, format: uuid }
+                      reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        "201": { description: Pool, allocation run and source lineage created atomically }
+        "403": { description: Reviewer role required }
+        "404": { description: Batch unavailable }
+        "409": { description: Duplicate source or batch already reconciled }
+        "422": { description: Held source rows, invalid allocation or total mismatch }
   /tenants/{tenantId}/matches/{matchId}/decision:
     parameters:
       - $ref: '#/components/parameters/TenantId'

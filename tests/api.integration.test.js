@@ -74,6 +74,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const rawB=await insertB("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES ($1,$2,1,'{}')",[tenantB,batchB]);
     await insertB("INSERT INTO mapping_decisions(tenant_id,raw_row_id,target_type,decision,method_version) VALUES ($1,$2,'invoice_row','candidate','ci')",[tenantB,rawB]);
     const payrollB=await insertB("INSERT INTO payroll_pools(tenant_id,batch_id,period_start,period_end,total_amount,source_ref) VALUES ($1,$2,'2026-02-01','2026-02-28',50,'ci')",[tenantB,batchB]);
+    await insertB("INSERT INTO payroll_source_records(tenant_id,raw_row_id,payroll_pool_id,source_ref,amount) VALUES ($1,$2,$3,'CI-B:source',50)",[tenantB,rawB,payrollB]);
     const allocationB=await insertB("INSERT INTO allocation_runs(tenant_id,payroll_pool_id,method_version,status,residual_amount) VALUES ($1,$2,'ci','draft',50)",[tenantB,payrollB]);
     await insertB("INSERT INTO allocation_lines(tenant_id,allocation_run_id,site_id,bucket_type,amount) VALUES ($1,$2,$3,'direct',50)",[tenantB,allocationB,siteB]);
     const invoiceB=await insertB("INSERT INTO invoices(tenant_id,direction,invoice_number,invoice_date,total_amount,tax_basis,source_ref) VALUES ($1,'customer','CI-B','2026-02-01',100,'gst_exclusive','ci')",[tenantB]);
@@ -120,6 +121,9 @@ test("authenticated API enforces tenant membership, role permissions and import 
       "UPDATE audit_events SET reason='tampered'",
       "DELETE FROM audit_events",
       "TRUNCATE audit_events",
+      "DELETE FROM payroll_source_records",
+      "UPDATE payroll_pools SET total_amount=0",
+      "UPDATE allocation_lines SET amount=0",
       "UPDATE match_reviews SET evidence='{}'",
       "UPDATE mapping_decisions SET method_version='tampered'"
     ];
@@ -306,6 +310,45 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(validRunBody.outputs.marginPercent,50);
     const storedRun=await admin.query("SELECT completeness FROM calculation_runs WHERE id=$1",[validRunBody.id]);
     assert.equal(storedRun.rows[0].completeness,"incomplete","limited contribution must not claim full financial completeness");
+
+
+    const pr1={source_ref:"ci-ledger:pay-001",amount:"40.01",currency:"AUD",period_start:"2026-02-01",period_end:"2026-02-28"};
+    const pr2={...pr1,source_ref:"ci-ledger:pay-002",amount:"9.99"};
+    const newPayroll=async hash=>{
+      const resp=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-analyst",method:"POST",body:{...importBody,sha256:hash.repeat(64)}});
+      assert.equal(resp.status,201);
+      const id=(await resp.json()).batch.id;
+      const path=`/v1/tenants/${tenantA}/imports/${id}`;
+      assert.equal((await request(path+"/rows",{subject:"ci-api-analyst",method:"POST",body:{rows:[pr1,pr2]}})).status,201);
+      const validate=await request(path+"/validate",{subject:"ci-api-analyst",method:"POST",body:{}});
+      assert.equal(validate.status,200);
+      assert.equal((await validate.json()).validCandidateRows,2);
+      return {id,path};
+    };
+    const p1=await newPayroll("2");
+    const reviewBody={controlTotal:"50.00",currency:"AUD",controlReference:"CI export total",reason:"CI reviewer verified control",assignments:[{rowNumber:1,bucket:"direct",siteId:siteA,reason:"CI verified site code"}]};
+    const review=(p,body)=>request(p.path+"/reconcile-payroll",{subject:"ci-api-analyst",method:"POST",body});
+    assert.equal((await review(p1,reviewBody)).status,403);
+    await admin.query("UPDATE tenant_memberships SET role='reviewer' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);
+    try{
+      assert.equal((await review(p1,{...reviewBody,controlTotal:"49.99"})).status,422);
+      assert.equal((await review(p1,{...reviewBody,assignments:[{...reviewBody.assignments[0],siteId:siteB}]})).status,422);
+      assert.equal((await admin.query("SELECT count(*)::int AS n FROM payroll_pools WHERE batch_id=$1",[p1.id])).rows[0].n,0);
+      const reviewed=await review(p1,reviewBody);
+      assert.equal(reviewed.status,201);
+      const result=await reviewed.json();
+      assert.deepEqual(result.buckets,{direct:"40.01",approved_allocated:"0.00",non_site:"0.00",excluded:"0.00",unallocated:"9.99"});
+      const lines=await admin.query("SELECT sum(amount)::text AS total FROM allocation_lines WHERE allocation_run_id=$1",[result.runId]);
+      assert.equal(lines.rows[0].total,"50.00");
+      assert.equal((await review(p1,reviewBody)).status,409);
+    }finally{await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);}
+    const p2=await newPayroll("3");
+    await admin.query("UPDATE tenant_memberships SET role='reviewer' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);
+    try{
+      assert.equal((await review(p2,reviewBody)).status,409);
+      assert.equal((await admin.query("SELECT count(*)::int AS n FROM payroll_pools WHERE batch_id=$1",[p2.id])).rows[0].n,0);
+      assert.equal((await admin.query("SELECT status FROM import_batches WHERE id=$1",[p2.id])).rows[0].status,"review");
+    }finally{await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);}
 
     const readerWrite=await request(`/v1/tenants/${tenantA}/imports`,{
       subject:"ci-api-reader",method:"POST",

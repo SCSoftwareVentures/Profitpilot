@@ -6,7 +6,7 @@ import rateLimit from "express-rate-limit";
 import {randomUUID} from "node:crypto";
 import {withTenant,health} from "./db.js";
 import {authRequired,requireRole} from "./auth.js";
-import {validateInvoiceRows,isIsoDate} from "../src/engine.js";
+import {validateInvoiceRows,validatePayrollRows,reconcilePayroll,isIsoDate} from "../src/engine.js";
 
 const MAX_IMPORT_ROWS=2000;
 const isUuid=value=>typeof value==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -76,22 +76,65 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requireRole("o
 app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
  if(!isUuid(req.params.batchId))return res.status(400).json({error:"Invalid batch ID"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
-  const batch=await client.query("SELECT id,status,source_type FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.batchId,req.membership.tenantId]);
+  const batch=await client.query("SELECT id,status,source_type,source_period_start::text AS period_start,source_period_end::text AS period_end FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[req.params.batchId,req.membership.tenantId]);
   if(!batch.rowCount)return {status:404,error:"Import batch not found"};
   if(!["uploaded","review"].includes(batch.rows[0].status))return {status:409,error:"Import batch is not open for validation"};
-  if(!["customer_invoice","supplier_invoice"].includes(batch.rows[0].source_type))return {status:422,error:"This validator currently supports invoice CSV rows only; payroll validation is not implemented."};
+  if(!["customer_invoice","supplier_invoice","payroll"].includes(batch.rows[0].source_type))return {status:422,error:"Unsupported source type"};
   const raw=await client.query("SELECT id,row_number,payload FROM raw_import_rows WHERE batch_id=$1 AND tenant_id=$2 ORDER BY row_number LIMIT $3",[req.params.batchId,req.membership.tenantId,MAX_IMPORT_ROWS+1]);
   if(!raw.rowCount)return {status:422,error:"No persisted import rows found. Ingest rows before validation."};
   if(raw.rowCount>MAX_IMPORT_ROWS||raw.rows.some((r,i)=>r.row_number!==i+1))return {status:409,error:"Source row numbering or batch size requires administrator review"};
-  const checked=validateInvoiceRows(raw.rows.map(r=>({...r.payload,__rowNumber:String(r.row_number)})));
+  const items=raw.rows.map(r=>({...r.payload,__rowNumber:String(r.row_number)}));
+  const payroll=batch.rows[0].source_type==="payroll";
+  const checked=payroll?validatePayrollRows(items,{periodStart:batch.rows[0].period_start,periodEnd:batch.rows[0].period_end}):validateInvoiceRows(items);
   const records=checked.map((item,i)=>({id:raw.rows[i].id,decision:item.errors.length?"held":"candidate",reason:item.errors.join("; ")||"Structural validation passed; requires mapping and human review"}));
   const held=records.filter(r=>r.decision==="held").length;
   // A repeat validation must never overwrite a human review or its recorded reason.
-  await client.query("INSERT INTO mapping_decisions(tenant_id,raw_row_id,target_type,target_id,decision,confidence,method_version,reason) SELECT $1,p.id,'invoice_row',NULL,p.decision,'LOW','invoice-validator-0.1.0',p.reason FROM jsonb_to_recordset($2::jsonb) AS p(id uuid,decision text,reason text) ON CONFLICT(tenant_id,raw_row_id,method_version) DO NOTHING",[req.membership.tenantId,JSON.stringify(records)]);
+  await client.query("INSERT INTO mapping_decisions(tenant_id,raw_row_id,target_type,target_id,decision,confidence,method_version,reason) SELECT $1,p.id,$3,NULL,p.decision,'LOW',$4,p.reason FROM jsonb_to_recordset($2::jsonb) AS p(id uuid,decision text,reason text) ON CONFLICT(tenant_id,raw_row_id,method_version) DO NOTHING",[req.membership.tenantId,JSON.stringify(records),payroll?"payroll_row":"invoice_row",payroll?"payroll-validator-0.1.0":"invoice-validator-0.1.0"]);
   await client.query("UPDATE import_batches SET status='review' WHERE id=$1 AND tenant_id=$2",[req.params.batchId,req.membership.tenantId]);
   return {status:200,batchId:req.params.batchId,total:raw.rowCount,validCandidateRows:raw.rowCount-held,heldRows:held,automaticallyAccepted:0};
  });
  if(result.error)return res.status(result.status).json({error:result.error});
+ const {status,...body}=result;res.status(status).json(body);
+ }catch(e){next(e);}});
+
+
+app.post("/v1/tenants/:tenantId/imports/:batchId/reconcile-payroll",membership,requireRole("owner","admin","reviewer"),async(req,res,next)=>{try{
+ if(!isUuid(req.params.batchId))return res.status(400).json({error:"Invalid batch ID"});
+ const {controlTotal,currency,controlReference,reason,assignments=[]}=req.body||{};
+ if(!Array.isArray(assignments)||assignments.length>MAX_IMPORT_ROWS||typeof controlReference!=="string"||!controlReference.trim()||controlReference.length>200||typeof reason!=="string"||reason.trim().length<3||reason.length>2000)return res.status(400).json({error:"Control reference, reviewer reason and bounded allocation plan required"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
+  const tenant=req.membership.tenantId,batchId=req.params.batchId;
+  const batch=await c.query("SELECT status,source_type,source_period_start::text AS period_start,source_period_end::text AS period_end FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[batchId,tenant]);
+  if(!batch.rowCount)return {status:404,error:"Import batch not found"};
+  const b=batch.rows[0];
+  if(b.source_type!=="payroll"||b.status!=="review")return {status:409,error:"Only validated payroll awaiting review can be reconciled"};
+  const existing=await c.query("SELECT id FROM payroll_pools WHERE tenant_id=$1 AND batch_id=$2 LIMIT 1",[tenant,batchId]);
+  if(existing.rowCount)return {status:409,error:"A payroll pool already exists for this batch"};
+  const rows=await c.query("SELECT r.id,r.row_number,r.payload,m.decision FROM raw_import_rows r LEFT JOIN mapping_decisions m ON m.tenant_id=r.tenant_id AND m.raw_row_id=r.id AND m.method_version='payroll-validator-0.1.0' WHERE r.tenant_id=$1 AND r.batch_id=$2 ORDER BY r.row_number LIMIT $3",[tenant,batchId,MAX_IMPORT_ROWS+1]);
+  if(!rows.rowCount||rows.rowCount>MAX_IMPORT_ROWS||rows.rows.some((r,i)=>r.row_number!==i+1||r.decision!=="candidate"))return {status:422,error:"All source rows must be validated candidates"};
+  let plan;
+  try{plan=reconcilePayroll(validatePayrollRows(rows.rows.map(r=>r.payload),{periodStart:b.period_start,periodEnd:b.period_end}),assignments,controlTotal,currency);}
+  catch(e){return {status:422,error:e.message};}
+  const sites=[...new Set(plan.lines.filter(l=>l.siteId).map(l=>l.siteId))];
+  if(sites.some(id=>!isUuid(id)))return {status:400,error:"Invalid site ID"};
+  if(sites.length){
+   const allowed=await c.query("SELECT id FROM sites WHERE tenant_id=$1 AND id=ANY($2::uuid[]) AND status='active'",[tenant,sites]);
+   if(allowed.rowCount!==sites.length)return {status:422,error:"Allocation site is unavailable in this tenant"};
+  }
+  const actor=await c.query("SELECT u.id FROM users u JOIN tenant_memberships m ON m.user_id=u.id WHERE u.auth_subject=$1 AND m.tenant_id=$2 AND m.status='active' AND m.role IN ('owner','admin','reviewer')",[req.identity.subject,tenant]);
+  if(!actor.rowCount)throw Object.assign(new Error("Active reviewer membership required"),{status:403});
+  const userId=actor.rows[0].id,k=plan.buckets;
+  const pool=await c.query("INSERT INTO payroll_pools(tenant_id,batch_id,period_start,period_end,total_amount,currency,source_ref) VALUES($1,$2,$3,$4,$5,$6,$7) RETURNING id",[tenant,batchId,b.period_start,b.period_end,plan.total,currency,"reconciled:"+controlReference.trim()]);
+  const poolId=pool.rows[0].id;
+  const run=await c.query("INSERT INTO allocation_runs(tenant_id,payroll_pool_id,method_version,status,direct_amount,allocated_amount,non_site_amount,excluded_amount,residual_amount,reviewer_id) VALUES($1,$2,'payroll-source-row-0.1.0','confirmed',$3,$4,$5,$6,$7,$8) RETURNING id",[tenant,poolId,k.direct,k.approved_allocated,k.non_site,k.excluded,k.unallocated,userId]);
+  const runId=run.rows[0].id;
+  const entries=plan.lines.map((l,i)=>({...l,rawRowId:rows.rows[i].id}));
+  await c.query("INSERT INTO payroll_source_records(tenant_id,raw_row_id,payroll_pool_id,source_ref,amount) SELECT $1,x.raw_row_id,$2,x.source_ref,x.amount FROM jsonb_to_recordset($3::jsonb) AS x(raw_row_id uuid,source_ref text,amount numeric)",[tenant,poolId,JSON.stringify(entries.map(e=>({raw_row_id:e.rawRowId,source_ref:e.sourceRef,amount:e.amount})))]);
+  await c.query("INSERT INTO allocation_lines(tenant_id,allocation_run_id,site_id,bucket_type,amount,source_ref) SELECT $1,$2,x.site_id,x.bucket,x.amount,x.source_ref FROM jsonb_to_recordset($3::jsonb) AS x(site_id uuid,bucket text,amount numeric,source_ref text)",[tenant,runId,JSON.stringify(entries.map(e=>({site_id:e.siteId,bucket:e.bucket,amount:e.amount,source_ref:e.sourceRef})))]);
+  await c.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'payroll_reconciled','allocation_run',$3,$4,$5)",[tenant,userId,runId,reason.trim(),JSON.stringify({batchId,poolId,controlReference:controlReference.trim(),currency,total:plan.total,buckets:k,assignments:entries.map(e=>({rowNumber:e.rowNumber,bucket:e.bucket,siteId:e.siteId,reason:e.reason}))})]);
+  await c.query("UPDATE import_batches SET status='accepted' WHERE tenant_id=$1 AND id=$2",[tenant,batchId]);
+  return {status:201,poolId,runId,total:plan.total,currency,buckets:k,sourceRows:entries.length};
+ });
  const {status,...body}=result;res.status(status).json(body);
  }catch(e){next(e);}});
 

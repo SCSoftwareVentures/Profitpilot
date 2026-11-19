@@ -27,7 +27,9 @@ The first delivery mode is a concierge validation service using secure, authoris
 - Production Docker image build and running-container database health smoke test
 - Migration 008 narrows runtime writes to current endpoint operations, removes automatic grants on future tables and prevents runtime modification/deletion of raw evidence, calculation snapshots and audit events. Expanded tenant-table and foreign-object regression tests passed CI #2944 (commit bad8319).
 
-- Import integrity: contiguous chunks, atomic conflict rejection, exact replay, serialized ingestion/validation and preserved review decisions; calculations use a consistent snapshot, full-period contract coverage and payroll currency checks. New regression tests await CI confirmation. Source file hashes remain client-declared; original-byte verification and payroll validation are still outstanding.
+- Import integrity: contiguous chunks, atomic conflict rejection, exact replay, serialized ingestion/validation and preserved review decisions; calculations use a consistent snapshot, full-period contract coverage and payroll currency checks. Regression tests passed CI #2945 and #2946. Source file hashes remain client-declared; original-byte verification is outstanding.
+
+- Payroll prototype: structural validation, reviewer-attested controls, exact decimal whole-row allocations, residuals, tenant-scoped source lineage and duplicate reference rollback (migration 009). CI pending. Split allocations, independent source verification, database-only enforcement of allocation invariants, and statutory payroll compliance remain outstanding.
 
 ## What is not established
 

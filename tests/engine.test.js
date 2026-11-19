@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {money,parseCsv,validateInvoiceRows,allocatePayroll,matchInvoice,aggregateMetrics,isIsoDate} from "../src/engine.js";
+import {money,parseCsv,validateInvoiceRows,allocatePayroll,matchInvoice,aggregateMetrics,isIsoDate,payrollCents,validatePayrollRows,reconcilePayroll} from "../src/engine.js";
 
 test("money uses cent precision",()=>assert.equal(money(10.126),10.13));
 test("ISO date accepts a valid calendar date",()=>assert.equal(isIsoDate("2026-11-16"),true));
@@ -24,3 +24,23 @@ test("negative allocation is rejected",()=>assert.equal(allocatePayroll({pool:10
 test("amount-only match is unmatched",()=>assert.equal(matchInvoice({amount:100},{site:"A",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).confidence,"UNMATCHED"));
 test("match candidate always needs human confirmation",()=>assert.equal(matchInvoice({site:"A",date:"2026-11-05",amount:100},{id:"c",site:"A",periodStart:"2026-11-01",periodEnd:"2026-11-30"}).requiresHumanConfirmation,true));
 test("metrics aggregate totals and margin",()=>{const r=aggregateMetrics([{revenue:1000,cost:600},{revenue:500,cost:250}]);assert.deepEqual([r.revenue,r.cost,r.contribution,r.margin],[1500,850,650,43.33]);});
+
+test("payroll decimal parser rejects coercion and fractional cents",()=>{
+ assert.equal(payrollCents("123.45"),12345);
+ for(const x of [123.45,"1e2","1.001","-1","1,000","NaN","1000000000000"])assert.equal(payrollCents(x),null);
+});
+const payrollPeriod={periodStart:"2026-02-01",periodEnd:"2026-02-28"};
+const payrollRow={source_ref:"ledger:1",amount:"100.01",currency:"AUD",period_start:payrollPeriod.periodStart,period_end:payrollPeriod.periodEnd};
+test("payroll holds duplicate source IDs and mismatched period",()=>{
+ assert.ok(validatePayrollRows([payrollRow,payrollRow],payrollPeriod).every(r=>r.errors.length));
+ assert.equal(validatePayrollRows([{...payrollRow,period_end:"2026-03-01"}],payrollPeriod)[0].status,"held");
+});
+test("exact reconciliation preserves residual and rejects duplicates",()=>{
+ const rows=validatePayrollRows([payrollRow,{...payrollRow,source_ref:"ledger:2",amount:"0.09"}],payrollPeriod);
+ const plan=[{rowNumber:1,bucket:"direct",siteId:"site",reason:"Verified coding"}];
+ const result=reconcilePayroll(rows,plan,"100.10","AUD");
+ assert.equal(result.buckets.direct,"100.01");assert.equal(result.buckets.unallocated,"0.09");
+ assert.throws(()=>reconcilePayroll(rows,plan,"100.11","AUD"),/control total/);
+ assert.throws(()=>reconcilePayroll(rows,[...plan,...plan],"100.10","AUD"),/Duplicate/);
+ assert.throws(()=>reconcilePayroll(rows,plan,"100.10","USD"),/currency/);
+});
