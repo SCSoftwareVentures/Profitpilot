@@ -39,6 +39,28 @@ export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecov
  });
  const bad=()=>{throw Object.assign(new Error("Invalid request"),{status:400});};
  return Object.freeze({
+  async fundedCancellation({identity,tenantId,planId,body}){
+   const ctx=context(identity,tenantId);if(typeof planId!=="string"||!uuid.test(planId)||!exact(body,[]))bad();
+   return authenticated(ctx,async c=>{
+    const {rows:[r]}=await c.query("SELECT securepay_private.payer_funded_cancel_view($1,$2) AS view",[tenantId,planId]);
+    return r?.view?{ok:true,fundedCancellation:r.view}:{ok:false};
+   });
+  },
+  async acceptFundedCancellation({identity,tenantId,planId,body}){
+   const ctx=context(identity,tenantId);if(typeof planId!=="string"||!uuid.test(planId)||!exact(body,["offerId","offerDigest","payoutCents","refundCents"])||typeof body.offerId!=="string"||!uuid.test(body.offerId)||typeof body.offerDigest!=="string"||!/^[a-f0-9]{64}$/.test(body.offerDigest)||!Number.isSafeInteger(body.payoutCents)||body.payoutCents<0||!Number.isSafeInteger(body.refundCents)||body.refundCents<=0)bad();
+   return authenticated(ctx,async c=>{
+    const caseId=randomUUID();
+    const {rows:[r]}=await c.query("SELECT securepay_private.accept_funded_cancel($1,$2,$3,$4,$5,$6,$7,$8) AS ok",[tenantId,planId,body.offerId,caseId,randomUUID(),body.offerDigest,body.payoutCents,body.refundCents]);
+    return r?.ok?{ok:true,negotiatedCase:caseId}:{ok:false};
+   });
+  },
+  async acknowledgeNegotiated({identity,tenantId,planId,body}){
+   const ctx=context(identity,tenantId);if(typeof planId!=="string"||!uuid.test(planId)||!exact(body,["offerId","decisionId","payoutCents","refundCents"])||![body.offerId,body.decisionId].every(x=>typeof x==="string"&&uuid.test(x))||![body.payoutCents,body.refundCents].every(x=>Number.isSafeInteger(x)&&x>=0))bad();
+   return authenticated(ctx,async c=>{
+    const {rows:[r]}=await c.query("SELECT securepay_private.payer_ack_negotiated($1,$2,$3,$4,$5,$6,$7) AS ok",[tenantId,planId,body.offerId,randomUUID(),body.decisionId,body.payoutCents,body.refundCents]);
+    return r?.ok?{ok:true,negotiatedAcknowledged:true}:{ok:false};
+   });
+  },
   async contract({identity,tenantId,planId,body}){
    const ctx=context(identity,tenantId);if(typeof planId!=="string"||!uuid.test(planId)||!exact(body,[]))bad();
    return authenticated(ctx,async c=>{
