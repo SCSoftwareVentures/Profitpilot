@@ -91,7 +91,7 @@ paths:
       - $ref: '#/components/parameters/BatchId'
     post:
       summary: Human-confirm payroll against a reviewer-attested control total
-      description: Owner, admin or reviewer only. Source rows require stable tenant-unique source_ref, decimal amount string, currency and exact batch period_start/period_end. One bucket per whole source row; omitted rows remain unallocated.
+      description: Owner, admin or reviewer only. Source rows require stable tenant-unique source_ref, decimal amount string, currency and exact batch period_start/period_end. Whole-row assignment remains supported; multiple distinct destinations require explicit decimal amount strings. Unassigned amounts remain unallocated. Database confirmation checks each source, line and bucket total.
       requestBody:
         required: true
         content:
@@ -112,6 +112,7 @@ paths:
                     required: [rowNumber, bucket, reason]
                     properties:
                       rowNumber: { type: integer, minimum: 1 }
+                      amount: { type: string, description: Positive decimal split amount; omit only for whole-row assignment }
                       bucket: { type: string, enum: [direct, approved_allocated, non_site, excluded] }
                       siteId: { type: string, format: uuid }
                       reason: { type: string, minLength: 3, maxLength: 500 }

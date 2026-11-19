@@ -29,7 +29,7 @@ The first delivery mode is a concierge validation service using secure, authoris
 
 - Import integrity: contiguous chunks, atomic conflict rejection, exact replay, serialized ingestion/validation and preserved review decisions; calculations use a consistent snapshot, full-period contract coverage and payroll currency checks. Regression tests passed CI #2945 and #2946. Source file hashes remain client-declared; original-byte verification is outstanding.
 
-- Payroll prototype: structural validation, reviewer-attested controls, exact decimal whole-row allocations, residuals, tenant-scoped source lineage and duplicate reference rollback (migration 009). CI pending. Split allocations, independent source verification, database-only enforcement of allocation invariants, and statutory payroll compliance remain outstanding.
+- Payroll prototype: structural validation, reviewer-attested controls, exact decimal whole-row allocations, residuals, tenant-scoped source lineage and duplicate reference rollback (migration 009). CI #2947 passed. Migration 010 introduces v0.2 split-source allocations, source-record foreign keys, reviewer-only write policies, draft-to-confirmed database validation and post-confirmation insertion protection. New CI pending. Legacy/manual and v0.1 runs are not retroactively validated by these new controls; original-file verification and statutory payroll compliance remain outstanding.
 
 ## What is not established
 

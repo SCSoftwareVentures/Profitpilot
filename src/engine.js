@@ -90,21 +90,36 @@ export function reconcilePayroll(rows,assignments,controlTotal,currency){
   if(expected===null||expected<=0||typeof currency!=="string"||!/^[A-Z]{3}$/.test(currency))throw new Error("Valid control total and currency required");
   const byRow=new Map(),buckets={direct:0,approved_allocated:0,non_site:0,excluded:0,unallocated:0};
   for(const a of assignments){
-    if(!a||!Number.isSafeInteger(a.rowNumber)||a.rowNumber<1||a.rowNumber>rows.length||byRow.has(a.rowNumber))throw new Error("Duplicate or invalid allocation row");
+    if(!a||!Number.isSafeInteger(a.rowNumber)||a.rowNumber<1||a.rowNumber>rows.length)throw new Error("Invalid allocation row");
     if(!Object.hasOwn(buckets,a.bucket)||a.bucket==="unallocated")throw new Error("Invalid allocation bucket");
     if(typeof a.reason!=="string"||a.reason.trim().length<3||a.reason.length>500)throw new Error("Allocation evidence or reason required");
     const siteBucket=a.bucket==="direct"||a.bucket==="approved_allocated";
     if(siteBucket?typeof a.siteId!=="string"||!a.siteId:a.siteId!=null)throw new Error("Site ID required only for site allocations");
-    byRow.set(a.rowNumber,{bucket:a.bucket,siteId:a.siteId?.toLowerCase()??null,reason:a.reason.trim()});
+    const list=byRow.get(a.rowNumber)||[],siteId=a.siteId?.toLowerCase()??null;
+    if(list.some(x=>x.bucket===a.bucket&&x.siteId===siteId))throw new Error("Duplicate allocation destination");
+    const cents=a.amount===undefined?null:payrollCents(a.amount);
+    if(a.amount!==undefined&&(cents===null||cents<=0))throw new Error("Positive decimal split amount required");
+    list.push({bucket:a.bucket,siteId,reason:a.reason.trim(),cents});
+    byRow.set(a.rowNumber,list);
   }
   let total=0;
-  const lines=rows.map((r,i)=>{
+  const lines=rows.flatMap((r,i)=>{
     if(r.errors.length||r.record.currency!==currency)throw new Error("Held or currency-mismatched payroll row");
     total+=r.cents;
     if(!Number.isSafeInteger(total)||total>99999999999999)throw new Error("Payroll total exceeds supported precision");
-    const a=byRow.get(i+1)||{bucket:"unallocated",siteId:null,reason:"No supported assignment"};
-    buckets[a.bucket]+=r.cents;
-    return {rowNumber:i+1,sourceRef:r.record.source_ref,amount:centsDecimal(r.cents),...a};
+    const list=byRow.get(i+1)||[];
+    if(list.length>1&&list.some(a=>a.cents===null))throw new Error("Every split must specify its amount");
+    let allocated=0;
+    const parts=list.map(a=>{
+      const cents=a.cents===null?r.cents:a.cents;
+      allocated+=cents;
+      if(allocated>r.cents)throw new Error("Allocation exceeds source row amount");
+      buckets[a.bucket]+=cents;
+      return {rowNumber:i+1,sourceRef:r.record.source_ref,amount:centsDecimal(cents),bucket:a.bucket,siteId:a.siteId,reason:a.reason};
+    });
+    const residual=r.cents-allocated;
+    if(residual>0){buckets.unallocated+=residual;parts.push({rowNumber:i+1,sourceRef:r.record.source_ref,amount:centsDecimal(residual),bucket:"unallocated",siteId:null,reason:"No supported assignment"});}
+    return parts;
   });
   if(total!==expected)throw new Error("Imported payroll does not reconcile to control total");
   return {total:centsDecimal(total),buckets:Object.fromEntries(Object.entries(buckets).map(([k,v])=>[k,centsDecimal(v)])),lines};

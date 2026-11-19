@@ -326,7 +326,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
       return {id,path};
     };
     const p1=await newPayroll("2");
-    const reviewBody={controlTotal:"50.00",currency:"AUD",controlReference:"CI export total",reason:"CI reviewer verified control",assignments:[{rowNumber:1,bucket:"direct",siteId:siteA,reason:"CI verified site code"}]};
+    const reviewBody={controlTotal:"50.00",currency:"AUD",controlReference:"CI export total",reason:"CI reviewer verified control",assignments:[{rowNumber:1,bucket:"direct",siteId:siteA,amount:"30.01",reason:"CI verified site code"},{rowNumber:1,bucket:"non_site",amount:"5.00",reason:"CI shared cost"}]};
     const review=(p,body)=>request(p.path+"/reconcile-payroll",{subject:"ci-api-analyst",method:"POST",body});
     assert.equal((await review(p1,reviewBody)).status,403);
     await admin.query("UPDATE tenant_memberships SET role='reviewer' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);
@@ -337,9 +337,20 @@ test("authenticated API enforces tenant membership, role permissions and import 
       const reviewed=await review(p1,reviewBody);
       assert.equal(reviewed.status,201);
       const result=await reviewed.json();
-      assert.deepEqual(result.buckets,{direct:"40.01",approved_allocated:"0.00",non_site:"0.00",excluded:"0.00",unallocated:"9.99"});
+      assert.deepEqual(result.buckets,{direct:"30.01",approved_allocated:"0.00",non_site:"5.00",excluded:"0.00",unallocated:"14.99"});
       const lines=await admin.query("SELECT sum(amount)::text AS total FROM allocation_lines WHERE allocation_run_id=$1",[result.runId]);
       assert.equal(lines.rows[0].total,"50.00");
+      assert.equal(result.sourceRows,2);assert.equal(result.allocationLines,4);
+      const linked=await admin.query("SELECT count(*)::int AS n FROM allocation_lines WHERE allocation_run_id=$1 AND source_record_id IS NOT NULL",[result.runId]);
+      assert.equal(linked.rows[0].n,4);
+      const sr=await admin.query("SELECT id,source_ref FROM payroll_source_records WHERE payroll_pool_id=$1 ORDER BY source_ref",[result.poolId]);
+      await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("INSERT INTO allocation_lines(tenant_id,allocation_run_id,site_id,bucket_type,amount,source_ref,source_record_id) VALUES($1,$2,$3,'direct',1,$4,$5)",[tenantA,result.runId,siteA,sr.rows[0].source_ref,sr.rows[0].id])),err=>["42501","23514"].includes(err.code),"confirmed allocation must reject later additions");
+      // Admin fixture tests the confirmation invariant independently of HTTP.
+      const tempPool=await admin.query("INSERT INTO payroll_pools(tenant_id,batch_id,period_start,period_end,total_amount,currency,source_ref) VALUES($1,$2,'2026-02-01','2026-02-28',50,'AUD','CI invariant fixture') RETURNING id",[tenantA,p1.id]);
+      const tempRun=await admin.query("INSERT INTO allocation_runs(tenant_id,payroll_pool_id,method_version,status,residual_amount,reviewer_id) VALUES($1,$2,'payroll-source-row-0.2.0','draft',50,$3) RETURNING id",[tenantA,tempPool.rows[0].id,userA]);
+      await assert.rejects(()=>admin.query("UPDATE allocation_runs SET status='confirmed' WHERE id=$1",[tempRun.rows[0].id]),err=>err.code==="23514","database must reject confirmation without source and allocation coverage");
+      await admin.query("DELETE FROM allocation_runs WHERE id=$1",[tempRun.rows[0].id]);
+      await admin.query("DELETE FROM payroll_pools WHERE id=$1",[tempPool.rows[0].id]);
       assert.equal((await review(p1,reviewBody)).status,409);
     }finally{await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);}
     const p2=await newPayroll("3");

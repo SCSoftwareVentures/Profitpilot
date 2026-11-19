@@ -44,3 +44,13 @@ test("exact reconciliation preserves residual and rejects duplicates",()=>{
  assert.throws(()=>reconcilePayroll(rows,[...plan,...plan],"100.10","AUD"),/Duplicate/);
  assert.throws(()=>reconcilePayroll(rows,plan,"100.10","USD"),/currency/);
 });
+
+test("split payroll sources reconcile exactly and preserve per-row residual",()=>{
+ const rows=validatePayrollRows([payrollRow],payrollPeriod);
+ const assignments=[{rowNumber:1,bucket:"direct",siteId:"a",amount:"30.01",reason:"Site evidence"},{rowNumber:1,bucket:"approved_allocated",siteId:"b",amount:"50.00",reason:"Approved basis"}];
+ const result=reconcilePayroll(rows,assignments,"100.01","AUD");
+ assert.equal(result.buckets.direct,"30.01");assert.equal(result.buckets.approved_allocated,"50.00");assert.equal(result.buckets.unallocated,"20.00");
+ assert.equal(result.lines.length,3);
+ assert.throws(()=>reconcilePayroll(rows,[...assignments,{rowNumber:1,bucket:"non_site",amount:"20.01",reason:"Other cost"}],"100.01","AUD"),/exceeds/);
+ assert.throws(()=>reconcilePayroll(rows,[{...assignments[0],amount:undefined},assignments[1]],"100.01","AUD"),/Every split/);
+});
