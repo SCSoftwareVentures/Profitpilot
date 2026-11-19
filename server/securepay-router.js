@@ -72,7 +72,7 @@ export function createSecurePayRouter({enabled=false,verifyToken,service,takeBud
   }
  };
  router.post("/tenants/:tenantId/plans/:planId/view",handle(req=>service.plan({identity:req.payerIdentity,tenantId:req.params.tenantId,planId:req.params.planId,body:req.body})));
- router.post("/tenants/:tenantId/plans/:planId/accept",handle(req=>service.acceptPlan({identity:req.payerIdentity,tenantId:req.params.tenantId,planId:req.params.planId,body:req.body})));
+ router.post("/tenants/:tenantId/plans/:planId/accept",handle(req=>service.acceptPlan({identity:req.payerIdentity,tenantId:req.params.tenantId,planId:req.params.planId,body:req.body,requireQuote:true})));
  router.post("/tenants/:tenantId/pin/grant",handle(req=>service.issueGrant({identity:req.payerIdentity,tenantId:req.params.tenantId,body:req.body})));
  router.post("/tenants/:tenantId/pin",handle(req=>service.setPin({identity:req.payerIdentity,tenantId:req.params.tenantId,body:req.body})));
  for(const action of ["completion","photo","approve","reject","dispute"])router.post("/tenants/:tenantId/milestones/:milestoneId/"+action,handle(req=>service[action]({identity:req.payerIdentity,tenantId:req.params.tenantId,milestoneId:req.params.milestoneId,body:req.body})));
