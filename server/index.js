@@ -35,7 +35,18 @@ const securityMonitor=createSecurityMonitor();
 app.use(securityMonitor.middleware);
 // Set privacy headers even for rejected or throttled requests.
 app.use((req,res,next)=>{res.set("Cache-Control","no-store");res.set("Pragma","no-cache");next();});
-app.use(helmet());
+// Helmet's upgrade-insecure-requests is retained on production and all
+// non-loopback requests. Safari/WebKit can upgrade a deliberately HTTP-only
+// local synthetic test origin to unavailable HTTPS. Restrict the exception
+// to the explicit candidate toggle, test/development and actual loopback
+// transport plus numeric loopback Host. No trust-proxy-derived address.
+const defaultHelmet=helmet();
+const localCandidateHelmet=helmet({contentSecurityPolicy:{directives:{"upgrade-insecure-requests":null}}});
+app.use((req,res,next)=>{
+ const local=process.env.NODE_ENV!=="production"&&["test","development"].includes(process.env.NODE_ENV)&&process.env.SYNTHETIC_SECURITY_UI_ENABLED==="true"
+ && ["127.0.0.1","::ffff:127.0.0.1"].includes(req.socket.remoteAddress)&&/^127[.]0[.]0[.]1(?::[0-9]{1,5})?$/.test(req.headers.host||"");
+ return (local?localCandidateHelmet:defaultHelmet)(req,res,next);
+});
 app.use(createRequestAdmission(32));
 app.use(cors({origin:corsOrigins(),credentials:false,methods:["GET","POST"]}));
 const readiness=createReadinessGuard(health);

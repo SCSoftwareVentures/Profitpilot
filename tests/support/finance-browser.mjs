@@ -11,11 +11,13 @@ export async function verifyFinanceBrowser({base,tenant,token,run,traceDigest}){
  if(!/^http:\/\/127\.0\.0\.1:\d+$/.test(base)||!process.env.PROFITPILOT_CI_CHROME)throw Error("Disposable CI browser required.");
  const root=await mkdtemp(join(tmpdir(),"profitpilot-browser-")),profile=join(root,"profile"),downloads=join(root,"downloads");
  await mkdir(downloads);
- const proc=spawn(process.env.PROFITPILOT_CI_CHROME,["--headless","--no-sandbox","--disable-dev-shm-usage","--disable-background-networking","--disable-sync","--no-first-run","--no-default-browser-check","--remote-debugging-address=127.0.0.1","--remote-debugging-port=0","--user-data-dir="+profile,"about:blank"],{stdio:"ignore"});
+ const proc=spawn(process.env.PROFITPILOT_CI_CHROME,["--headless","--no-sandbox","--disable-dev-shm-usage","--disable-background-networking","--disable-sync","--no-first-run","--no-default-browser-check","--remote-debugging-address=127.0.0.1","--remote-debugging-port=0","--user-data-dir="+profile,"about:blank"],{stdio:["ignore","ignore","pipe"]});
+ let launchDiagnostics="";proc.stderr.on("data",b=>{if(launchDiagnostics.length<8192)launchDiagnostics+=b.toString("utf8").slice(0,8192-launchDiagnostics.length);});
  let launchError;proc.on("error",e=>{launchError=e;});
  let ws,seq=0;const pending=new Map();
  try{
-  const port=await until(async()=>{if(launchError||proc.exitCode!==null)throw Error("CI browser failed to start");try{return (await readFile(join(profile,"DevToolsActivePort"),"utf8")).split("\n")[0];}catch{return null;}},"debug port");
+  const port=await until(async()=>{if(launchError||proc.exitCode!==null)throw Error("CI browser failed to start");try{return (await readFile(join(profile,"DevToolsActivePort"),"utf8")).split("\n")[0];}catch{return null;}},"debug port",45000);
+  launchDiagnostics="";
   const page=await until(async()=>{try{return (await (await fetch("http://127.0.0.1:"+port+"/json/list")).json()).find(x=>x.type==="page");}catch{return null;}},"page");
   assert.match(page.webSocketDebuggerUrl,/^ws:\/\/127\.0\.0\.1:\d+\/devtools\/page\//);
   ws=new WebSocket(page.webSocketDebuggerUrl);
@@ -56,7 +58,7 @@ export async function verifyFinanceBrowser({base,tenant,token,run,traceDigest}){
   assert.equal(await evaluate("document.getElementById('workspace').hidden && document.getElementById('token').value==='' && document.getElementById('report-downloads').children.length===0"),true);
   for(const url of urls)assert.equal(await evaluate("fetch("+JSON.stringify(url)+").then(()=>false,()=>true)"),true);
   console.log("Real headless Chromium, 390px mobile viewport: authenticated report read, explicit export confirmation, actual JSON/text downloads, source receipt and session cleanup passed");
- }finally{
+ }catch(e){if(!ws&&launchDiagnostics)console.error("Chromium startup diagnostic categories:",{sandbox:/sandbox/i.test(launchDiagnostics),display:/display/i.test(launchDiagnostics),memory:/memory|resource temporarily unavailable/i.test(launchDiagnostics),devtools:/devtools/i.test(launchDiagnostics)});throw e;}finally{
   if(ws)ws.close();for(const p of pending.values())clearTimeout(p.timer);
   if(proc.exitCode===null&&!launchError){proc.kill("SIGTERM");await Promise.race([new Promise(r=>proc.once("exit",r)),sleep(2000)]);if(proc.exitCode===null)proc.kill("SIGKILL");}
   await rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:200});

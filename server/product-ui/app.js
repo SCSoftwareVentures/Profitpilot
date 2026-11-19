@@ -193,3 +193,4 @@ async function action(name){
  finally{busy=false;controller=null;document.querySelectorAll("[data-action]").forEach(n=>n.disabled=false);}
 }
 document.querySelectorAll("[data-action]").forEach(n=>n.addEventListener("click",()=>action(n.dataset.action)));
+document.documentElement.dataset.workspaceReady="true";
