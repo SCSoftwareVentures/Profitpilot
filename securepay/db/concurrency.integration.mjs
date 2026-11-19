@@ -8,6 +8,7 @@ import {changePin,resolvePayer} from "./change-pin.mjs";
 import {withPayer} from "./with-payer.mjs";
 import {deriveCommandKey,reserveSigned,changePinSigned} from "./signed-commands.mjs";
 import {createRecoveryVerifier,issueRecoveryGrant} from "./recovery-grant.mjs";
+import {makeNotificationWorker} from "./notification-worker.mjs";
 import {verifyPinCredential} from "../domain/pin-credential.mjs";
 import {readFile} from "node:fs/promises";
 import pg from "pg";
@@ -23,9 +24,9 @@ const pool=new pg.Pool({connectionString:url.href,max:8,connectionTimeoutMillis:
   statement_timeout:10000});
 const payerSigningKey=randomBytes(32);
 const recoveryKey=randomBytes(32);
-let payerPool;
+let payerPool, notificationPool;
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(singleton,secret) VALUES(true,$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(singleton,secret) VALUES(true,$1)",[deriveCommandKey(pepper)]);
@@ -34,13 +35,17 @@ before(async()=>{
   await pool.query("ALTER ROLE securepay_payer_runtime LOGIN PASSWORD '"+password+"'");
   const payerUrl=new URL(url);payerUrl.username="securepay_payer_runtime";payerUrl.password=password;
   payerPool=new pg.Pool({connectionString:payerUrl.href,max:4,connectionTimeoutMillis:5000,statement_timeout:10000});
+  const notificationPassword=randomBytes(32).toString("hex");
+  await pool.query("ALTER ROLE securepay_notification_runtime LOGIN PASSWORD '"+notificationPassword+"'");
+  const notificationUrl=new URL(url);notificationUrl.username="securepay_notification_runtime";notificationUrl.password=notificationPassword;
+  notificationPool=new pg.Pool({connectionString:notificationUrl.href,max:4,connectionTimeoutMillis:5000,statement_timeout:10000});
   await pool.query("CREATE TABLE securepay_ci_staff_only(secret text); INSERT INTO securepay_ci_staff_only VALUES ('fixture')");
   // Fixture admin bypasses RLS solely to exercise transaction semantics.
   // No permissive policies are installed; restricted role tested below.
   await pool.query("CREATE ROLE securepay_ci_restricted NOLOGIN NOBYPASSRLS");
   await pool.query("GRANT SELECT, INSERT, UPDATE ON securepay_milestones, securepay_release_requests, securepay_release_proofs, securepay_customer_pins, securepay_payer_identities, securepay_pin_change_grants TO securepay_ci_restricted");
 });
-after(async()=>{if(payerPool)await payerPool.end();await pool.end();});
+after(async()=>{if(notificationPool)await notificationPool.end();if(payerPool)await payerPool.end();await pool.end();});
 async function fixture(status="approved",tenantId=randomUUID()) {
   const milestoneId=randomUUID(), customerId=randomUUID();
   await pool.query("INSERT INTO securepay_milestones(id,tenant_id,job_id,amount_cents,status) VALUES($1,$2,$3,5000,$4)",
@@ -468,4 +473,55 @@ test("rollback of PIN recovery also rolls back revocation and notification inten
  const {rows}=await pool.query("SELECT event_type FROM securepay_private.recovery_notification_outbox WHERE tenant_id=$1 AND customer_id=$2",[s.tenantId,s.customerId]);
  assert.deepEqual(rows,[{event_type:"pin_enrolled"}]);
  assert.equal((await asPayer(s,c=>changePin(c,{...g,pin:"654321"},pepper))).ok,true);
+});
+
+async function notificationFixture(){
+ // Preserve earlier audit assertions, but isolate notification worker tests from their backlog.
+ await pool.query("UPDATE securepay_private.recovery_notification_outbox SET dead_lettered_at=clock_timestamp(),lease_id=NULL,lease_until=NULL WHERE delivered_at IS NULL AND dead_lettered_at IS NULL");
+ const s=await identityFixture();
+ const g=await changeGrant(s);
+ assert.equal((await asPayer(s,c=>changePin(c,g,pepper))).ok,true);
+ const {rows:[n]}=await pool.query("SELECT notification_id FROM securepay_private.recovery_notification_outbox WHERE tenant_id=$1 AND customer_id=$2",[s.tenantId,s.customerId]);
+ return {...s,id:n.notification_id};
+}
+test("notification workers claim exactly once under concurrent execution and cannot access payment credentials",async()=>{
+ const s=await notificationFixture(),calls=[];
+ const worker=makeNotificationWorker({pool:notificationPool,namespace:"fixture",sink:{send:async m=>{calls.push(m);await new Promise(r=>setTimeout(r,30));return {reference:"receipt-1"};}}});
+ const results=await Promise.all([worker.runOnce(),worker.runOnce()]);
+ assert.deepEqual(results.map(r=>r.status).sort(),["delivered","idle"]);
+ assert.equal(calls.length,1);
+ assert.deepEqual(Object.keys(calls[0]).sort(),["customerId","eventType","idempotencyKey","tenantId"]);
+ assert.equal(calls[0].customerId,s.customerId);
+ assert.equal((await worker.runOnce()).status,"idle");
+ await assert.rejects(notificationPool.query("SELECT * FROM public.securepay_customer_pins"),e=>e.code==="42501");
+ await assert.rejects(notificationPool.query("SELECT * FROM securepay_private.recovery_notification_outbox"),e=>e.code==="42501");
+ await assert.rejects(asPayer(s,c=>c.query("SELECT * FROM securepay_private.claim_notification($1)",[randomUUID()])),e=>e.code==="42501");
+});
+test("ambiguous notification failure reuses identical provider idempotency key and backs off",async()=>{
+ const s=await notificationFixture(),keys=[],seen=new Set();
+ const worker=makeNotificationWorker({pool:notificationPool,namespace:"fixture",sink:{send:async m=>{
+  keys.push(m.idempotencyKey);
+  if(!seen.has(m.idempotencyKey)){seen.add(m.idempotencyKey);throw Error("synthetic connection loss after delivery");}
+  return {reference:"same-receipt"};
+ }}});
+ assert.equal((await worker.runOnce()).status,"retry_or_dead_letter");
+ assert.equal((await worker.runOnce()).status,"idle");
+ await pool.query("UPDATE securepay_private.recovery_notification_outbox SET next_attempt_at=clock_timestamp()-interval '1 second' WHERE notification_id=$1",[s.id]);
+ assert.equal((await worker.runOnce()).status,"delivered");
+ assert.equal(keys.length,2);assert.equal(keys[0],keys[1]);assert.equal(seen.size,1);
+ const {rows:[r]}=await pool.query("SELECT attempt_count,delivery_ref FROM securepay_private.recovery_notification_outbox WHERE notification_id=$1",[s.id]);
+ assert.equal(r.attempt_count,2);assert.equal(r.delivery_ref,"same-receipt");
+});
+test("expired leases cannot acknowledge reclaimed notifications; exhausted retries dead-letter",async()=>{
+ const s=await notificationFixture(),lease=randomUUID(),next=randomUUID();
+ await notificationPool.query("SELECT * FROM securepay_private.claim_notification($1)",[lease]);
+ await pool.query("UPDATE securepay_private.recovery_notification_outbox SET lease_until=clock_timestamp()-interval '1 second',attempt_count=7 WHERE notification_id=$1",[s.id]);
+ const {rows:[job]}=await notificationPool.query("SELECT * FROM securepay_private.claim_notification($1)",[next]);
+ assert.equal(job.notification_id,s.id);assert.equal(job.attempt_count,8);
+ const finish=(l,ok,ref)=>notificationPool.query("SELECT securepay_private.finish_notification($1,$2,$3,$4) AS ok",[s.id,l,ok,ref]);
+ assert.equal((await finish(lease,true,"stale")).rows[0].ok,false);
+ assert.equal((await finish(next,false,null)).rows[0].ok,true);
+ const {rows:[r]}=await pool.query("SELECT dead_lettered_at,delivered_at FROM securepay_private.recovery_notification_outbox WHERE notification_id=$1",[s.id]);
+ assert.ok(r.dead_lettered_at);assert.equal(r.delivered_at,null);
+ assert.equal((await notificationPool.query("SELECT * FROM securepay_private.claim_notification($1)",[randomUUID()])).rowCount,0);
 });
