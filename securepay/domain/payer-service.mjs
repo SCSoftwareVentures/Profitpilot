@@ -75,6 +75,22 @@ export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecov
     return r?.ok?{ok:true,workApproved:true}:{ok:false};
    });
   },
+  async reject({identity,tenantId,milestoneId,body}){
+   const ctx=context(identity,tenantId);
+   if(!uuid.test(milestoneId)||!exact(body,["completionId","manifestDigest","version","reason"])||!uuid.test(body.completionId)||typeof body.manifestDigest!=="string"||!/^[a-f0-9]{64}$/.test(body.manifestDigest)||typeof body.version!=="string"||!/^(0|[1-9][0-9]{0,18})$/.test(body.version)||BigInt(body.version)>=9223372036854775807n||typeof body.reason!=="string"||body.reason.trim().length<10||body.reason.length>2000||body.reason.includes("\0"))bad();
+   return authenticated(ctx,async c=>{
+    const {rows:[r]}=await c.query("SELECT securepay_private.reject_work_completion($1,$2,$3,$4,$5,$6) AS ok",[tenantId,milestoneId,body.completionId,body.manifestDigest,body.version,body.reason]);
+    return r?.ok?{ok:true,workRejected:true}:{ok:false};
+   });
+  },
+  async dispute({identity,tenantId,milestoneId,body}){
+   const ctx=context(identity,tenantId);
+   if(!uuid.test(milestoneId)||!exact(body,["caseId","severity","manifestDigest","version","reason"])||!uuid.test(body.caseId)||!["minor","moderate","serious"].includes(body.severity)||typeof body.manifestDigest!=="string"||!/^[a-f0-9]{64}$/.test(body.manifestDigest)||typeof body.version!=="string"||!/^(0|[1-9][0-9]{0,18})$/.test(body.version)||BigInt(body.version)>=9223372036854775807n||typeof body.reason!=="string"||body.reason.trim().length<10||body.reason.length>2000||body.reason.includes("\0"))bad();
+   return authenticated(ctx,async c=>{
+    const {rows:[r]}=await c.query("SELECT securepay_private.payer_open_work_dispute($1,$2,$3,$4,$5,$6,$7,$8) AS ok",[tenantId,milestoneId,body.caseId,randomUUID(),body.severity,body.reason,body.manifestDigest,body.version]);
+    return r?.ok?{ok:true,disputeOpened:body.caseId}:{ok:false};
+   });
+  },
   async reserve({identity,tenantId,milestoneId,body}){
    const ctx=context(identity,tenantId);
    if(typeof milestoneId!=="string"||!uuid.test(milestoneId)||
