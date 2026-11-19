@@ -89,6 +89,7 @@ services:
       - ./database/migrations/071_supplier_cost_classification.sql:/docker-entrypoint-initdb.d/073-supplier-cost-classification.sql:ro
       - ./database/migrations/072_direct_supplier_calculation.sql:/docker-entrypoint-initdb.d/074-direct-supplier-calculation.sql:ro
       - ./database/migrations/073_shared_cost_allocation.sql:/docker-entrypoint-initdb.d/075-shared-cost-allocation.sql:ro
+      - ./database/migrations/074_shared_cost_calculation.sql:/docker-entrypoint-initdb.d/076-shared-cost-calculation.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s

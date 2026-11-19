@@ -222,7 +222,7 @@ paths:
       - $ref: '#/components/parameters/TenantId'
     post:
       summary: Create a versioned contract/site/period calculation run
-      description: Server calculates from immutable input versions; no client-supplied output totals are trusted. The approved contract version tax basis must be explicit and must match every confirmed invoice source basis; unknown or mixed tax basis is blocked. Optional includeApprovedSupplierCosts true selects version 0.3.0 and includes independently classified direct supplier expenses; default false preserves version 0.2.0.
+      description: Server calculates from immutable input versions; no client-supplied output totals are trusted. The approved contract version tax basis must be explicit and must match every confirmed invoice source basis; unknown or mixed tax basis is blocked. Optional includeApprovedSupplierCosts true selects version 0.3.0 and includes independently classified direct supplier expenses; default false preserves version 0.2.0. Optional useSharedCostAllocations true selects version 0.4.0, requires active reviewed site payroll and overhead allocations, and includes direct supplier expenses.
       responses:
         "201":
           description: Incomplete management calculation run created with headline contribution and margin withheld
