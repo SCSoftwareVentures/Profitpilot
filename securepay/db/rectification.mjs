@@ -15,10 +15,12 @@ export function makeRectificationActor({pool,actorId,key,scanner}){
    if(typeof scanner?.attest!=="function")return {ok:false};
    const snapshot=Buffer.from(content);
    let attestation;try{attestation=await scanner.attest({photoId,tenantId,milestoneId,caseId,actorId,mediaType,content:Buffer.from(snapshot)});}catch{return {ok:false};}
-   const digest=createHash("sha256").update(snapshot).digest("hex"),exp=expires();
-   if(!attestation||attestation.digest!==digest||!Number.isSafeInteger(attestation.exp)||typeof attestation.signature!=="string")return {ok:false};
-   const sig=mac(["sp-photo-v1",photoId,tenantId,milestoneId,caseId,actorId,mediaType,digest,exp]);
-   const {rows:[r]}=await pool.query("SELECT securepay_private.store_screened_photo($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::text,$7::text,$8::bytea,$9::bigint,$10::text,$11::bigint,$12::text) AS ok",[photoId,tenantId,milestoneId,caseId,actorId,mediaType,digest,snapshot,exp,sig,attestation.exp,attestation.signature]);
+   const originalDigest=createHash("sha256").update(snapshot).digest("hex"),exp=expires();
+   if(!attestation||attestation.originalDigest!==originalDigest||attestation.originalMediaType!==mediaType||!Buffer.isBuffer(attestation.content)||attestation.content.length>2097152||!Number.isSafeInteger(attestation.exp)||typeof attestation.signature!=="string")return {ok:false};
+   const normalized=Buffer.from(attestation.content),digest=createHash("sha256").update(normalized).digest("hex");
+   if(attestation.digest!==digest||(mediaType==="image/png"&&!normalized.equals(snapshot)))return {ok:false};
+   const sig=mac(["sp-photo-v1",photoId,tenantId,milestoneId,caseId,actorId,"image/png",digest,exp]);
+   const {rows:[r]}=await pool.query("SELECT securepay_private.store_screened_photo_v2($1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::uuid,$6::text,$7::text,$8::bytea,$9::bigint,$10::text,$11::bigint,$12::text,$13::text,$14::text) AS ok",[photoId,tenantId,milestoneId,caseId,actorId,"image/png",digest,normalized,exp,sig,attestation.exp,attestation.signature,mediaType,originalDigest]);
    return r.ok?{ok:true,photoId,digest}:{ok:false};
   },
   async readPhoto({photoId,tenantId,milestoneId,caseId}){
