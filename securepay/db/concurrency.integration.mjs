@@ -281,3 +281,59 @@ test("signed payer runtime isolates same-tenant and cross-tenant customers and e
  assert.equal((await state(other)).status,"approved");
  assert.equal((await state(foreign)).status,"approved");
 });
+
+test("sandbox HTTP routes require customer audience, recent MFA and real PIN; deny spoofing and cross-payer access",async()=>{
+ const {default:express}=await import("express");
+ const {createServer}=await import("node:http");
+ const {generateKeyPair,SignJWT}=await import("jose");
+ const {createSecurePayRouter,createPayerTokenVerifier,createSecurePayRouterFromEnv}=await import("../../server/securepay-router.js");
+ const {makePayerService}=await import("../domain/payer-service.mjs");
+ const s=await identityFixture(), other=await identityFixture();
+ const grant=await changeGrant(s);
+ await pool.query("UPDATE securepay_milestones SET payer_customer_id=$2 WHERE id=$1",[s.milestoneId,s.customerId]);
+ await pool.query("UPDATE securepay_milestones SET payer_customer_id=$2 WHERE id=$1",[other.milestoneId,other.customerId]);
+ const {publicKey,privateKey}=await generateKeyPair("ES256");
+ const issuer="https://fixture.invalid/",audience="securepay-customer",requiredAcr="fixture-mfa";
+ const verifyToken=createPayerTokenVerifier({issuer,audience,requiredAcr,keyResolver:async()=>publicKey});
+ const app=express();
+ app.use("/disabled",createSecurePayRouterFromEnv({NODE_ENV:"production",SECUREPAY_SANDBOX_ENABLED:"true"}));
+ app.use("/sandbox",createSecurePayRouter({enabled:true,verifyToken,
+   service:makePayerService({pool:payerPool,signingKey:payerSigningKey,pepper})}));
+ const api=createServer(app);
+ await new Promise(r=>api.listen(0,"127.0.0.1",r));
+ const base="http://127.0.0.1:"+api.address().port;
+ const now=Math.floor(Date.now()/1000);
+ const token=async({sub=s.subject,aud=audience,acr=requiredAcr,authTime=now}={})=>
+  new SignJWT({acr,auth_time:authTime}).setProtectedHeader({alg:"ES256"}).setIssuer(issuer)
+   .setAudience(aud).setSubject(sub).setIssuedAt().setExpirationTime("5m").sign(privateKey);
+ const pinPath="/sandbox/tenants/"+s.tenantId+"/pin";
+ const releasePath="/sandbox/tenants/"+s.tenantId+"/milestones/"+s.milestoneId+"/reserve";
+ const post=(path,body,bearer)=>fetch(base+path,{method:"POST",headers:{"content-type":"application/json",...(bearer?{authorization:"Bearer "+bearer}:{})},body:JSON.stringify(body)});
+ const pinBody={pin:s.pin,purpose:"enroll",grantRef:grant.grantRef};
+ const releaseBody={pin:s.pin,expectedAmountCents:5000,idempotencyKey:randomUUID()};
+ try {
+  assert.equal((await post(pinPath,pinBody)).status,401);
+  assert.equal((await post(pinPath,pinBody,await token({aud:"profitpilot-api"}))).status,401);
+  assert.equal((await post(pinPath,pinBody,await token({acr:"password-only"}))).status,401);
+  assert.equal((await post(pinPath,pinBody,await token({authTime:now-600}))).status,401);
+  assert.equal((await post(pinPath,pinBody,await token({sub:other.subject}))).status,403);
+  const bearer=await token();
+  assert.equal((await post(pinPath.replace("/sandbox","/disabled"),pinBody,bearer)).status,404);
+  assert.equal((await post(pinPath,{...pinBody,customerId:s.customerId},bearer)).status,400);
+  const enrolled=await post(pinPath,pinBody,bearer);
+  assert.equal(enrolled.status,200);assert.equal(enrolled.headers.get("cache-control"),"no-store");
+  assert.deepEqual(await enrolled.json(),{mode:"sandbox",status:"pin_updated"});
+  assert.equal((await post(releasePath,{...releaseBody,pin:"999999"},bearer)).status,403);
+  assert.equal((await post(releasePath,{...releaseBody,expectedAmountCents:5001},bearer)).status,403);
+  assert.equal((await post(releasePath,{...releaseBody,customerId:s.customerId},bearer)).status,400);
+  assert.equal((await post(releasePath,releaseBody,await token({sub:other.subject}))).status,403);
+  const reserved=await post(releasePath,releaseBody,bearer);
+  assert.equal(reserved.status,202);
+  const body=await reserved.json();
+  assert.equal(body.mode,"sandbox");assert.equal(body.status,"reserved");assert.equal(body.moneyMoved,false);
+  assert.equal(body.amountCents,"5000");assert.equal(body.milestoneId,s.milestoneId);
+  assert.equal(Object.hasOwn(body,"authorizationRef"),false);
+  assert.equal((await post(releasePath,releaseBody,bearer)).status,403);
+  assert.equal((await state(s)).requests,1);
+ }finally{await new Promise(resolve=>api.close(resolve));}
+});
