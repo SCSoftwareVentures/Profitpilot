@@ -1648,6 +1648,10 @@ test("concurrent quote amendment and customer acceptance have exactly one winner
  assert.equal(rows[0].n,accept.ok?2:0);
 });
 test("owner quote and customer agreement HTTP APIs enforce scoped persisted quote and exact consent",async()=>{
+ const {mkdtemp,rm}=await import("node:fs/promises");
+ const {tmpdir}=await import("node:os");
+ const {join}=await import("node:path");
+ const {createSecurePayGateway}=await import("../../server/securepay-gateway.js");
  const {createCompletionRouter}=await import("../../server/securepay-completion.js");
  const {createSecurePayRouter}=await import("../../server/securepay-router.js");
  const {createServer}=await import("node:http");
@@ -1656,11 +1660,15 @@ test("owner quote and customer agreement HTTP APIs enforce scoped persisted quot
  const ownerApp=express(),payerApp=express();
  ownerApp.use("/v1/securepay-completion",createCompletionRouter({enabled:true,tenantId:scope.tenantId,subject:"assigned-owner",verifyToken:async token=>({subject:token}),owner:d.owner}));
  payerApp.use("/v1/securepay",createSecurePayRouter({enabled:true,service:d.svc,verifyToken:async token=>({subject:token,authTime:Math.floor(Date.now()/1000)})}));
- const ownerServer=createServer(ownerApp),payerServer=createServer(payerApp);
- await Promise.all([new Promise(r=>ownerServer.listen(0,"127.0.0.1",r)),new Promise(r=>payerServer.listen(0,"127.0.0.1",r))]);
+ const dir=await mkdtemp(join(tmpdir(),"sp-quote-")),socketPath=join(dir,"authority.sock");
+ const gateway=express();gateway.use("/v1/securepay",createSecurePayGateway({NODE_ENV:"test",SECUREPAY_SANDBOX_ENABLED:"true",SECUREPAY_AUTHORITY_SOCKET:socketPath}));
+ const ownerServer=createServer(ownerApp),payerServer=createServer(payerApp),gatewayServer=createServer(gateway);
+ await Promise.all([new Promise(r=>ownerServer.listen(0,"127.0.0.1",r)),new Promise(r=>payerServer.listen(socketPath,r)),new Promise(r=>gatewayServer.listen(0,"127.0.0.1",r))]);
  try{
   const o="http://127.0.0.1:"+ownerServer.address().port+"/v1/securepay-completion";
-  const p="http://127.0.0.1:"+payerServer.address().port+"/v1/securepay/tenants/"+scope.tenantId+"/plans/";
+  const base="http://127.0.0.1:"+gatewayServer.address().port+"/v1/securepay";
+  const p=base+"/tenants/"+scope.tenantId+"/plans/";
+  const customerPage=await fetch(base+"/quote");assert.equal(customerPage.status,200);assert.match(await customerPage.text(),/quote agreement/);
   const post=(url,body,token)=>fetch(url,{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+token},body:JSON.stringify(body)});
   const own=(action,body={},token="assigned-owner",jobId=scope.jobId)=>post(o+"/"+jobId+"/"+action,body,token);
   const page=await fetch(o+"/quotes");assert.equal(page.status,200);assert.match(await page.text(),/quotation manager/);
@@ -1674,5 +1682,5 @@ test("owner quote and customer agreement HTTP APIs enforce scoped persisted quot
   assert.equal((await post(url+"/accept",{planDigest:v.planDigest,expectedTotalCents:4999},d.s.subject)).status,403);
   assert.equal((await post(url+"/accept",{planDigest:v.planDigest,expectedTotalCents:5000},d.s.subject)).status,200);
   assert.equal((await own("publish-quote",{previousDigest:q.quote.quoteDigest,description:"Amended",totalCents:6000})).status,403);
- }finally{await Promise.all([new Promise(r=>ownerServer.close(r)),new Promise(r=>payerServer.close(r))]);}
+ }finally{await Promise.all([new Promise(r=>ownerServer.close(r)),new Promise(r=>payerServer.close(r)),new Promise(r=>gatewayServer.close(r))]);await rm(dir,{recursive:true,force:true});}
 });
