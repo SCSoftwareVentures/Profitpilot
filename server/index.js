@@ -49,6 +49,9 @@ if(process.env.NODE_ENV!=="production"&&process.env.SYNTHETIC_SECURITY_UI_ENABLE
  app.use("/candidate/security",express.static(fileURLToPath(new URL("./candidate-ui/",import.meta.url)),{index:"index.html",dotfiles:"deny",fallthrough:false,redirect:true,etag:false,lastModified:false}));
  app.use("/candidate/workspace",express.static(fileURLToPath(new URL("./product-ui/",import.meta.url)),{index:"index.html",dotfiles:"deny",fallthrough:false,redirect:true,etag:false,lastModified:false}));
 }
+// Public customer sandbox has its own audience and fixed-socket authority; never staff membership.
+const {mountSecurePayCandidate}=await import("./securepay-candidate.js");
+await mountSecurePayCandidate(app);
 app.use("/v1",authRequired());
 app.use("/v1",sessionRequired(checkIdentitySession));
 app.use("/v1/tenants/:tenantId/imports",importIntakeGate());
