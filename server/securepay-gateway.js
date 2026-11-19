@@ -1,6 +1,7 @@
 // Staff API gateway: no SecurePay DB credentials, context key, PIN pepper or recovery key.
 // Fixed Unix socket only; no client-controlled destination, redirects or raw upstream replies.
 import express from "express";
+import {customerPortalPage,sendPortalPage} from "./securepay-portal-page.js";
 import rateLimit from "express-rate-limit";
 import {request} from "node:http";
 import {isAbsolute} from "node:path";
@@ -35,6 +36,7 @@ export function createSecurePayGateway(env=process.env){
  const socket=env.SECUREPAY_AUTHORITY_SOCKET;
  if(typeof socket!=="string"||!isAbsolute(socket)||socket.length>100||socket.includes("\0"))throw Error("SecurePay authority socket required");
  router.use(rateLimit({windowMs:60_000,limit:30,standardHeaders:true,legacyHeaders:false}));
+ router.get("/portal",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,customerPortalPage()));
  router.use(express.json({limit:"8kb",strict:true}));
  router.use(async(req,res)=>{
   if(req.method!=="POST"||!allowedPath.test(req.path)||req.originalUrl.includes("?"))return res.status(404).json({error:"Not found"});
