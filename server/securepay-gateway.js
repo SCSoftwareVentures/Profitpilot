@@ -1,7 +1,9 @@
 // Staff API gateway: no SecurePay DB credentials, context key, PIN pepper or recovery key.
 // Fixed Unix socket only; no client-controlled destination, redirects or raw upstream replies.
 import express from "express";
-import {customerPortalPage,customerQuotePage,customerContractPage,customerCancellationPage,sendPortalPage} from "./securepay-portal-page.js";
+import {customerPortalPage,customerQuotePage,customerContractPage,customerCancellationPage,participantPage,sendPortalPage} from "./securepay-portal-page.js";
+import {projectParticipant} from "./securepay-participant-view.js";
+import {validParticipantRequest} from "../securepay/db/participant.mjs";
 import {projectFundedCancellation} from "./securepay-funded-cancellation-view.js";
 import {projectContract} from "./securepay-contract-view.js";
 import rateLimit from "express-rate-limit";
@@ -9,9 +11,9 @@ import {request} from "node:http";
 import {createHash} from "node:crypto";
 import {isAbsolute} from "node:path";
 const uuid="[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
-const allowedPath=new RegExp("^/tenants/"+uuid+"/(?:pin(?:/grant)?|milestones/"+uuid+"/(?:reserve|view|completion|photo|approve|reject|dispute)|plans/"+uuid+"/(?:view|accept|contract|accept-change|funded-cancellation|accept-funded-cancellation|ack-negotiated|appeal-negotiated))$");
+const allowedPath=new RegExp("^/tenants/"+uuid+"/(?:pin(?:/grant)?|milestones/"+uuid+"/(?:reserve|view|completion|photo|approve|reject|dispute|case-(?:view|photo|upload|evidence|ack|appeal|repair))|plans/"+uuid+"/(?:view|accept|contract|accept-change|funded-cancellation|accept-funded-cancellation|ack-negotiated|appeal-negotiated))$");
 const uuidOnly=new RegExp("^"+uuid+"$");
-export const authoritySecrets=["SECUREPAY_DATABASE_URL","SECUREPAY_CONTEXT_HMAC_SECRET","SECUREPAY_PIN_PEPPER","SECUREPAY_RECOVERY_KEY","SECUREPAY_COMMAND_KEY","SECUREPAY_RATE_LIMIT_KEY"];
+export const authoritySecrets=["SECUREPAY_DATABASE_URL","SECUREPAY_CONTEXT_HMAC_SECRET","SECUREPAY_PIN_PEPPER","SECUREPAY_RECOVERY_KEY","SECUREPAY_COMMAND_KEY","SECUREPAY_RATE_LIMIT_KEY","SECUREPAY_DISPUTE_SCAN_KEY"];
 function forward(socketPath,path,token,body){
  return new Promise((resolve,reject)=>{
   const payload=JSON.stringify(body);
@@ -19,11 +21,11 @@ function forward(socketPath,path,token,body){
    authorization:token,"content-type":"application/json","content-length":Buffer.byteLength(payload)
   }},res=>{
    let size=0;const chunks=[];
-   res.on("data",chunk=>{size+=chunk.length;if(size>(path.endsWith("/photo")?2800000:(path.endsWith("/contract")||path.endsWith("/funded-cancellation"))?524288:path.includes("/plans/")?65536:16384)){res.destroy();req.destroy(Error("Oversize authority response"));return;}chunks.push(chunk);});
+   res.on("data",chunk=>{size+=chunk.length;if(size>((path.endsWith("/photo")||path.endsWith("/case-photo")||path.endsWith("/case-view"))?2800000:(path.endsWith("/contract")||path.endsWith("/funded-cancellation"))?524288:path.includes("/plans/")?65536:16384)){res.destroy();req.destroy(Error("Oversize authority response"));return;}chunks.push(chunk);});
    res.on("error",reject);
    res.on("end",()=>{try{resolve({status:res.statusCode,body:JSON.parse(Buffer.concat(chunks).toString("utf8"))});}catch{reject(Error("Invalid authority response"));}});
   });
-  const timer=setTimeout(()=>req.destroy(Error("Authority deadline exceeded")),12000);
+  const timer=setTimeout(()=>req.destroy(Error("Authority deadline exceeded")),path.endsWith("/case-upload")?30000:12000);
   req.on("error",e=>{clearTimeout(timer);reject(e);});
   req.on("close",()=>clearTimeout(timer));
   req.end(payload);
@@ -39,21 +41,29 @@ export function createSecurePayGateway(env=process.env){
  const socket=env.SECUREPAY_AUTHORITY_SOCKET;
  if(typeof socket!=="string"||!isAbsolute(socket)||socket.length>100||socket.includes("\0"))throw Error("SecurePay authority socket required");
  router.use(rateLimit({windowMs:60_000,limit:30,standardHeaders:true,legacyHeaders:false}));
+ router.get("/disputes",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,participantPage("customer")));
  router.get("/cancellation",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,customerCancellationPage()));
  router.get("/contract",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,customerContractPage()));
  router.get("/quote",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,customerQuotePage()));
  router.get("/portal",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,customerPortalPage()));
- router.use(express.json({limit:"8kb",strict:true}));
+ router.use((req,res,next)=>{
+ if(req.method!=="POST"||!allowedPath.test(req.path)||req.originalUrl.includes("?"))return res.status(404).json({error:"Not found"});
+ if(typeof req.headers.authorization!=="string"||req.headers.authorization.length>8192||!/^Bearer [^\s]+$/i.test(req.headers.authorization))return res.status(401).json({error:"Customer authentication required"});
+ return express.json({limit:req.path.endsWith("/case-upload")?2800000:"8kb",strict:true})(req,res,next);
+ });
  router.use(async(req,res)=>{
   if(req.method!=="POST"||!allowedPath.test(req.path)||req.originalUrl.includes("?"))return res.status(404).json({error:"Not found"});
   const token=req.headers.authorization;
   if(typeof token!=="string"||token.length>8192||!/^Bearer [^\s]+$/i.test(token))return res.status(401).json({error:"Customer authentication required"});
   if(!req.is("application/json")||!req.body||typeof req.body!=="object"||Array.isArray(req.body))return res.status(400).json({error:"Invalid request"});
   try{
+   const participantOp=req.path.includes("/milestones/")&&req.path.split("/").at(-1).startsWith("case-")?req.path.split("/").at(-1).slice(5):null;
+   if(participantOp&&!validParticipantRequest(participantOp,req.body))return res.status(400).json({error:"Invalid request"});
    const {status,body}=await forward(socket,req.path,token,req.body);
    const errors={400:"Invalid request",401:"Customer authentication required",403:"Authorization denied",404:"Not found",409:"Conflicting request",413:"Invalid request",415:"JSON required",429:"Too many requests",503:"SecurePay unavailable"};
    if(Object.hasOwn(errors,status))return res.status(status).json({error:errors[status]});
    if(body?.mode==="sandbox"){
+    if(participantOp&&status===200&&body.moneyMoved===false)return res.json({mode:"sandbox",moneyMoved:false,participant:projectParticipant(participantOp,body.participant,req.path.split("/")[4],"customer",req.body)});
     if(status===200&&body.moneyMoved===false&&req.path.endsWith("/funded-cancellation"))return res.json({mode:"sandbox",moneyMoved:false,cancellation:projectFundedCancellation(body.cancellation,req.path.split("/")[4])});
     if(status===200&&body.moneyMoved===false&&req.path.endsWith("/accept-funded-cancellation")&&body.status==="negotiation_opened"&&uuidOnly.test(body.caseId))return res.json({mode:"sandbox",moneyMoved:false,status:"negotiation_opened",caseId:body.caseId});
     if(status===200&&body.moneyMoved===false&&((req.path.endsWith("/ack-negotiated")&&body.status==="decision_acknowledged")||(req.path.endsWith("/appeal-negotiated")&&body.status==="decision_appealed")))return res.json({mode:"sandbox",moneyMoved:false,status:body.status});
