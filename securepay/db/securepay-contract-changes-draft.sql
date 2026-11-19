@@ -38,14 +38,15 @@ CREATE FUNCTION securepay_private.change_hash(v uuid,t uuid,z uuid,k text,m uuid
  LANGUAGE sql IMMUTABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
  SELECT encode(public.digest(convert_to(jsonb_build_array('sp-change-v1',v,t,z,k,m,amount,description,reason,state_hash,old_total,new_total)::text,'UTF8'),'sha256'),'hex')
 $$;
-CREATE FUNCTION securepay_private.offer_contract_change(v uuid,t uuid,z uuid,a uuid,k text,m uuid,amount bigint,description text,reason text,expires bigint,sig text) RETURNS jsonb
+CREATE FUNCTION securepay_private.offer_contract_change(v uuid,t uuid,z uuid,a uuid,k text,m uuid,amount bigint,description text,reason text,expected_state text,expires bigint,sig text) RETURNS jsonb
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE p securepay_private.payment_plans%ROWTYPE;s jsonb;stage jsonb;old_total bigint;new_total numeric;h text;sh text;
 BEGIN
  IF v IS NULL OR t IS NULL OR z IS NULL OR a IS NULL OR k IS NULL OR k NOT IN ('variation','cancel_remaining') OR reason IS NULL OR length(btrim(reason)) NOT BETWEEN 10 AND 2000
  OR (k='variation' AND (m IS NULL OR amount IS NULL OR amount NOT BETWEEN 1 AND 9007199254740991 OR description IS NULL OR length(btrim(description)) NOT BETWEEN 1 AND 500))
  OR (k='cancel_remaining' AND (m IS NOT NULL OR amount IS NOT NULL OR description IS NOT NULL))
- OR securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-change-offer-v1',v,t,z,a,k,coalesce(m::text,'-'),coalesce(amount::text,'-'),coalesce(encode(convert_to(description,'UTF8'),'hex'),'-'),encode(convert_to(reason,'UTF8'),'hex'),expires),expires,sig) IS DISTINCT FROM 'owner' THEN RETURN NULL; END IF;
+ OR expected_state IS NULL OR expected_state !~ '^[a-f0-9]{64}$'
+ OR securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-change-offer-v2',v,t,z,a,k,coalesce(m::text,'-'),coalesce(amount::text,'-'),coalesce(encode(convert_to(description,'UTF8'),'hex'),'-'),encode(convert_to(reason,'UTF8'),'hex'),expected_state,expires),expires,sig) IS DISTINCT FROM 'owner' THEN RETURN NULL; END IF;
  SELECT * INTO p FROM securepay_private.payment_plans WHERE tenant_id=t AND plan_id=z AND owner_id=a AND status='accepted' FOR UPDATE;
  IF NOT FOUND OR (SELECT count(*) FROM securepay_private.contract_changes WHERE plan_id=z)>=20 THEN RETURN NULL; END IF;
  PERFORM 1 FROM public.securepay_milestones x JOIN securepay_private.payment_plan_milestones l ON l.tenant_id=x.tenant_id AND l.milestone_id=x.id WHERE l.tenant_id=t AND l.plan_id=z ORDER BY x.id FOR UPDATE OF x;
@@ -62,6 +63,7 @@ BEGIN
  END IF;
  IF new_total NOT BETWEEN 0 AND 9007199254740991 THEN RETURN NULL; END IF;
  sh:=encode(public.digest(convert_to(s::text,'UTF8'),'sha256'),'hex');
+ IF sh IS DISTINCT FROM expected_state THEN RETURN NULL; END IF;
  h:=securepay_private.change_hash(v,t,z,k,m,amount,description,reason,sh,old_total,new_total::bigint);
  INSERT INTO securepay_private.contract_changes(change_id,tenant_id,plan_id,owner_id,customer_id,kind,milestone_id,old_total,new_total,new_amount,new_description,reason,before_state,state_digest,change_digest)
  VALUES(v,t,z,a,p.customer_id,k,m,old_total,new_total,amount,description,reason,s,sh,h);
@@ -105,7 +107,7 @@ BEGIN
 END $$;
 CREATE FUNCTION securepay_private.contract_change_view(t uuid,z uuid) RETURNS jsonb
  LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
- SELECT jsonb_build_object('state',securepay_private.contract_state(t,z),'changes',coalesce((SELECT jsonb_agg(jsonb_build_object('changeId',c.change_id,'kind',c.kind,'milestoneId',c.milestone_id,'oldTotalCents',c.old_total::text,'newTotalCents',c.new_total::text,'newAmountCents',c.new_amount::text,'newDescription',c.new_description,'reason',c.reason,'status',c.status,'changeDigest',c.change_digest,'current',c.status='offered' AND c.state_digest=encode(public.digest(convert_to(securepay_private.contract_state(t,z)::text,'UTF8'),'sha256'),'hex'),'affectedStages',(SELECT coalesce(jsonb_agg(jsonb_build_object('milestoneId',x->>'milestoneId','amountCents',x->>'amountCents','description',x->>'description') ORDER BY x->>'milestoneId'),'[]'::jsonb) FROM jsonb_array_elements(c.before_state->'stages') x WHERE (c.kind='variation' AND x->>'milestoneId'=c.milestone_id::text) OR (c.kind='cancel_remaining' AND (x->>'eligible')::boolean))) ORDER BY c.created_at,c.change_id) FROM securepay_private.contract_changes c WHERE c.tenant_id=t AND c.plan_id=z),'[]'::jsonb))
+ SELECT jsonb_build_object('state',securepay_private.contract_state(t,z),'stateDigest',encode(public.digest(convert_to(securepay_private.contract_state(t,z)::text,'UTF8'),'sha256'),'hex'),'changes',coalesce((SELECT jsonb_agg(jsonb_build_object('changeId',c.change_id,'kind',c.kind,'milestoneId',c.milestone_id,'oldTotalCents',c.old_total::text,'newTotalCents',c.new_total::text,'newAmountCents',c.new_amount::text,'newDescription',c.new_description,'reason',c.reason,'status',c.status,'changeDigest',c.change_digest,'current',c.status='offered' AND c.state_digest=encode(public.digest(convert_to(securepay_private.contract_state(t,z)::text,'UTF8'),'sha256'),'hex'),'affectedStages',(SELECT coalesce(jsonb_agg(jsonb_build_object('milestoneId',x->>'milestoneId','amountCents',x->>'amountCents','description',x->>'description') ORDER BY x->>'milestoneId'),'[]'::jsonb) FROM jsonb_array_elements(c.before_state->'stages') x WHERE (c.kind='variation' AND x->>'milestoneId'=c.milestone_id::text) OR (c.kind='cancel_remaining' AND (x->>'eligible')::boolean))) ORDER BY c.created_at,c.change_id) FROM securepay_private.contract_changes c WHERE c.tenant_id=t AND c.plan_id=z),'[]'::jsonb))
 $$;
 CREATE FUNCTION securepay_private.payer_contract_view(t uuid,z uuid) RETURNS jsonb
  LANGUAGE sql VOLATILE SECURITY DEFINER SET search_path=pg_catalog AS $$
@@ -119,9 +121,9 @@ ALTER FUNCTION securepay_private.contract_state(uuid,uuid) OWNER TO securepay_co
 REVOKE ALL ON FUNCTION securepay_private.contract_state(uuid,uuid) FROM PUBLIC;
 ALTER FUNCTION securepay_private.change_hash(uuid,uuid,uuid,text,uuid,bigint,text,text,text,bigint,bigint) OWNER TO securepay_context_owner;
 REVOKE ALL ON FUNCTION securepay_private.change_hash(uuid,uuid,uuid,text,uuid,bigint,text,text,text,bigint,bigint) FROM PUBLIC;
-ALTER FUNCTION securepay_private.offer_contract_change(uuid,uuid,uuid,uuid,text,uuid,bigint,text,text,bigint,text) OWNER TO securepay_context_owner;
-REVOKE ALL ON FUNCTION securepay_private.offer_contract_change(uuid,uuid,uuid,uuid,text,uuid,bigint,text,text,bigint,text) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION securepay_private.offer_contract_change(uuid,uuid,uuid,uuid,text,uuid,bigint,text,text,bigint,text) TO securepay_completion_runtime;
+ALTER FUNCTION securepay_private.offer_contract_change(uuid,uuid,uuid,uuid,text,uuid,bigint,text,text,text,bigint,text) OWNER TO securepay_context_owner;
+REVOKE ALL ON FUNCTION securepay_private.offer_contract_change(uuid,uuid,uuid,uuid,text,uuid,bigint,text,text,text,bigint,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION securepay_private.offer_contract_change(uuid,uuid,uuid,uuid,text,uuid,bigint,text,text,text,bigint,text) TO securepay_completion_runtime;
 ALTER FUNCTION securepay_private.accept_contract_change(uuid,uuid,uuid,text,bigint) OWNER TO securepay_context_owner;
 REVOKE ALL ON FUNCTION securepay_private.accept_contract_change(uuid,uuid,uuid,text,bigint) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION securepay_private.accept_contract_change(uuid,uuid,uuid,text,bigint) TO securepay_payer_runtime;
