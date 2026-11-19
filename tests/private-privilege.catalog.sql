@@ -21,6 +21,7 @@ BEGIN
     'private.site_payroll_summary(uuid,uuid,date,date)','private.read_calculation_summary(uuid,uuid)',
     'private.verify_security_catalog()','private.verify_startup_signing_key(text,bigint,text,text)','private.admit_actor_request(uuid)','private.lock_tenant_available(uuid)',
     'private.api_privacy_rights_case(uuid,uuid,text,text,bigint,bigint,text,bigint,text,text,text,text,text,text)',
+    'private.api_shared_cost_correction_step(uuid,text,uuid,uuid,uuid,jsonb,text,text,text,bigint,bigint,text,bigint,text,text,text)',
     'private.api_shared_cost_step(uuid,text,uuid,uuid,jsonb,text,text,text,bigint,bigint,text,bigint,text,text,text)',
     'private.api_shared_cost_status(uuid,uuid,text,text,bigint,bigint,text,bigint,text,text,text,text,uuid)',
     'private.api_supplier_cost_step(uuid,uuid,uuid,text,text,text,text,text,bigint,bigint,text,bigint,text,text,text)',
