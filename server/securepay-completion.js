@@ -7,7 +7,8 @@ import {createServer} from "node:http";
 import {fileURLToPath} from "node:url";
 import {createPayerTokenVerifier} from "./securepay-router.js";
 import {authoritySecrets} from "./securepay-gateway.js";
-import {ownerCompletionPage,ownerQuotePage,ownerContractPage,sendPortalPage} from "./securepay-portal-page.js";
+import {ownerCompletionPage,ownerQuotePage,ownerContractPage,ownerCancellationPage,sendPortalPage} from "./securepay-portal-page.js";
+import {projectFundedCancellation} from "./securepay-funded-cancellation-view.js";
 import {projectContract} from "./securepay-contract-view.js";
 import {makeWorkCompletionOwner} from "../securepay/db/work-completion.mjs";
 import {makeEvidenceScanner,clamavScanner,jpegNormalizer} from "../securepay/db/evidence-scanner.mjs";
@@ -20,12 +21,13 @@ export function createCompletionRouter({enabled=false,tenantId,subject,verifyTok
  if(!enabled)return router;
  if(!uuid.test(tenantId)||typeof subject!=="string"||!subject||typeof verifyToken!=="function"||!owner)throw Error("Completion authority unavailable");
  router.use(rateLimit({windowMs:60000,limit:30,standardHeaders:true,legacyHeaders:false}));
+ router.get("/cancellations",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,ownerCancellationPage()));
  router.get("/contracts",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,ownerContractPage()));
  router.get("/quotes",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,ownerQuotePage()));
  router.get("/upload",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,ownerCompletionPage()));
  let uploading=false;
  router.post("/:milestoneId/:action",async(req,res,next)=>{
-  if(req.originalUrl.includes("?")||!uuid.test(req.params.milestoneId)||!["status","start","upload","submit","quote-status","publish-quote","offer-plan","withdraw-plan","contract-status","offer-change","withdraw-change"].includes(req.params.action))return res.status(404).json({error:"Not found"});
+  if(req.originalUrl.includes("?")||!uuid.test(req.params.milestoneId)||!["status","start","upload","submit","quote-status","publish-quote","offer-plan","withdraw-plan","contract-status","offer-change","withdraw-change","funded-cancellation-status","offer-funded-cancellation","withdraw-funded-cancellation","ack-negotiated"].includes(req.params.action))return res.status(404).json({error:"Not found"});
   try{
    const token=req.headers.authorization?.match(/^Bearer ([^\s]{1,8192})$/i)?.[1];
    if(!token)return res.status(401).json({error:"Authentication required"});
@@ -49,6 +51,26 @@ export function createCompletionRouter({enabled=false,tenantId,subject,verifyTok
   const {milestoneId,action}=req.params,body=req.body,scope={tenantId,milestoneId};
   try{
    let result;
+   if(["funded-cancellation-status","offer-funded-cancellation","withdraw-funded-cancellation","ack-negotiated"].includes(action)){
+    const planId=milestoneId;
+    if(action==="funded-cancellation-status"){
+     if(!exact(body,[]))return res.status(400).json({error:"Invalid request"});
+     result=await owner.fundedCancellationStatus({tenantId,planId});
+    }else if(action==="offer-funded-cancellation"){
+     if(!exact(body,["milestoneId","payoutCents","refundCents","reason","stateDigest"])||typeof body.milestoneId!=="string"||!uuid.test(body.milestoneId)||!Number.isSafeInteger(body.payoutCents)||body.payoutCents<0||!Number.isSafeInteger(body.refundCents)||body.refundCents<=0||typeof body.reason!=="string"||body.reason.trim().length<10||body.reason.length>2000||body.reason.includes("\0")||typeof body.stateDigest!=="string"||!hex.test(body.stateDigest))return res.status(400).json({error:"Invalid request"});
+     result=await owner.offerFundedCancellation({tenantId,planId,...body});
+    }else if(action==="withdraw-funded-cancellation"){
+     if(!exact(body,["offerId"])||typeof body.offerId!=="string"||!uuid.test(body.offerId))return res.status(400).json({error:"Invalid request"});
+     result=await owner.withdrawFundedCancellation({tenantId,planId,offerId:body.offerId});
+    }else{
+     if(!exact(body,["offerId","decisionId","payoutCents","refundCents"])||![body.offerId,body.decisionId].every(x=>typeof x==="string"&&uuid.test(x))||![body.payoutCents,body.refundCents].every(x=>Number.isSafeInteger(x)&&x>=0))return res.status(400).json({error:"Invalid request"});
+     result=await owner.acknowledgeFundedCancellation({tenantId,planId,...body});
+    }
+    if(!result?.ok)return res.status(403).json({error:"Authorization denied"});
+    if(action==="funded-cancellation-status")return res.json({mode:"sandbox",moneyMoved:false,cancellation:projectFundedCancellation(result.view,planId)});
+    if(action==="offer-funded-cancellation")return res.status(201).json({mode:"sandbox",moneyMoved:false,offer:result.offer});
+    return res.json({mode:"sandbox",moneyMoved:false,status:action==="ack-negotiated"?"decision_acknowledged":"withdrawn"});
+   }
    if(["contract-status","offer-change","withdraw-change"].includes(action)){
     const planId=milestoneId;
     if(action==="contract-status"){
