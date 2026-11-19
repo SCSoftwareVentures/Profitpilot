@@ -10,6 +10,7 @@ import {deriveCommandKey,reserveSigned,changePinSigned} from "./signed-commands.
 import {createRecoveryVerifier,issueRecoveryGrant} from "./recovery-grant.mjs";
 import {makeNotificationWorker} from "./notification-worker.mjs";
 import {makeSandboxProvider} from "./sandbox-provider.mjs";
+import {makeDisputeActor,makeSettlementAuthorizer,makeSettlementProvider} from "./dispute-settlement.mjs";
 import {verifyPinCredential} from "../domain/pin-credential.mjs";
 import {readFile} from "node:fs/promises";
 import pg from "pg";
@@ -26,9 +27,9 @@ const pool=new pg.Pool({connectionString:url.href,max:8,connectionTimeoutMillis:
 const payerSigningKey=randomBytes(32);
 const recoveryKey=randomBytes(32);
 const providerKey=randomBytes(32);
-let payerPool, notificationPool, providerPool, provider;
+let payerPool, notificationPool, providerPool, provider, disputePool, settlementPool;
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(key_id,secret) VALUES('primary',$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(key_id,secret) VALUES('primary',$1)",[deriveCommandKey(pepper)]);
@@ -47,13 +48,21 @@ before(async()=>{
   providerPool=new pg.Pool({connectionString:providerUrl.href,max:4,connectionTimeoutMillis:5000,statement_timeout:10000});
   await pool.query("INSERT INTO securepay_private.provider_key(key_id,secret) VALUES('primary',$1)",[providerKey]);
   provider=makeSandboxProvider({pool:providerPool,key:providerKey});
+  async function rolePool(role){
+   const password=randomBytes(32).toString("hex");
+   await pool.query("ALTER ROLE "+role+" LOGIN PASSWORD '"+password+"'");
+   const u=new URL(url);u.username=role;u.password=password;
+   return new pg.Pool({connectionString:u.href,max:4,connectionTimeoutMillis:5000,statement_timeout:10000});
+  }
+  disputePool=await rolePool("securepay_dispute_runtime");
+  settlementPool=await rolePool("securepay_settlement_runtime");
   await pool.query("CREATE TABLE securepay_ci_staff_only(secret text); INSERT INTO securepay_ci_staff_only VALUES ('fixture')");
   // Fixture admin bypasses RLS solely to exercise transaction semantics.
   // No permissive policies are installed; restricted role tested below.
   await pool.query("CREATE ROLE securepay_ci_restricted NOLOGIN NOBYPASSRLS");
   await pool.query("GRANT SELECT, INSERT, UPDATE ON securepay_milestones, securepay_release_requests, securepay_release_proofs, securepay_customer_pins, securepay_payer_identities, securepay_pin_change_grants TO securepay_ci_restricted");
 });
-after(async()=>{if(providerPool)await providerPool.end();if(notificationPool)await notificationPool.end();if(payerPool)await payerPool.end();await pool.end();});
+after(async()=>{if(disputePool)await disputePool.end();if(settlementPool)await settlementPool.end();if(providerPool)await providerPool.end();if(notificationPool)await notificationPool.end();if(payerPool)await payerPool.end();await pool.end();});
 async function fixture(status="approved",tenantId=randomUUID()) {
   const milestoneId=randomUUID(), customerId=randomUUID();
   await pool.query("INSERT INTO securepay_milestones(id,tenant_id,job_id,amount_cents,status) VALUES($1,$2,$3,5000,$4)",
@@ -723,4 +732,89 @@ test("provider hold blocks pending dispatch; failed provider operation freezes r
  const reconciliation=await pool.query("SELECT reason FROM securepay_private.provider_reconciliation WHERE tenant_id=$1 AND milestone_id=$2 ORDER BY opened_at",[other.tenantId,other.milestoneId]);
  assert.deepEqual(reconciliation.rows.map(r=>r.reason),["hold_after_dispatch","provider_failure"]);
  assert.equal((await state(other)).status,"release_pending");
+});
+
+async function disputeFixture(){
+ const s=await providerPayer({funded:true}),caseId=randomUUID(),settlementId=randomUUID();
+ const scope={tenantId:s.tenantId,milestoneId:s.milestoneId,caseId};
+ async function actor(role,actorId=randomUUID()){
+  const key=randomBytes(32);
+  await pool.query("INSERT INTO securepay_private.dispute_actors(tenant_id,actor_id,role,secret) VALUES($1,$2,$3,$4)",[s.tenantId,actorId,role,key]);
+  return {actorId,key,service:makeDisputeActor({pool:disputePool,key,actorId})};
+ }
+ const customer=await actor("customer",s.customerId),owner=await actor("owner"),reviewer=await actor("reviewer"),second=await actor("reviewer"),authorizer=await actor("settlement");
+ await pool.query("INSERT INTO securepay_private.dispute_parties(tenant_id,milestone_id,owner_id) VALUES($1,$2,$3)",[s.tenantId,s.milestoneId,owner.actorId]);
+ const call=(actor,action,details,extra={})=>actor.service.action({...scope,action,details,...extra});
+ const digest=randomBytes(32).toString("hex"),amounts={payoutCents:3000,refundCents:2000};
+ const settlement={...scope,settlementId,...amounts};
+ const approval=makeSettlementAuthorizer({pool:settlementPool,key:authorizer.key,actorId:authorizer.actorId});
+ const confirm=makeSettlementProvider({pool:providerPool,key:providerKey});
+ return {s,scope,settlement,customer,owner,reviewer,second,authorizer,call,digest,amounts,approval,confirm};
+}
+const openCase=d=>d.call(d.customer,"open","moderate",{evidenceDigest:d.digest});
+const evidence=d=>d.call(d.owner,"evidence","Owner supporting material",{evidenceDigest:d.digest});
+const decide=(d,amounts=d.amounts)=>d.call(d.reviewer,"decide","Reasoned provisional decision",{...amounts,evidenceDigest:d.digest});
+const finalize=(d,amounts=d.amounts)=>d.call(d.second,"finalize","Independent final review",{...amounts,evidenceDigest:d.digest});
+test("independent dispute hold blocks ordinary dispatch and requires both parties' evidence and separate final reviewer",async()=>{
+ const d=await disputeFixture(),r=await reserveProvider(d.s);assert.equal(r.ok,true);
+ assert.equal((await d.call(d.owner,"open","moderate",{evidenceDigest:d.digest})).ok,false);
+ assert.equal((await openCase(d)).ok,true);
+ assert.equal((await state(d.s)).status,"disputed");
+ assert.equal((await provider.beginDispatch({...d.s,requestId:r.releaseRequestId})).ok,false);
+ assert.equal((await reserveProvider(d.s)).ok,false);
+ assert.equal((await decide(d)).ok,false);
+ assert.equal((await evidence(d)).ok,true);
+ assert.equal((await d.call(d.owner,"decide","Owner cannot adjudicate",{...d.amounts,evidenceDigest:d.digest})).ok,false);
+ assert.equal((await decide(d,{payoutCents:3000,refundCents:2500})).ok,false);
+ assert.equal((await decide(d)).ok,true);
+ assert.equal((await d.approval.authorize(d.settlement)).ok,false);
+ assert.equal((await finalize(d)).ok,false);
+ assert.equal((await d.call(d.customer,"ack","Customer acknowledges")).ok,true);
+ assert.equal((await d.call(d.owner,"ack","Owner acknowledges")).ok,true);
+ assert.equal((await d.call(d.reviewer,"finalize","Same reviewer forbidden",{...d.amounts,evidenceDigest:d.digest})).ok,false);
+ assert.equal((await finalize(d)).ok,true);
+ assert.equal((await state(d.s)).status,"disputed");
+ assert.equal((await d.confirm.confirm({...d.settlement,receipt:randomUUID()})).ok,false);
+ await assert.rejects(disputePool.query("SELECT secret FROM securepay_private.dispute_actors"),e=>e.code==="42501");
+});
+test("appeal requires both parties' additional evidence; separate settlement and provider receipt enforce exact monetary split",async()=>{
+ const d=await disputeFixture();
+ assert.equal((await openCase(d)).ok,true);assert.equal((await evidence(d)).ok,true);assert.equal((await decide(d)).ok,true);
+ assert.equal((await d.call(d.customer,"appeal","Customer challenges outcome",{evidenceDigest:d.digest})).ok,true);
+ const revised={payoutCents:2000,refundCents:3000};
+ assert.equal((await finalize(d,revised)).ok,false);
+ assert.equal((await d.call(d.owner,"evidence","Owner appeal response",{evidenceDigest:d.digest})).ok,true);
+ assert.equal((await finalize(d,revised)).ok,true);
+ assert.equal((await d.approval.authorize(d.settlement)).ok,false);
+ const settlement={...d.settlement,...revised};
+ const forged=makeSettlementAuthorizer({pool:settlementPool,actorId:d.reviewer.actorId,key:d.reviewer.key});
+ assert.equal((await forged.authorize(settlement)).ok,false);
+ const auth=await Promise.all([d.approval.authorize(settlement),d.approval.authorize(settlement)]);
+ assert.equal(auth.filter(x=>x.ok).length,1);
+ const receipt=randomUUID();
+ assert.equal((await d.confirm.confirm({...settlement,receipt})).ok,false);
+ const dispatch=await Promise.all([d.confirm.dispatch(settlement),d.confirm.dispatch(settlement)]);
+ assert.equal(dispatch.filter(x=>x.ok).length,1);
+ assert.equal((await d.confirm.confirm({...settlement,receipt,refundCents:2999})).ok,false);
+ const fakeProvider=makeSettlementProvider({pool:providerPool,key:randomBytes(32)});
+ assert.equal((await fakeProvider.confirm({...settlement,receipt})).ok,false);
+ const results=await Promise.all([d.confirm.confirm({...settlement,receipt}),d.confirm.confirm({...settlement,receipt})]);
+ assert.ok(results.every(x=>x.ok&&!x.moneyMoved));
+ assert.equal((await d.confirm.confirm({...settlement,receipt:randomUUID()})).ok,false);
+ assert.equal((await state(d.s)).status,"settled");
+ const {rows:[r]}=await pool.query("SELECT status,payout_cents,refund_cents FROM securepay_private.dispute_settlements WHERE settlement_id=$1",[settlement.settlementId]);
+ assert.deepEqual(r,{status:"confirmed",payout_cents:"2000",refund_cents:"3000"});
+});
+test("provider hold cannot be overridden by dispute finality; cross-tenant and replayed actions fail closed",async()=>{
+ const d=await disputeFixture(),eventId=randomUUID();
+ assert.equal((await d.call(d.customer,"open","serious",{evidenceDigest:d.digest,eventId,tenantId:randomUUID()})).ok,false);
+ assert.equal((await d.call(d.customer,"open","serious",{evidenceDigest:d.digest,eventId})).ok,true);
+ assert.equal((await d.call(d.customer,"open","serious",{evidenceDigest:d.digest,eventId})).ok,false);
+ assert.equal((await evidence(d)).ok,true);assert.equal((await decide(d)).ok,true);
+ assert.equal((await d.call(d.customer,"ack","Accepted")).ok,true);
+ assert.equal((await d.call(d.owner,"ack","Accepted")).ok,true);
+ assert.equal((await finalize(d)).ok,true);
+ assert.equal((await providerEvent(d.s,"held")).status,"applied");
+ assert.equal((await d.approval.authorize(d.settlement)).ok,false);
+ assert.equal((await state(d.s)).status,"disputed");
 });
