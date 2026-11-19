@@ -2545,7 +2545,8 @@ test("correction assessment freezes new transfers and rejects stale state until 
  const p=await f.packet(fresh.correctionId);
  const invalid=await f.endorseCorrection(reconciliationPool,p,f.signCorrectionProvider(p,providerKey),"0".repeat(64),f.signCorrectionReconciler(p,f.two.actorId,f.two.key));assert.equal(invalid.ok,false);
  const result=await Promise.all([f.endorse(p),f.endorse(p)]);assert.equal(result.filter(x=>x.ok).length,1);
- assert.equal((await f.admin.read(fresh.correctionId)).status,"endorsed");
+ const record=await f.admin.read(fresh.correctionId);assert.equal(record.status,"endorsed");assert.match(record.endorsementDigest,/^[a-f0-9]{64}$/);
+ assert.equal(await f.request({payoutCents:1500,refundCents:3500}),null);
  assert.equal((await d.confirm.dispatch({...s,kind:"refund"})).ok,false);
  assert.deepEqual(await balanceFor(d.s),{funded_cents:"5000",payout_cents:"3000",refund_cents:"0",remaining_cents:"2000"});
  assert.equal((await verifyAuditChain(auditPool,f.t)).ok,true);
@@ -2565,4 +2566,22 @@ test("settled correction assessment records possible external recovery without r
  await assert.rejects(reconciliationPool.query("UPDATE securepay_private.settlement_correction_cases SET status='endorsed'"),e=>e.code==="42501");
  await assert.rejects(adminPool.query("SELECT * FROM securepay_private.financial_journal"),e=>e.code==="42501");
  assert.equal((await verifyAuditChain(auditPool,t)).ok,true);
+});
+
+test("correction dashboard HTTP boundary permits only the managed-case administrator and never endorsement or payment",async()=>{
+ const {createGovernanceRouter}=await import("../../server/securepay-governance.js"),{createServer}=await import("node:http"),{default:express}=await import("express");
+ const f=await correctionFixture(),{d,caseId,one,two}=f,app=express(),verifyToken=async token=>({subject:token});
+ app.use("/admin",createGovernanceRouter({enabled:true,role:"administrator",subject:"admin",verifyToken,actor:{requestCorrection:f.admin.request,readCorrection:f.admin.read}}));
+ app.use("/settlement",createGovernanceRouter({enabled:true,role:"settlement",subject:"settlement",verifyToken,actor:f.authorizer}));
+ const server=createServer(app);await new Promise(r=>server.listen(0,"127.0.0.1",r));try{
+  const root="http://127.0.0.1:"+server.address().port,post=(role,route,body,token=role)=>fetch(root+"/"+role+"/"+route,{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify(body)});
+  assert.equal((await fetch(root+"/admin/correction")).status,200);assert.equal((await fetch(root+"/settlement/correction")).status,404);
+  const b={caseId,actorOne:one.actorId,actorTwo:two.actorId,correctionId:randomUUID(),payoutCents:1000,refundCents:4000,reason:"Independent review of proposed correction"};
+  assert.equal((await post("settlement","correction-request",b)).status,404);assert.equal((await post("admin","correction-request",b,"other")).status,403);
+  assert.equal((await post("admin","correction-request",{...b,refundCents:3999})).status,403);
+  const response=await post("admin","correction-request",b);assert.equal(response.status,200);assert.equal((await response.json()).moneyMoved,false);
+  const read=await post("admin","correction-read",{correctionId:b.correctionId});assert.equal(read.status,200);assert.equal((await read.json()).correction.status,"pending");
+  assert.equal((await post("admin","correction-endorse",{})).status,404);
+  assert.equal((await d.confirm.dispatch({...f.s,kind:"payout"})).ok,false);assert.equal((await balanceFor(d.s)).remaining_cents,"5000");
+ }finally{await new Promise(r=>server.close(r));}
 });
