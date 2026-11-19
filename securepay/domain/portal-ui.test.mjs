@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {Script,createContext} from "node:vm";
 import {createHash,randomUUID} from "node:crypto";
-import {customerPortalPage,ownerDashboardPage,customerQuotePage,ownerQuotePage,customerContractPage,ownerContractPage,customerCancellationPage,reviewerPage} from "../../server/securepay-portal-page.js";
+import {customerPortalPage,ownerDashboardPage,customerQuotePage,ownerQuotePage,customerContractPage,ownerContractPage,customerCancellationPage,reviewerPage,disputeAdminPage,settlementAuthorizationPage} from "../../server/securepay-portal-page.js";
 import {createPayerTokenVerifier} from "../../server/securepay-router.js";
 import {generateKeyPair,SignJWT} from "jose";
 function ui(page,responses){
@@ -132,4 +132,19 @@ test("reviewer page requires photo loading and explicit acknowledgement before b
  h.get("payout").value="30";h.get("refund").value="19.99";h.get("reason").value="Reasoned review of evidence";await h.fire("submit");assert.equal(h.calls.length,3);
  h.get("refund").value="20";await h.fire("submit");assert.deepEqual(JSON.parse(h.calls[3].opts.body),{caseId,action:"decide",reason:"Reasoned review of evidence",payoutCents:3000,refundCents:2000,stateDigest});
  assert.equal(h.get("details").hidden,true);assert.match(h.get("message").textContent,/No payment authorised/);
+});
+
+test("settlement dashboard binds explicit consent to the exact final decision and never reports money movement",async()=>{
+ const caseId=randomUUID(),digest="a".repeat(64),review={stateDigest:digest,case:{caseId,caseStatus:"final",fundingStatus:"funded",amountCents:"5000",remainingCents:"5000",payoutCents:"3000",refundCents:"2000",independent:true,journalVerified:true,unresolved:false,decision:{reason:"Independent final decision",digest},legs:[]}};
+ const response=x=>({code:200,data:{mode:"sandbox",moneyMoved:false,...x}});
+ const h=ui(settlementAuthorizationPage(),[response({cases:[{caseId,severity:"moderate",status:"final",eligible:true,declared:true}]}),response({review}),response({status:"settlement_authorized",settlementId:randomUUID()}),response({cases:[]})]);
+ h.get("token").value="fixture";await h.fire("load");h.get("case-ref").value=caseId;await h.fire("read");
+ assert.equal(h.get("authorize").disabled,true);assert.match(h.get("summary").children[3].textContent,/AUD \$30.00/);
+ h.get("agree").checked=true;await h.fire("agree","change");assert.equal(h.get("authorize").disabled,false);
+ await h.fire("authorize");assert.deepEqual(JSON.parse(h.calls[2].opts.body),{caseId,payoutCents:3000,refundCents:2000,stateDigest:digest});assert.match(h.get("message").textContent,/No money moved/);assert.equal(h.get("authorize").disabled,true);
+});
+test("administrator case actions require rationale and exact actor identifier",async()=>{
+ const caseId=randomUUID(),target=randomUUID(),response=x=>({code:200,data:{mode:"sandbox",moneyMoved:false,...x}}),h=ui(disputeAdminPage(),[response({cases:[]}),response({status:"recorded"}),response({cases:[]})]);
+ h.get("token").value="fixture";await h.fire("load");h.get("case-ref").value=caseId;h.get("op").value="assign";h.get("target").value=target;h.get("reason").value="short";await h.fire("apply");assert.equal(h.calls.length,1);
+ h.get("reason").value="Documented independent reviewer assignment";await h.fire("apply");assert.deepEqual(JSON.parse(h.calls[1].opts.body),{caseId,target,action:"assign",reason:"Documented independent reviewer assignment"});
 });
