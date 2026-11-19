@@ -7,6 +7,23 @@ export function makeWorkCompletionOwner({pool,actorId,key,scanner}){
  if(!pool?.query||!Buffer.isBuffer(key)||key.length!==32||typeof scanner?.attest!=="function")throw Error("Completion authority unavailable");
  const mac=args=>createHmac("sha256",key).update(args.join(":")).digest("hex");
  return Object.freeze({
+  async fundedCancellationStatus({tenantId,planId}){
+   ids(tenantId,planId);const exp=expiry(),args=[tenantId,planId,actorId,exp];
+   const {rows:[r]}=await pool.query("SELECT securepay_private.owner_funded_cancel_view($1,$2,$3,$4,$5) AS view",[...args,mac(["sp-funded-cancel-view-v1",...args])]);
+   return r?.view?{ok:true,view:r.view}:{ok:false};
+  },
+  async offerFundedCancellation({offerId=randomUUID(),tenantId,planId,milestoneId,payoutCents,refundCents,reason,stateDigest}){
+   ids(offerId,tenantId,planId,milestoneId);
+   if(!Number.isSafeInteger(payoutCents)||payoutCents<0||!Number.isSafeInteger(refundCents)||refundCents<=0||typeof reason!=="string"||reason.trim().length<10||reason.length>2000||reason.includes("\0")||typeof stateDigest!=="string"||!/^[a-f0-9]{64}$/.test(stateDigest))throw Error("Invalid funded cancellation");
+   const exp=expiry(),args=[offerId,tenantId,planId,milestoneId,actorId,payoutCents,refundCents,reason,stateDigest,exp];
+   const {rows:[r]}=await pool.query("SELECT securepay_private.offer_funded_cancel($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) AS offer",[...args,mac(["sp-funded-cancel-offer-v1",offerId,tenantId,planId,milestoneId,actorId,payoutCents,refundCents,Buffer.from(reason).toString("hex"),stateDigest,exp])]);
+   return r?.offer?{ok:true,offer:r.offer}:{ok:false};
+  },
+  async withdrawFundedCancellation({tenantId,planId,offerId}){
+   ids(tenantId,planId,offerId);const exp=expiry(),args=[tenantId,planId,offerId,actorId,exp];
+   const {rows:[r]}=await pool.query("SELECT securepay_private.withdraw_funded_cancel($1,$2,$3,$4,$5,$6) AS ok",[...args,mac(["sp-funded-cancel-withdraw-v1",...args])]);
+   return {ok:r?.ok===true,moneyMoved:false};
+  },
   async contractStatus({tenantId,planId}){
    ids(tenantId,planId);const exp=expiry(),args=[tenantId,planId,actorId,exp];
    const {rows:[r]}=await pool.query("SELECT securepay_private.owner_contract_view($1,$2,$3,$4,$5) AS view",[...args,mac(["sp-contract-view-v1",...args])]);
