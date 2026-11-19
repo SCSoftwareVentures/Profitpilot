@@ -525,3 +525,70 @@ test("expired leases cannot acknowledge reclaimed notifications; exhausted retri
  assert.ok(r.dead_lettered_at);assert.equal(r.delivered_at,null);
  assert.equal((await notificationPool.query("SELECT * FROM securepay_private.claim_notification($1)",[randomUUID()])).rowCount,0);
 });
+
+test("separate authority process verifies JWT and PIN; gateway has no signing keys or payer database credentials",async()=>{
+ const {default:express}=await import("express");
+ const {createServer}=await import("node:http");
+ const {generateKeyPair,exportJWK,SignJWT}=await import("jose");
+ const {spawn}=await import("node:child_process");
+ const {mkdtemp,rm}=await import("node:fs/promises");
+ const {tmpdir}=await import("node:os");
+ const {join}=await import("node:path");
+ const {createSecurePayGateway,authoritySecrets}=await import("../../server/securepay-gateway.js");
+ const s=await identityFixture();
+ await pool.query("UPDATE securepay_milestones SET payer_customer_id=$2 WHERE id=$1",[s.milestoneId,s.customerId]);
+ const g=await changeGrant(s);
+ const {publicKey,privateKey}=await generateKeyPair("ES256");
+ const jwk=await exportJWK(publicKey);jwk.kid="fixture";jwk.alg="ES256";
+ const jwks=createServer((req,res)=>{res.setHeader("content-type","application/json");res.end(JSON.stringify({keys:[jwk]}));});
+ const listen=server=>new Promise(r=>server.listen(0,"127.0.0.1",r));
+ const close=server=>new Promise(r=>server.close(r));
+ await listen(jwks);
+ const dir=await mkdtemp(join(tmpdir(),"sp-auth-")),socket=join(dir,"authority.sock");
+ const gatewayEnv={NODE_ENV:"test",SECUREPAY_SANDBOX_ENABLED:"true",SECUREPAY_AUTHORITY_SOCKET:socket};
+ for(const secret of authoritySecrets)assert.throws(()=>createSecurePayGateway({...gatewayEnv,[secret]:"forbidden"}),/secrets forbidden/);
+ const issuer="https://authority-fixture.invalid/",audience="securepay-customer",acr="fixture-mfa";
+ const child=spawn(process.execPath,["server/securepay-authority.js"],{env:{
+  PATH:process.env.PATH,NODE_ENV:"test",SECUREPAY_SANDBOX_ENABLED:"true",SECUREPAY_AUTHORITY_SOCKET:socket,
+  SECUREPAY_AUTH_ISSUER:issuer,SECUREPAY_AUTH_AUDIENCE:audience,SECUREPAY_AUTH_REQUIRED_ACR:acr,
+  SECUREPAY_AUTH_JWKS_URL:"http://127.0.0.1:"+jwks.address().port+"/jwks",
+  SECUREPAY_DATABASE_URL:payerPool.options.connectionString,SECUREPAY_CONTEXT_HMAC_SECRET:payerSigningKey.toString("hex"),SECUREPAY_PIN_PEPPER:pepper.toString("hex")
+ },stdio:["ignore","pipe","pipe"]});
+ const stopped=new Promise(r=>child.once("exit",r));
+ const app=express();app.use("/v1/securepay",createSecurePayGateway(gatewayEnv));
+ const gateway=createServer(app);
+ try{
+  await new Promise((resolve,reject)=>{
+   let log="";const timer=setTimeout(()=>reject(Error("authority startup timeout")),5000);
+   child.stdout.on("data",chunk=>{log+=chunk.toString();if(log.includes("authority ready")){clearTimeout(timer);resolve();}});
+   child.once("exit",()=>{clearTimeout(timer);reject(Error("authority exited before ready"));});
+   child.once("error",e=>{clearTimeout(timer);reject(e);});
+  });
+  await listen(gateway);
+  const base="http://127.0.0.1:"+gateway.address().port+"/v1/securepay/tenants/"+s.tenantId;
+  const token=async(sub=s.subject,aud=audience)=>new SignJWT({acr,auth_time:Math.floor(Date.now()/1000)})
+   .setProtectedHeader({alg:"ES256",kid:"fixture"}).setIssuer(issuer).setAudience(aud).setSubject(sub).setIssuedAt().setExpirationTime("5m").sign(privateKey);
+  const post=(path,body,bearer)=>fetch(base+path,{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+bearer},body:JSON.stringify(body)});
+  const bearer=await token(),pinBody={pin:s.pin,purpose:"enroll",grantRef:g.grantRef};
+  assert.equal((await post("/pin",pinBody,await token(s.subject,"staff"))).status,401);
+  assert.equal((await post("/pin",pinBody,await token("unknown"))).status,403);
+  assert.equal((await post("/pin?debug=true",pinBody,bearer)).status,404);
+  assert.equal((await post("/pin",{...pinBody,customerId:s.customerId},bearer)).status,400);
+  assert.equal((await post("/pin",pinBody,bearer)).status,200);
+  const route="/milestones/"+s.milestoneId+"/reserve",body={pin:s.pin,expectedAmountCents:5000,idempotencyKey:randomUUID()};
+  assert.equal((await post(route,{...body,pin:"999999"},bearer)).status,403);
+  const response=await post(route,body,bearer);
+  assert.equal(response.status,202);
+  const receipt=await response.json();assert.equal(receipt.moneyMoved,false);assert.equal(receipt.amountCents,"5000");
+  assert.equal((await state(s)).requests,1);
+  assert.equal((await post(route,body,bearer)).status,403);
+  child.kill("SIGTERM");await stopped;
+  const unavailable=await post(route,body,bearer);assert.equal(unavailable.status,503);
+  assert.deepEqual(await unavailable.json(),{error:"SecurePay unavailable"});
+  assert.equal((await state(s)).requests,1);
+ }finally{
+  if(child.exitCode===null&&child.signalCode===null){child.kill("SIGKILL");await stopped;}
+  if(gateway.listening)await close(gateway);
+  await close(jwks);await rm(dir,{recursive:true,force:true});
+ }
+});
