@@ -100,7 +100,7 @@ export function createSecurePayRouter({enabled=false,verifyToken,service,takeBud
    const {tenantId,milestoneId}=req.params,r=await service.participant({identity:req.payerIdentity,tenantId,milestoneId,op,body:req.body});
    if(!r?.ok)return res.status(403).json({error:"Authorization denied"});
    return res.json({mode:"sandbox",moneyMoved:false,participant:projectParticipant(op,r.participant,milestoneId,"customer",req.body)});
-  }catch(e){return res.status(e.status===400?400:503).json({error:e.status===400?"Invalid request":"SecurePay unavailable"});}finally{res.locals.finishParticipantUpload?.();}
+  }catch(e){const status=e.status===400?400:e.message==="Payer context denied"?403:503;return res.status(status).json({error:status===400?"Invalid request":status===403?"Authorization denied":"SecurePay unavailable"});}finally{res.locals.finishParticipantUpload?.();}
  });
  for(const action of ["completion","photo","approve","reject","dispute"])router.post("/tenants/:tenantId/milestones/:milestoneId/"+action,handle(req=>service[action]({identity:req.payerIdentity,tenantId:req.params.tenantId,milestoneId:req.params.milestoneId,body:req.body})));
  router.post("/tenants/:tenantId/milestones/:milestoneId/view",handle(req=>service.view({identity:req.payerIdentity,tenantId:req.params.tenantId,milestoneId:req.params.milestoneId,body:req.body})));
