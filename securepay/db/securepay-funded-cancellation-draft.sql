@@ -83,8 +83,8 @@ BEGIN
  sh:=securepay_private.funded_cancel_state(t,z,mid);
  IF sh IS NULL OR sh<>o.state_digest OR securepay_private.funded_cancel_hash(v,t,z,mid,o.owner_id,c,payout,refund,o.reason,sh)<>h THEN RETURN false; END IF;
  -- Consent is evidence, not a final decision or transfer authorization.
- INSERT INTO securepay_private.dispute_cases(case_id,tenant_id,milestone_id,customer_id,owner_id,severity,status,customer_evidence,owner_evidence)
- VALUES(d,t,mid,c,o.owner_id,'moderate','open',true,true);
+ INSERT INTO securepay_private.dispute_cases(case_id,tenant_id,milestone_id,customer_id,owner_id,severity,status,customer_evidence,owner_evidence,owner_responded_at)
+ VALUES(d,t,mid,c,o.owner_id,'moderate','open',true,true,clock_timestamp());
  INSERT INTO securepay_private.dispute_events(event_id,case_id,actor_id,action,details,evidence_digest,payout_cents,refund_cents)
  VALUES(e,d,c,'negotiated_cancellation',o.reason,h,payout,refund);
  UPDATE securepay_private.funded_cancellation_offers SET status='accepted',case_id=d,accepted_at=clock_timestamp() WHERE offer_id=v;
@@ -209,6 +209,7 @@ BEGIN
     UPDATE securepay_private.dispute_cases SET status='final',final_reviewer=a,payout_cents=payout,refund_cents=refund WHERE case_id=d;
    ELSE RETURN false; END IF;
   ELSIF op IN ('ack','appeal') THEN
+   IF op='ack' AND EXISTS(SELECT 1 FROM securepay_private.funded_cancellation_offers WHERE case_id=d) THEN RETURN false; END IF;
    IF c.status<>'decided' OR payout IS NOT NULL OR refund IS NOT NULL OR length(btrim(details))=0
    OR NOT ((role_name='customer' AND a=c.customer_id) OR (role_name='owner' AND a=c.owner_id)) THEN RETURN false; END IF;
    IF op='appeal' THEN
@@ -243,5 +244,26 @@ END $$;
 ALTER FUNCTION securepay_private.payer_appeal_negotiated(uuid,uuid,uuid,uuid,uuid,text,text) OWNER TO securepay_context_owner;
 REVOKE ALL ON FUNCTION securepay_private.payer_appeal_negotiated(uuid,uuid,uuid,uuid,uuid,text,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION securepay_private.payer_appeal_negotiated(uuid,uuid,uuid,uuid,uuid,text,text) TO securepay_payer_runtime;
+
+CREATE FUNCTION securepay_private.owner_ack_negotiated(t uuid,z uuid,v uuid,e uuid,decision uuid,a uuid,payout bigint,refund bigint,expires bigint,sig text) RETURNS boolean
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE o securepay_private.funded_cancellation_offers%ROWTYPE;d securepay_private.dispute_cases%ROWTYPE;
+BEGIN
+ IF t IS NULL OR z IS NULL OR v IS NULL OR e IS NULL OR decision IS NULL OR a IS NULL OR payout IS NULL OR refund IS NULL OR securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-negotiated-ack-v1',t,z,v,e,decision,a,payout,refund,expires),expires,sig) IS DISTINCT FROM 'owner' THEN RETURN false; END IF;
+ SELECT * INTO o FROM securepay_private.funded_cancellation_offers WHERE tenant_id=t AND plan_id=z AND offer_id=v AND owner_id=a AND status='accepted';
+ IF NOT FOUND THEN RETURN false; END IF;
+ PERFORM 1 FROM public.securepay_milestones WHERE tenant_id=t AND id=o.milestone_id AND status='disputed' FOR UPDATE;
+ IF NOT FOUND THEN RETURN false; END IF;
+ SELECT * INTO d FROM securepay_private.dispute_cases WHERE case_id=o.case_id AND tenant_id=t AND owner_id=a AND status='decided' FOR UPDATE;
+ IF NOT FOUND OR d.owner_ack OR d.payout_cents<>payout OR d.refund_cents<>refund OR NOT EXISTS(SELECT 1 FROM securepay_private.dispute_events WHERE case_id=d.case_id AND event_id=decision AND action='decide' AND payout_cents=payout AND refund_cents=refund) THEN RETURN false; END IF;
+ UPDATE securepay_private.dispute_cases SET owner_ack=true WHERE case_id=d.case_id;
+ INSERT INTO securepay_private.dispute_events(event_id,case_id,actor_id,action,details,payout_cents,refund_cents)
+ VALUES(e,d.case_id,a,'ack','Owner acknowledged exact reasoned provisional decision',payout,refund);
+ RETURN true;
+EXCEPTION WHEN unique_violation THEN RETURN false;
+END $$;
+ALTER FUNCTION securepay_private.owner_ack_negotiated(uuid,uuid,uuid,uuid,uuid,uuid,bigint,bigint,bigint,text) OWNER TO securepay_context_owner;
+REVOKE ALL ON FUNCTION securepay_private.owner_ack_negotiated(uuid,uuid,uuid,uuid,uuid,uuid,bigint,bigint,bigint,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION securepay_private.owner_ack_negotiated(uuid,uuid,uuid,uuid,uuid,uuid,bigint,bigint,bigint,text) TO securepay_completion_runtime;
 
 COMMIT;
