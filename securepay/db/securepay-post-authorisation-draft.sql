@@ -12,7 +12,7 @@ CREATE TABLE securepay_private.post_auth_votes(
  review_id uuid NOT NULL REFERENCES securepay_private.post_auth_reviews(review_id),tenant_id uuid NOT NULL,case_id uuid NOT NULL,
  actor_id uuid NOT NULL,stage text NOT NULL CHECK(stage IN ('reviewer','authorizer')),outcome text NOT NULL CHECK(outcome IN ('reaffirm','stop')),
  state_digest text NOT NULL CHECK(state_digest ~ '^[a-f0-9]{64}$'),reason text NOT NULL CHECK(length(btrim(reason)) BETWEEN 10 AND 4000),
- recorded_at timestamptz NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(review_id,actor_id,state_digest)
+ recorded_at timestamptz NOT NULL DEFAULT clock_timestamp(),PRIMARY KEY(review_id,actor_id,state_digest,outcome)
 );
 ALTER TABLE securepay_private.post_auth_reviews OWNER TO securepay_context_owner;
 REVOKE ALL ON securepay_private.post_auth_reviews FROM PUBLIC,securepay_dispute_admin_runtime,securepay_reviewer_runtime,securepay_settlement_dashboard_runtime,securepay_dispute_runtime,securepay_settlement_runtime,securepay_provider_runtime;
