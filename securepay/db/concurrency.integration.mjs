@@ -17,6 +17,7 @@ import {makeSharedCustomerBudget} from "./shared-budget.mjs";
 import {createHash} from "node:crypto";
 import {deflateSync} from "node:zlib";
 import {verifyAuditChain} from "./audit-chain.mjs";
+import {prepareRecovery,signProviderRecovery,signReviewerRecovery,applyRecovery} from "./settlement-recovery.mjs";
 import {verifyPinCredential} from "../domain/pin-credential.mjs";
 import {readFile} from "node:fs/promises";
 import pg from "pg";
@@ -33,11 +34,11 @@ const pool=new pg.Pool({connectionString:url.href,max:8,connectionTimeoutMillis:
 const payerSigningKey=randomBytes(32);
 const recoveryKey=randomBytes(32);
 const providerKey=randomBytes(32);
-let payerPool, notificationPool, providerPool, provider, disputePool, settlementPool, escalationPool, auditPool, retentionPool;
+let payerPool, notificationPool, providerPool, provider, disputePool, settlementPool, escalationPool, auditPool, retentionPool, reconciliationPool;
 const scanKey=randomBytes(32);
 const scanner=makeEvidenceScanner({key:scanKey,scan:async()=>"clean"});
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(key_id,secret) VALUES('primary',$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(key_id,secret) VALUES('primary',$1)",[deriveCommandKey(pepper)]);
@@ -67,6 +68,7 @@ before(async()=>{
   escalationPool=await rolePool("securepay_escalation_runtime");
   auditPool=await rolePool("securepay_audit_runtime");
   retentionPool=await rolePool("securepay_retention_runtime");
+  reconciliationPool=await rolePool("securepay_reconciliation_runtime");
   await pool.query("INSERT INTO securepay_private.evidence_scan_keys(key_id,secret) VALUES('primary',$1)",[scanKey]);
   await pool.query("INSERT INTO securepay_private.evidence_keys(key_id,secret,write_enabled) VALUES('primary',$1,true)",[randomBytes(32)]);
   await pool.query("CREATE TABLE securepay_ci_staff_only(secret text); INSERT INTO securepay_ci_staff_only VALUES ('fixture')");
@@ -75,7 +77,7 @@ before(async()=>{
   await pool.query("CREATE ROLE securepay_ci_restricted NOLOGIN NOBYPASSRLS");
   await pool.query("GRANT SELECT, INSERT, UPDATE ON securepay_milestones, securepay_release_requests, securepay_release_proofs, securepay_customer_pins, securepay_payer_identities, securepay_pin_change_grants TO securepay_ci_restricted");
 });
-after(async()=>{if(retentionPool)await retentionPool.end();if(auditPool)await auditPool.end();if(escalationPool)await escalationPool.end();if(disputePool)await disputePool.end();if(settlementPool)await settlementPool.end();if(providerPool)await providerPool.end();if(notificationPool)await notificationPool.end();if(payerPool)await payerPool.end();await pool.end();});
+after(async()=>{if(reconciliationPool)await reconciliationPool.end();if(retentionPool)await retentionPool.end();if(auditPool)await auditPool.end();if(escalationPool)await escalationPool.end();if(disputePool)await disputePool.end();if(settlementPool)await settlementPool.end();if(providerPool)await providerPool.end();if(notificationPool)await notificationPool.end();if(payerPool)await payerPool.end();await pool.end();});
 async function fixture(status="approved",tenantId=randomUUID()) {
   const milestoneId=randomUUID(), customerId=randomUUID();
   await pool.query("INSERT INTO securepay_milestones(id,tenant_id,job_id,amount_cents,status) VALUES($1,$2,$3,5000,$4)",
@@ -1154,4 +1156,79 @@ test("late provider hold preserves already-dispatched receipt and blocks outstan
  assert.equal((await state(d.s)).status,"disputed");
  const r=await pool.query("SELECT reason FROM securepay_private.provider_reconciliation WHERE tenant_id=$1 AND milestone_id=$2",[scope.tenantId,scope.milestoneId]);
  assert.deepEqual(r.rows,[{reason:"hold_after_dispatch"}]);
+});
+
+async function reconciler(d){
+ const actorId=randomUUID(),key=randomBytes(32);
+ await pool.query("INSERT INTO securepay_private.dispute_actors(tenant_id,actor_id,role,secret) VALUES($1,$2,'reconciler',$3)",[d.scope.tenantId,actorId,key]);
+ return {actorId,key};
+}
+async function recoveryFixture(d,extra){
+ const one=await reconciler(d),two=await reconciler(d);
+ const packet=await prepareRecovery(reconciliationPool,{...d.settlement,...extra,actorOne:one.actorId,actorTwo:two.actorId,
+ evidenceDigest:randomBytes(32).toString("hex"),reason:"Independent synthetic provider statement reconciliation"});
+ const providerSig=signProviderRecovery(packet,providerKey),sig1=signReviewerRecovery(packet,one.actorId,one.key),sig2=signReviewerRecovery(packet,two.actorId,two.key);
+ return {packet,one,two,providerSig,sig1,sig2,apply:()=>applyRecovery(reconciliationPool,packet,providerSig,sig1,sig2)};
+}
+const balanceFor=async s=>(await auditPool.query("SELECT * FROM securepay_private.financial_balance($1,$2)",[s.tenantId,s.milestoneId])).rows[0];
+test("financial journal reconciles exact funding and individual receipts, no duplicate entries or direct runtime mutation",async()=>{
+ const d=await authorizedDispute();
+ assert.deepEqual(await balanceFor(d.s),{funded_cents:"5000",payout_cents:"0",refund_cents:"0",remaining_cents:"5000"});
+ const payout=await d.confirm.dispatch({...d.settlement,kind:"payout"}),receipt=randomUUID();
+ const event={...d.settlement,...payout,outcome:"confirmed",receipt};
+ assert.equal((await d.confirm.record(event)).status,"applied");
+ assert.equal((await d.confirm.record(event)).status,"duplicate");
+ assert.deepEqual(await balanceFor(d.s),{funded_cents:"5000",payout_cents:"3000",refund_cents:"0",remaining_cents:"2000"});
+ const refund=await d.confirm.dispatch({...d.settlement,kind:"refund"});
+ assert.equal((await d.confirm.record({...d.settlement,...refund,outcome:"confirmed",receipt:randomUUID()})).ok,true);
+ assert.deepEqual(await balanceFor(d.s),{funded_cents:"5000",payout_cents:"3000",refund_cents:"2000",remaining_cents:"0"});
+ assert.equal((await state(d.s)).status,"settled");
+ await assert.rejects(providerPool.query("DELETE FROM securepay_private.financial_journal"),e=>e.code==="42501");
+ const ordinary=await providerPayer({funded:true}),r=await reserveProvider(ordinary);
+ assert.equal((await provider.beginDispatch({...ordinary,requestId:r.releaseRequestId})).ok,true);
+ assert.equal((await providerEvent(ordinary,"released",{requestId:r.releaseRequestId,transactionRef:randomUUID()})).status,"applied");
+ assert.deepEqual(await balanceFor(ordinary),{funded_cents:"5000",payout_cents:"5000",refund_cents:"0",remaining_cents:"0"});
+});
+test("exhausted leg requires current provider statement and distinct independent approvals for one final retry",async()=>{
+ const d=await authorizedDispute({payoutCents:0,refundCents:5000});
+ let leg;
+ for(let attempt=1;attempt<=3;attempt++){
+  leg=await d.confirm.dispatch({...d.settlement,kind:"refund"});assert.equal(leg.attempt,attempt);
+  assert.equal((await d.confirm.record({...d.settlement,...leg,outcome:"not_executed"})).status,"applied");
+  if(attempt<3)assert.equal((await d.approval.retry({...d.settlement,...leg})).ok,true);
+ }
+ const rec=await recoveryFixture(d,{legId:leg.legId,action:"retry_once"});
+ assert.equal((await applyRecovery(reconciliationPool,rec.packet,rec.providerSig,rec.sig1,rec.sig1)).ok,false);
+ assert.equal((await applyRecovery(reconciliationPool,rec.packet,signProviderRecovery(rec.packet,randomBytes(32)),rec.sig1,rec.sig2)).ok,false);
+ const results=await Promise.all([rec.apply(),rec.apply()]);assert.equal(results.filter(x=>x.ok).length,1);
+ const last=await d.confirm.dispatch({...d.settlement,kind:"refund"});assert.equal(last.attempt,4);assert.equal(last.legId,leg.legId);
+ assert.equal((await d.confirm.record({...d.settlement,...last,outcome:"not_executed"})).ok,true);
+ const exhausted=await recoveryFixture(d,{legId:leg.legId,action:"retry_once"});assert.equal((await exhausted.apply()).ok,false);
+ assert.equal((await d.confirm.dispatch({...d.settlement,kind:"refund"})).ok,false);
+ assert.equal((await state(d.s)).status,"disputed");assert.equal((await balanceFor(d.s)).remaining_cents,"5000");
+});
+test("dual recovery accepts exclusively quarantined receipt, rejects stale state and balances the settlement",async()=>{
+ const d=await authorizedDispute({payoutCents:0,refundCents:5000});
+ const leg=await d.confirm.dispatch({...d.settlement,kind:"refund"});
+ assert.equal((await d.confirm.record({...d.settlement,...leg,outcome:"not_executed"})).ok,true);
+ const receipt=randomUUID(),stale=await recoveryFixture(d,{legId:leg.legId,action:"confirm",receipt});
+ assert.equal((await d.confirm.record({...d.settlement,...leg,outcome:"confirmed",receipt})).status,"reconcile");
+ assert.equal((await stale.apply()).ok,false);
+ const rec=await recoveryFixture(d,{legId:leg.legId,action:"confirm",receipt});
+ assert.equal((await rec.apply()).ok,true);assert.equal((await rec.apply()).ok,false);
+ assert.equal((await state(d.s)).status,"settled");assert.equal((await balanceFor(d.s)).remaining_cents,"0");
+ const r=(await pool.query("SELECT resolved_at,resolution_id FROM securepay_private.settlement_leg_conflicts WHERE case_id=$1",[d.scope.caseId])).rows[0];
+ assert.ok(r.resolved_at);assert.equal(r.resolution_id,rec.packet.resolutionId);
+ assert.equal((await verifyAuditChain(auditPool,d.s.tenantId)).ok,true);
+});
+test("signed dual hold recovery cannot dispatch during uncertainty and lifts only the matching provider hold",async()=>{
+ const d=await authorizedDispute(),leg=await d.confirm.dispatch({...d.settlement,kind:"payout"});
+ assert.equal((await providerEvent(d.s,"held")).status,"applied");
+ const premature=await recoveryFixture(d,{action:"lift_hold"});assert.equal((await premature.apply()).ok,false);
+ assert.equal((await d.confirm.record({...d.settlement,...leg,outcome:"confirmed",receipt:randomUUID()})).ok,true);
+ const rec=await recoveryFixture(d,{action:"lift_hold"});assert.equal((await rec.apply()).ok,true);
+ const refund=await d.confirm.dispatch({...d.settlement,kind:"refund"});assert.equal(refund.ok,true);
+ assert.equal((await d.confirm.record({...d.settlement,...refund,outcome:"confirmed",receipt:randomUUID()})).ok,true);
+ assert.equal((await state(d.s)).status,"settled");assert.equal((await balanceFor(d.s)).remaining_cents,"0");
+ const hold=(await pool.query("SELECT resolved_at FROM securepay_private.provider_reconciliation WHERE tenant_id=$1 AND milestone_id=$2",[d.scope.tenantId,d.scope.milestoneId])).rows[0];assert.ok(hold.resolved_at);
 });
