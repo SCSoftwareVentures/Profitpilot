@@ -320,6 +320,7 @@ CREATE FUNCTION securepay_private.dispute_action(e uuid,t uuid,m uuid,d uuid,a u
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 BEGIN
  IF op IN ('decide','finalize') THEN
+  IF securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-dispute-v1',e,t,m,d,a,op,encode(convert_to(details,'UTF8'),'hex'),coalesce(digest,'-'),coalesce(payout::text,'-'),coalesce(refund::text,'-'),expires),expires,sig) IS DISTINCT FROM 'reviewer' THEN RETURN false; END IF;
   PERFORM 1 FROM public.securepay_milestones WHERE tenant_id=t AND id=m FOR UPDATE;
   IF EXISTS(SELECT 1 FROM securepay_private.governed_cases WHERE case_id=d) THEN RETURN false; END IF;
  END IF;
@@ -352,6 +353,7 @@ REVOKE EXECUTE ON FUNCTION securepay_private.authorize_settlement_internal(uuid,
 CREATE FUNCTION securepay_private.authorize_settlement(s uuid,t uuid,m uuid,d uuid,a uuid,payout bigint,refund bigint,expires bigint,sig text) RETURNS boolean
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 BEGIN
+ IF securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-settlement-v1',s,t,m,d,a,payout,refund,expires),expires,sig) IS DISTINCT FROM 'settlement' THEN RETURN false; END IF;
  PERFORM 1 FROM public.securepay_milestones WHERE tenant_id=t AND id=m FOR UPDATE;
  IF EXISTS(SELECT 1 FROM securepay_private.governed_cases WHERE case_id=d) THEN RETURN false; END IF;
  RETURN securepay_private.authorize_settlement_internal(s,t,m,d,a,payout,refund,expires,sig);
