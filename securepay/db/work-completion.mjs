@@ -1,3 +1,4 @@
+import {participantRequest} from "./participant.mjs";
 import {createHmac,createHash,randomUUID} from "node:crypto";
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
 const ids=(...x)=>{if(!x.every(v=>typeof v==="string"&&uuid.test(v)))throw Error("Invalid completion scope");};
