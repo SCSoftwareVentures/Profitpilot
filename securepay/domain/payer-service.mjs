@@ -39,6 +39,15 @@ export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecov
  });
  const bad=()=>{throw Object.assign(new Error("Invalid request"),{status:400});};
  return Object.freeze({
+  async view({identity,tenantId,milestoneId,body}){
+   const ctx=context(identity,tenantId);
+   if(typeof milestoneId!=="string"||!uuid.test(milestoneId)||!exact(body,[]))bad();
+   return authenticated(ctx,async c=>{
+    const {rows:[r]}=await c.query("SELECT * FROM securepay_private.payer_milestone_view($1,$2)",[tenantId,milestoneId]);
+    if(!r)return {ok:false};
+    return {ok:true,view:{milestoneId:r.milestone_id,amountCents:r.amount_cents,status:r.status,fundingStatus:r.funding_status,isFinal:r.is_final,requestStatus:r.request_status}};
+   });
+  },
   async reserve({identity,tenantId,milestoneId,body}){
    const ctx=context(identity,tenantId);
    if(typeof milestoneId!=="string"||!uuid.test(milestoneId)||
