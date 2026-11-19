@@ -6,12 +6,15 @@ import rateLimit from "express-rate-limit";
 import {randomUUID,createHash} from "node:crypto";
 import {withTenant,health} from "./db.js";
 import {authRequired,requireRole} from "./auth.js";
+import {createSecurePayGateway} from "./securepay-gateway.js";
 import {parseCsv,validateInvoiceRows,isIsoDate} from "../src/engine.js";
 
 const app=express();
 app.disable("x-powered-by");
 app.use(helmet());
 app.use(cors({origin:(process.env.CORS_ORIGIN||"").split(",").map(x=>x.trim()).filter(Boolean),credentials:false,methods:["GET","POST"]}));
+// Separate customer audience, body parser and rate limiter; never staff membership.
+app.use("/v1/securepay",createSecurePayGateway());
 app.use(express.json({limit:"100kb"}));
 app.use(rateLimit({windowMs:60_000,limit:100,standardHeaders:true,legacyHeaders:false}));
 app.get("/health",async(req,res)=>{try{await health();res.json({status:"ok",database:"connected"});}catch{res.status(503).json({status:"unavailable"});}});
