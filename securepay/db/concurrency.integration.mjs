@@ -17,7 +17,7 @@ import {makeSharedCustomerBudget} from "./shared-budget.mjs";
 import {createHash} from "node:crypto";
 import {deflateSync} from "node:zlib";
 import {verifyAuditChain} from "./audit-chain.mjs";
-import {loadReconciliationReport,summarizeReport,renderReconciliationDashboard} from "./reconciliation-report.mjs";
+import {loadReconciliationReport,summarizeReport,renderReconciliationDashboard,signReport,verifySignedReport,reportCSV} from "./reconciliation-report.mjs";
 import {prepareRecovery,signProviderRecovery,signReviewerRecovery,applyRecovery} from "./settlement-recovery.mjs";
 import {verifyPinCredential} from "../domain/pin-credential.mjs";
 import {readFile} from "node:fs/promises";
@@ -1261,6 +1261,25 @@ test("tenant-scoped reconciliation snapshot exposes exact balances and no other 
  assert.equal(JSON.stringify(report).includes(d.s.customerId),false);
  assert.equal(renderReconciliationDashboard(report,{buyerSummary:true}).includes(d.s.milestoneId),false);
  assert.equal((await verifyAuditChain(auditPool,d.s.tenantId,{checkpoint:report.checkpoint})).ok,true);
+ if(process.env.SECUREPAY_CI_REPORT_EXPORT==="true"){
+  // This suite refuses non-local/non-CI databases. All records and keys here
+  // are disposable synthetic fixtures, never production or buyer data.
+  const {mkdir,writeFile}=await import("node:fs/promises");
+  const {generateKeyPairSync}=await import("node:crypto");
+  const {privateKey,publicKey}=generateKeyPairSync("ed25519");
+  const envelope=signReport(report,privateKey);
+  assert.equal(verifySignedReport(JSON.parse(JSON.stringify(envelope)),publicKey),true);
+  await mkdir("securepay-ci-report",{mode:0o700});
+  const files={
+   "reconciliation.html":renderReconciliationDashboard(report),
+   "buyer-summary.html":renderReconciliationDashboard(report,{buyerSummary:true}),
+   "transactions.csv":reportCSV(report),
+   "signed-report.json":JSON.stringify(envelope,null,2),
+   "demo-public-key.pem":publicKey.export({format:"pem",type:"spki"}),
+   "README.txt":"SECUREPAY SANDBOX DEMONSTRATION.\nAll records are synthetic CI fixtures. No real funds moved.\nThe ephemeral public key verifies this demonstration export only, not a production signing identity or independently anchored audit history.\nUse the redacted buyer-summary.html for a quick overview. Detailed exports contain synthetic operational identifiers.\n"
+  };
+  await Promise.all(Object.entries(files).map(([name,data])=>writeFile("securepay-ci-report/"+name,data,{flag:"wx",mode:0o600})));
+ }
  await assert.rejects(loadReconciliationReport(reportingPool,{...actor,tenantId:other.s.tenantId}),/Reporting denied/);
  await assert.rejects(loadReconciliationReport(reportingPool,{...actor,key:randomBytes(32)}),/Reporting denied/);
  await assert.rejects(reportingPool.query("SELECT * FROM securepay_private.financial_journal"),e=>e.code==="42501");
