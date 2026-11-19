@@ -55,3 +55,19 @@ jobs:
       - run: npm install --ignore-scripts --no-audit --no-fund
       - name: Test real PostgreSQL concurrency and rollback
         run: node --test securepay/db/concurrency.integration.mjs
+  evidence-engines:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install real decoder and scanner engines
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-pil clamav
+      - name: Exercise real decoder and antivirus against isolated synthetic signatures
+        run: node --test securepay/db/evidence-engines.integration.mjs
