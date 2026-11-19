@@ -119,6 +119,12 @@ BEGIN
   PERFORM 1 FROM securepay_private.work_retention_policy p WHERE p.tenant_id=x.tenant_id AND p.milestone_id=x.id AND NOT p.legal_hold AND p.retain_until<=clock_timestamp() FOR UPDATE;
   IF NOT FOUND OR EXISTS(SELECT 1 FROM securepay_private.provider_reconciliation r WHERE r.tenant_id=x.tenant_id AND r.milestone_id=x.id AND r.resolved_at IS NULL)
   OR EXISTS(SELECT 1 FROM securepay_private.dispute_cases d WHERE d.tenant_id=x.tenant_id AND d.milestone_id=x.id AND (d.status<>'settled' OR EXISTS(SELECT 1 FROM securepay_private.settlement_leg_conflicts r WHERE r.case_id=d.case_id AND r.resolved_at IS NULL) OR EXISTS(SELECT 1 FROM securepay_private.evidence_retention_policy p WHERE p.case_id=d.case_id AND (p.legal_hold OR p.retain_until>clock_timestamp())))) THEN CONTINUE; END IF;
+  -- Lock case and policy before removal; no purge if case policy is absent.
+  PERFORM 1 FROM securepay_private.dispute_cases d WHERE d.tenant_id=x.tenant_id AND d.milestone_id=x.id FOR UPDATE;
+  IF FOUND THEN
+   PERFORM 1 FROM securepay_private.evidence_retention_policy p JOIN securepay_private.dispute_cases d ON d.case_id=p.case_id WHERE d.tenant_id=x.tenant_id AND d.milestone_id=x.id AND NOT p.legal_hold AND p.retain_until<=clock_timestamp() FOR UPDATE OF p;
+   IF NOT FOUND THEN CONTINUE; END IF;
+  END IF;
   UPDATE securepay_private.work_photos q SET content=NULL,purged_at=clock_timestamp() FROM securepay_private.work_completion w WHERE q.completion_id=w.completion_id AND w.tenant_id=x.tenant_id AND w.milestone_id=x.id AND q.purged_at IS NULL;
   GET DIAGNOSTICS changed=ROW_COUNT;n:=n+changed;
  END LOOP;
@@ -133,4 +139,49 @@ GRANT EXECUTE ON FUNCTION securepay_private.payer_open_work_dispute(uuid,uuid,uu
 ALTER FUNCTION securepay_private.purge_work_evidence(integer) OWNER TO securepay_context_owner;
 REVOKE ALL ON FUNCTION securepay_private.purge_work_evidence(integer) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION securepay_private.purge_work_evidence(integer) TO securepay_retention_runtime;
+-- Assigned owner can resume a draft and read previous rejection reasons.
+CREATE FUNCTION securepay_private.owner_work_status(t uuid,m uuid,a uuid,expires bigint,sig text) RETURNS jsonb
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE result jsonb;
+BEGIN
+ IF t IS NULL OR m IS NULL OR a IS NULL OR securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-work-status-v1',t,m,a,expires),expires,sig) IS DISTINCT FROM 'owner'
+ OR NOT EXISTS(SELECT 1 FROM securepay_private.work_assignments WHERE tenant_id=t AND milestone_id=m AND owner_id=a) THEN RETURN NULL; END IF;
+ SELECT jsonb_build_object('milestoneId',x.id,'status',x.status,'amountCents',x.amount_cents::text,
+ 'current',(SELECT jsonb_build_object('completionId',w.completion_id,'status',w.status,'photoCount',(SELECT count(*) FROM securepay_private.work_photos p WHERE p.completion_id=w.completion_id)) FROM securepay_private.work_completion w WHERE w.tenant_id=t AND w.milestone_id=m AND w.status<>'rejected'),
+ 'rejections',(SELECT coalesce(jsonb_agg(jsonb_build_object('completionId',w.completion_id,'reason',w.rejection_reason,'rejectedAt',w.rejected_at) ORDER BY w.rejected_at),'[]'::jsonb) FROM securepay_private.work_completion w WHERE w.tenant_id=t AND w.milestone_id=m AND w.status='rejected')) INTO result
+ FROM public.securepay_milestones x WHERE x.tenant_id=t AND x.id=m;
+ RETURN result;
+END $$;
+ALTER FUNCTION securepay_private.owner_work_status(uuid,uuid,uuid,bigint,text) OWNER TO securepay_context_owner;
+REVOKE ALL ON FUNCTION securepay_private.owner_work_status(uuid,uuid,uuid,bigint,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION securepay_private.owner_work_status(uuid,uuid,uuid,bigint,text) TO securepay_completion_runtime;
+CREATE FUNCTION securepay_private.dispute_work_evidence(t uuid,m uuid,d uuid,a uuid,p uuid,expires bigint,sig text) RETURNS jsonb
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE c securepay_private.dispute_cases%ROWTYPE;role_name text;photo securepay_private.work_photos%ROWTYPE;k bytea;plain bytea;items jsonb;
+BEGIN
+ role_name:=securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-linked-work-v1',t,m,d,a,coalesce(p::text,'-'),expires),expires,sig);
+ IF role_name IS NULL OR t IS NULL OR m IS NULL OR d IS NULL OR a IS NULL THEN RETURN NULL; END IF;
+ PERFORM 1 FROM public.securepay_milestones WHERE tenant_id=t AND id=m FOR UPDATE;
+ IF NOT FOUND THEN RETURN NULL; END IF;
+ SELECT * INTO c FROM securepay_private.dispute_cases WHERE tenant_id=t AND milestone_id=m AND case_id=d FOR UPDATE;
+ IF NOT FOUND OR NOT ((role_name='customer' AND a=c.customer_id) OR (role_name='owner' AND a=c.owner_id) OR (role_name='reviewer' AND EXISTS(SELECT 1 FROM securepay_private.dispute_photo_reviewers WHERE case_id=d AND tenant_id=t AND reviewer_id=a))) THEN RETURN NULL; END IF;
+ IF p IS NULL THEN
+  SELECT coalesce(jsonb_agg(jsonb_build_object('completionId',w.completion_id,'manifestDigest',l.manifest_digest,'comments',w.comments,'status',w.status,'rejectionReason',w.rejection_reason,
+   'photos',(SELECT coalesce(jsonb_agg(jsonb_build_object('photoId',q.photo_id,'digest',q.digest,'purged',q.purged_at IS NOT NULL) ORDER BY q.photo_id),'[]'::jsonb) FROM securepay_private.work_photos q WHERE q.completion_id=w.completion_id)) ORDER BY w.completion_id),'[]'::jsonb) INTO items
+  FROM securepay_private.work_dispute_links l JOIN securepay_private.work_completion w ON w.completion_id=l.completion_id WHERE l.case_id=d AND l.tenant_id=t;
+  RETURN jsonb_build_object('completions',items);
+ END IF;
+ SELECT q.* INTO photo FROM securepay_private.work_photos q JOIN securepay_private.work_dispute_links l ON l.completion_id=q.completion_id WHERE l.case_id=d AND l.tenant_id=t AND q.photo_id=p AND q.tenant_id=t;
+ IF NOT FOUND OR photo.purged_at IS NOT NULL THEN RETURN NULL; END IF;
+ SELECT secret INTO k FROM securepay_private.evidence_keys WHERE key_id=photo.key_id AND read_enabled;
+ IF k IS NULL THEN RAISE EXCEPTION 'Evidence unavailable'; END IF;
+ plain:=public.pgp_sym_decrypt_bytea(photo.content,encode(k,'hex'));
+ IF octet_length(plain)<>photo.plaintext_size OR encode(public.digest(plain,'sha256'),'hex')<>photo.digest THEN RAISE EXCEPTION 'Evidence integrity failure'; END IF;
+ PERFORM securepay_private.append_audit_chain(t,'work_photos','READ',encode(public.digest(convert_to(concat_ws(':',p,d,a,photo.digest),'UTF8'),'sha256'),'hex'));
+ RETURN jsonb_build_object('photoId',p,'digest',photo.digest,'content',replace(encode(plain,'base64'),chr(10),''));
+END $$;
+ALTER FUNCTION securepay_private.dispute_work_evidence(uuid,uuid,uuid,uuid,uuid,bigint,text) OWNER TO securepay_context_owner;
+REVOKE ALL ON FUNCTION securepay_private.dispute_work_evidence(uuid,uuid,uuid,uuid,uuid,bigint,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION securepay_private.dispute_work_evidence(uuid,uuid,uuid,uuid,uuid,bigint,text) TO securepay_dispute_runtime;
+
 COMMIT;
