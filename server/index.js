@@ -23,8 +23,8 @@ import {jobReferenceSigner,issueJobReference} from "./core-job-reference.js";
 const coreReferenceKey=jobReferenceSigner();
 import {invoiceIntakeFields,invoiceDigest} from "../src/invoice-intake.js";
 import {supplierCostFields} from "../src/supplier-cost.js";
-import {supplierCostStepProof,supplierCostStatusProof,sharedCostStepProof,sharedCostStatusProof} from "./sensitive-operation-proof.js";
-import {sharedCostFields} from "../src/shared-cost.js";
+import {supplierCostStepProof,supplierCostStatusProof,sharedCostStepProof,sharedCostStatusProof,sharedCostCorrectionProof} from "./sensitive-operation-proof.js";
+import {sharedCostFields,sharedCostCorrectionFields} from "../src/shared-cost.js";
 validateProductionSecrets();
 import {authRequired,requireRole,requireRecentMfa,sessionRequired} from "./auth.js";
 import {quarantineConfig,sealQuarantine,MAX_QUARANTINE_BYTES} from "./quarantine.js";
@@ -652,8 +652,8 @@ app.get("/v1/tenants/:tenantId/supplier-costs/:batchId/orders/:orderId",membersh
 });
 const sharedIds=req=>[req.membership.tenantId,req.params.kind,req.params.sourceId.toLowerCase(),req.params.orderId.toLowerCase()];
 app.post("/v1/tenants/:tenantId/shared-costs/:kind/:sourceId/orders/:orderId",membership,requireRole("owner","admin"),requireRecentMfa,async(req,res,next)=>{
- try{const b=req.body;const ids=sharedIds(req);if(!emptyQuery(req)||!exactBody(b,["shares","evidenceDigest","confirm","step"])||b.confirm!==true||!["request","approve","reject","consume"].includes(b.step))return res.status(400).json({error:"Explicit allocation action required"});
- const {confirm,step,...input}=b;if(!sharedCostFields(ids[1],ids[2],input))return res.status(400).json({error:"Invalid ordered allocation shares"});
+ try{const b=req.body;const ids=sharedIds(req),correcting=b!=null&&Object.hasOwn(b,"replacesOrderId");if(!emptyQuery(req)||!exactBody(b,correcting?["shares","evidenceDigest","confirm","step","replacesOrderId"]:["shares","evidenceDigest","confirm","step"])||b.confirm!==true||!["request","approve","reject","consume"].includes(b.step))return res.status(400).json({error:"Explicit allocation action required"});
+ const {confirm,step,...input}=b;if(correcting){if(!sharedCostCorrectionFields(ids[1],ids[2],input))return res.status(400).json({error:"Invalid allocation correction scope"});return res.json(await sensitiveQuery(req,"SELECT private.api_shared_cost_correction_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) AS result",sharedCostCorrectionProof(...ids,input,step,req.identity)));}if(!sharedCostFields(ids[1],ids[2],input))return res.status(400).json({error:"Invalid ordered allocation shares"});
  return res.json(await sensitiveQuery(req,"SELECT private.api_shared_cost_step($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) AS result",sharedCostStepProof(...ids,input,step,req.identity)));
  }catch(e){return failSensitive(e,res,next);}
 });
@@ -662,7 +662,7 @@ app.get("/v1/tenants/:tenantId/shared-costs/:kind/:sourceId/orders/:orderId",mem
  return res.json(await sensitiveQuery(req,"SELECT private.api_shared_cost_status($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) AS result",sharedCostStatusProof(...ids,req.identity)));
  }catch(e){return failSensitive(e,res,next);}
 });
-app.use((err,req,res,next)=>{if(res.destroyed||res.writableEnded)return;if(res.headersSent)return next(err);const id=randomUUID();const status=err.code==="P4501"?429:(err.code==="23505"||err.code==="P4502")?409:err.code==="54000"?413:err.code==="22P02"||err.code==="22P05"?400:err.status===503?503:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);if(status===503)res.set("Retry-After","5");if(err.code==="P4501")res.set("Retry-After","3600");process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:err.code==="P4501"?"Financial access limit reached; retry later":err.code==="P4502"?"Payroll evidence was corrected; recalculate before relying on this result":status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":status===503?"Request capacity temporarily unavailable":"Internal server error",reference:id});});
+app.use((err,req,res,next)=>{if(res.destroyed||res.writableEnded)return;if(res.headersSent)return next(err);const id=randomUUID();const status=err.code==="P4501"?429:(err.code==="23505"||err.code==="P4502"||err.code==="P4503")?409:err.code==="54000"?413:err.code==="22P02"||err.code==="22P05"?400:err.status===503?503:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);if(status===503)res.set("Retry-After","5");if(err.code==="P4501")res.set("Retry-After","3600");process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"?err.code:"INTERNAL",status})+"\n");res.status(status).json({error:err.code==="P4501"?"Financial access limit reached; retry later":err.code==="P4502"?"Payroll evidence was corrected; recalculate before relying on this result":err.code==="P4503"?"Shared expense allocation was corrected; recalculate before relying on this result":status===409?"Conflicting record; refresh and review the current state":status<500?"Request could not be completed":status===503?"Request capacity temporarily unavailable":"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);
 if(process.env.NODE_ENV==="production"){
  try{if(!await readiness.check())throw new Error("Not ready");}

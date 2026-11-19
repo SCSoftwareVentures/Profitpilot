@@ -10,3 +10,9 @@ export function sharedCostFields(kind,source,input){
  }
  return {shares,evidence:input.evidenceDigest,canonical:["shared-cost-v1",kind,source,input.evidenceDigest,...shares.map(x=>[x[0]??"~",x[1]??"~",x[2]].join(","))].join("\n")};
 }
+
+export function sharedCostCorrectionFields(kind,source,input){
+ if(!input||typeof input!=="object"||Object.keys(input).length!==3||typeof input.replacesOrderId!=="string"||!uuid.test(input.replacesOrderId))return null;
+ const {replacesOrderId,...rest}=input,f=sharedCostFields(kind,source,rest);if(!f)return null;
+ return {...f,replaces:replacesOrderId,canonical:["shared-cost-correction-v1",kind,source,replacesOrderId,f.evidence,...f.shares.map(x=>[x[0]??"~",x[1]??"~",x[2]].join(","))].join("\n")};
+}

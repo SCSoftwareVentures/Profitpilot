@@ -1254,6 +1254,7 @@ paths:
                   description: Ordered arrays of contract UUID, baseline UUID and positive exact decimal amount. Null contract and baseline represent a single explicit unallocated remainder at the end.
                   items: { type: array, minItems: 3, maxItems: 3 }
                 evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                replacesOrderId: { type: string, format: uuid, description: Optional active predecessor for independent correction; supply at every correction step }
                 confirm: { const: true }
                 step: { enum: [request, approve, reject, consume] }
       responses:
