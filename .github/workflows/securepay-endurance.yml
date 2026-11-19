@@ -1,0 +1,180 @@
+name: SecurePay 500-run endurance qualification
+on:
+  pull_request:
+    types: [synchronize]
+    paths:
+      - '.github/workflows/securepay-endurance.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  gate:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    outputs:
+      run: ${{ steps.trigger.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: trigger
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT" == workflow_dispatch ]]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            test -n "$BEFORE"
+            test -n "$HEAD_SHA"
+            git diff --name-only "$BEFORE" "$HEAD_SHA" > changed-files.txt
+            if grep -Fxq '.github/workflows/securepay-endurance.yml' changed-files.txt; then
+              echo "run=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "run=false" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+  endurance:
+    needs: gate
+    if: needs.gate.outputs.run == 'true'
+    name: Endurance shard ${{ matrix.shard }} (50 suites)
+    strategy:
+      fail-fast: false
+      max-parallel: 10
+      matrix:
+        shard: [1,2,3,4,5,6,7,8,9,10]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: securepay_ci
+          POSTGRES_PASSWORD: disposable-ci-password
+          POSTGRES_DB: securepay_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U securepay_ci -d securepay_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SECUREPAY_TEST_DATABASE: securepay_ci
+      SECUREPAY_TEST_DATABASE_URL: postgresql://securepay_ci:disposable-ci-password@127.0.0.1:5432/securepay_ci
+      MAINTENANCE_URL: postgresql://securepay_ci:disposable-ci-password@127.0.0.1:5432/postgres
+      SHARD: ${{ matrix.shard }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install test dependencies once
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Repeat all SecurePay tests 50 times with fresh database
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p endurance-results
+          printf 'iteration,status,duration_ms,tests,passed,failed,skipped\n' > endurance-results/results.csv
+          reset_db() {
+            psql "$MAINTENANCE_URL" -X -v ON_ERROR_STOP=1 -c 'DROP DATABASE IF EXISTS securepay_ci WITH (FORCE)' &&
+            psql "$MAINTENANCE_URL" -X -v ON_ERROR_STOP=1 -c 'DROP ROLE IF EXISTS securepay_ci_restricted, securepay_payer_runtime, securepay_context_owner' &&
+            psql "$MAINTENANCE_URL" -X -v ON_ERROR_STOP=1 -c 'CREATE DATABASE securepay_ci OWNER securepay_ci'
+          }
+          stat() { awk -v k="$1" '$1=="#" && $2==k {n=$3} END {if(n=="") print "-1"; else print n}' "$2"; }
+          failures=0
+          for i in $(seq 1 50); do
+            iteration=$(( (SHARD - 1) * 50 + i ))
+            log="endurance-results/iteration-$iteration.log"
+            start=$(date +%s%N)
+            rc=0
+            if reset_db > "$log" 2>&1; then
+              timeout 90s node --experimental-strip-types --test --test-reporter=tap \
+                securepay/domain/*.test.mjs securepay/db/*.test.mjs securepay/db/concurrency.integration.mjs >> "$log" 2>&1 || rc=$?
+            else
+              rc=1
+            fi
+            elapsed=$(( ($(date +%s%N) - start) / 1000000 ))
+            n=$(stat tests "$log"); p=$(stat pass "$log"); f=$(stat fail "$log"); s=$(stat skipped "$log")
+            c=$(stat cancelled "$log"); t=$(stat todo "$log")
+            if [[ "$rc" == 0 && "$n" == 52 && "$p" == 52 && "$f" == 0 && "$s" == 0 && "$c" == 0 && "$t" == 0 ]]; then
+              status=PASS
+              rm "$log"
+            else
+              status=FAIL
+              failures=$((failures+1))
+              tail -n 80 "$log"
+            fi
+            printf '%s,%s,%s,%s,%s,%s,%s\n' "$iteration" "$status" "$elapsed" "$n" "$p" "$f" "$s" >> endurance-results/results.csv
+            echo "SecurePay repetition $iteration/500: $status ($elapsed ms; $p/$n tests passed)"
+          done
+          cat endurance-results/results.csv
+          echo "Shard $SHARD completed with $failures failing repetitions." >> "$GITHUB_STEP_SUMMARY"
+          test "$failures" -eq 0
+      - name: Preserve per-iteration timing, counts and failure logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: securepay-endurance-${{ matrix.shard }}
+          path: endurance-results/
+          if-no-files-found: error
+          retention-days: 14
+  qualify:
+    needs: [gate, endurance]
+    if: always() && needs.gate.outputs.run == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: securepay-endurance-*
+          path: results
+      - name: Require all 500 unique complete repetitions
+        env:
+          MATRIX_RESULT: ${{ needs.endurance.result }}
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import csv, os, statistics
+          from pathlib import Path
+          paths = sorted(Path("results").glob("*/results.csv"))
+          rows = [r for p in paths for r in csv.DictReader(p.open())]
+          ids = sorted(int(r["iteration"]) for r in rows)
+          passed = [r for r in rows if r["status"]=="PASS" and int(r["tests"])==52 and int(r["passed"])==52 and int(r["failed"])==0 and int(r["skipped"])==0]
+          timing = sorted(int(r["duration_ms"]) for r in passed)
+          qualified = len(paths)==10 and ids==list(range(1,501)) and len(passed)==500 and os.environ["MATRIX_RESULT"]=="success"
+          lines = [
+              "# SecurePay endurance qualification",
+              f"Repetitions recorded: {len(rows)}/500",
+              f"Complete passing repetitions: {len(passed)}/500",
+              f"Passing test executions in qualified repetitions: {sum(int(r['passed']) for r in passed):,}",
+              f"Failed or incomplete recorded repetitions: {len(rows)-len(passed)}",
+              f"Missing repetition IDs: {sorted(set(range(1,501))-set(ids))}",
+          ]
+          if timing:
+              lines += [f"Median suite + database reset: {statistics.median(timing)/1000:.3f}s",
+                        f"P95: {timing[(95*len(timing)+99)//100-1]/1000:.3f}s",
+                        f"Maximum: {max(timing)/1000:.3f}s"]
+          lines += ["QUALIFICATION: " + ("PASS" if qualified else "FAIL"),
+                    "Sandbox tests only; no live provider transfers, production load or legal certification."]
+          report = "\n".join(lines) + "\n"
+          print(report)
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a") as summary:
+              summary.write(report)
+          Path("qualification.txt").write_text(report)
+          if not qualified:
+              raise SystemExit(1)
+          PY
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: securepay-endurance-qualification
+          path: qualification.txt
+          retention-days: 14
