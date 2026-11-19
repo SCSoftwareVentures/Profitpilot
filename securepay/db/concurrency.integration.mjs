@@ -39,7 +39,7 @@ let payerPool, notificationPool, providerPool, provider, disputePool, settlement
 const scanKey=randomBytes(32);
 const scanner=makeEvidenceScanner({key:scanKey,scan:async()=>"clean"});
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql","securepay-reporting-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql","securepay-reporting-draft.sql","securepay-portal-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(key_id,secret) VALUES('primary',$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(key_id,secret) VALUES('primary',$1)",[deriveCommandKey(pepper)]);
@@ -611,12 +611,21 @@ test("separate authority process verifies JWT and PIN; gateway has no signing ke
   assert.equal((await post("/pin?debug=true",pinBody,bearer)).status,404);
   assert.equal((await post("/pin",{...pinBody,customerId:s.customerId},bearer)).status,400);
   assert.equal((await post("/pin",pinBody,bearer)).status,200);
+  const viewRoute="/milestones/"+s.milestoneId+"/view";
+  const page=await fetch("http://127.0.0.1:"+gateway.address().port+"/v1/securepay/portal");
+  assert.equal(page.status,200);assert.match(page.headers.get("content-security-policy"),/sha256-/);assert.match(await page.text(),/SANDBOX ONLY/);
+  const read=await post(viewRoute,{},bearer);assert.equal(read.status,200);
+  assert.deepEqual(await read.json(),{mode:"sandbox",moneyMoved:false,milestoneId:s.milestoneId,amountCents:"5000",status:"approved",fundingStatus:"funded",isFinal:false,requestStatus:null});
+  assert.equal((await post(viewRoute,{customerId:s.customerId},bearer)).status,400);
+  assert.equal((await post(viewRoute,{},await token("unknown"))).status,403);
+  assert.equal((await post("/milestones/"+randomUUID()+"/view",{},bearer)).status,403);
   const route="/milestones/"+s.milestoneId+"/reserve",body={pin:s.pin,expectedAmountCents:5000,idempotencyKey:randomUUID()};
   assert.equal((await post(route,{...body,pin:"999999"},bearer)).status,403);
   const response=await post(route,body,bearer);
   assert.equal(response.status,202);
   const receipt=await response.json();assert.equal(receipt.moneyMoved,false);assert.equal(receipt.amountCents,"5000");
   assert.equal((await state(s)).requests,1);
+  const pending=await post(viewRoute,{},bearer);assert.equal(pending.status,200);const updated=await pending.json();assert.equal(updated.status,"release_pending");assert.equal(updated.requestStatus,"pending");
   assert.equal((await post(route,body,bearer)).status,403);
   child.kill("SIGTERM");await stopped;
   const unavailable=await post(route,body,bearer);assert.equal(unavailable.status,503);
@@ -1306,4 +1315,51 @@ test("report access is audited and replayed signed report IDs are denied; journa
   assert.equal(r.report,null);await client.query("ROLLBACK");
  }finally{client.release();}
  assert.equal((await verifyAuditChain(auditPool,d.s.tenantId,{checkpoint:clean.checkpoint})).ok,true);
+});
+
+test("payer milestone view rejects same-tenant foreign customer and cross-tenant identifiers; does not expose financial internals",async()=>{
+ const {makePayerService}=await import("../domain/payer-service.mjs");
+ const s=await identityFixture(),other=await fixture("approved",s.tenantId),foreign=await identityFixture();
+ await pool.query("UPDATE securepay_milestones SET payer_customer_id=$2 WHERE id=$1",[s.milestoneId,s.customerId]);
+ await pool.query("UPDATE securepay_milestones SET payer_customer_id=$2 WHERE id=$1",[other.milestoneId,other.customerId]);
+ const svc=makePayerService({pool:payerPool,signingKey:payerSigningKey,pepper});
+ const base={tenantId:s.tenantId,identity:{subject:s.subject,authTime:Math.floor(Date.now()/1000)},body:{}};
+ const r=await svc.view({...base,milestoneId:s.milestoneId});assert.equal(r.ok,true);
+ assert.deepEqual(Object.keys(r.view).sort(),["amountCents","fundingStatus","isFinal","milestoneId","requestStatus","status"]);
+ assert.equal((await svc.view({...base,milestoneId:other.milestoneId})).ok,false);
+ assert.equal((await svc.view({...base,milestoneId:foreign.milestoneId})).ok,false);
+ await assert.rejects(svc.view({...base,tenantId:foreign.tenantId,milestoneId:foreign.milestoneId}),/Payer context denied/);
+ assert.equal((await providerEvent(s,"held")).status,"applied");
+ assert.equal((await svc.view({...base,milestoneId:s.milestoneId})).view.fundingStatus,"held");
+});
+test("separate owner dashboard accepts only configured owner MFA audience and tenant; reporting runtime cannot move money",async()=>{
+ const {startOwnerDashboard}=await import("../../server/securepay-owner.js");
+ const {generateKeyPair,exportJWK,SignJWT}=await import("jose");
+ const {createServer}=await import("node:http");
+ const d=await authorizedDispute(),foreign=await authorizedDispute(),actor=await reportingActor(d.s.tenantId);
+ const {privateKey,publicKey}=await generateKeyPair("ES256"),jwk=await exportJWK(publicKey);jwk.kid="owner";jwk.alg="ES256";
+ const jwks=createServer((req,res)=>{res.setHeader("content-type","application/json");res.end(JSON.stringify({keys:[jwk]}));});
+ await new Promise(r=>jwks.listen(0,"127.0.0.1",r));
+ const issuer="https://owner-fixture.invalid",audience="securepay-owner",subject="owner-fixture",acr="owner-mfa";
+ const env={NODE_ENV:"test",SECUREPAY_OWNER_SANDBOX_ENABLED:"true",SECUREPAY_OWNER_PORT:"0",SECUREPAY_OWNER_ISSUER:issuer,SECUREPAY_OWNER_AUDIENCE:audience,SECUREPAY_OWNER_REQUIRED_ACR:acr,SECUREPAY_OWNER_SUBJECT:subject,SECUREPAY_AUTH_AUDIENCE:"securepay-customer",
+ SECUREPAY_OWNER_JWKS_URL:"http://127.0.0.1:"+jwks.address().port+"/jwks",SECUREPAY_REPORT_DATABASE_URL:reportingPool.options.connectionString,SECUREPAY_REPORT_TENANT_ID:actor.tenantId,SECUREPAY_REPORT_ACTOR_ID:actor.actorId,SECUREPAY_REPORT_ACTOR_KEY:actor.key.toString("hex")};
+ let service;
+ try{
+  await assert.rejects(startOwnerDashboard({...env,SECUREPAY_PIN_PEPPER:"forbidden"}),/secrets forbidden/);
+  await assert.rejects(startOwnerDashboard({...env,SECUREPAY_OWNER_AUDIENCE:"securepay-customer"}),/configuration incomplete/);
+  await assert.rejects(startOwnerDashboard({...env,NODE_ENV:"production"}),/disabled/);
+  service=await startOwnerDashboard(env);
+  const base="http://127.0.0.1:"+service.server.address().port+"/v1/securepay-owner";
+  const token=(sub=subject,aud=audience)=>new SignJWT({acr,auth_time:Math.floor(Date.now()/1000)}).setProtectedHeader({alg:"ES256",kid:"owner"}).setIssuer(issuer).setAudience(aud).setSubject(sub).setIssuedAt().setExpirationTime("5m").sign(privateKey);
+  const post=(body,bearer)=>fetch(base+"/report",{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+bearer},body:JSON.stringify(body)});
+  const html=await fetch(base+"/dashboard");assert.equal(html.status,200);assert.equal(html.headers.get("cache-control"),"no-store");assert.match(await html.text(),/business-owner dashboard/);
+  assert.equal((await post({},await token(subject,"securepay-customer"))).status,401);
+  assert.equal((await post({},await token("other-owner"))).status,403);
+  assert.equal((await post({tenantId:foreign.s.tenantId},await token())).status,400);
+  const response=await post({},await token());assert.equal(response.status,200);
+  const result=await response.json();assert.equal(result.report.tenantId,d.s.tenantId);assert.equal(result.report.milestones.length,1);assert.equal(result.summary.remainingCents,"5000");
+  assert.equal(JSON.stringify(result).includes(foreign.s.milestoneId),false);
+  assert.equal((await fetch(base+"/reserve",{method:"POST"})).status,404);
+  await assert.rejects(reportingPool.query("SELECT securepay_private.dispatch_settlement_leg(NULL,NULL,NULL,NULL,NULL)"),e=>e.code==="42501");
+ }finally{if(service)await service.close();await new Promise(r=>jwks.close(r));}
 });
