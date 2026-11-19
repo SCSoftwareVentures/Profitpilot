@@ -4,6 +4,7 @@ import rateLimit from "express-rate-limit";
 import pg from "pg";
 import {createRemoteJWKSet,jwtVerify} from "jose";
 import {makePayerService} from "../securepay/domain/payer-service.mjs";
+import {validKeyId} from "../securepay/db/key-envelope.mjs";
 import {createRecoveryVerifier} from "../securepay/db/recovery-grant.mjs";
 
 // Require a distinct customer audience and recently verified MFA assurance.
@@ -67,7 +68,8 @@ export function createSecurePayRouterFromEnv(env=process.env){
  const {SECUREPAY_AUTH_ISSUER:issuer,SECUREPAY_AUTH_AUDIENCE:audience,SECUREPAY_AUTH_JWKS_URL:jwks,SECUREPAY_AUTH_REQUIRED_ACR:requiredAcr,SECUREPAY_DATABASE_URL:databaseUrl}=env;
  const hex=/^[a-f0-9]{64}$/i;
  if(!issuer||!audience||audience===env.AUTH_AUDIENCE||!jwks||!requiredAcr||!databaseUrl||
-    !hex.test(env.SECUREPAY_CONTEXT_HMAC_SECRET??"")||!hex.test(env.SECUREPAY_PIN_PEPPER??"")||
+    !hex.test(env.SECUREPAY_CONTEXT_HMAC_SECRET??"")||!hex.test(env.SECUREPAY_PIN_PEPPER??"")||!hex.test(env.SECUREPAY_COMMAND_KEY??"")||!validKeyId(env.SECUREPAY_CONTEXT_KEY_ID??"primary")||!validKeyId(env.SECUREPAY_COMMAND_KEY_ID??"primary")||
+    [env.SECUREPAY_CONTEXT_HMAC_SECRET,env.SECUREPAY_PIN_PEPPER,env.TENANT_CONTEXT_HMAC_SECRET].some(k=>k?.toLowerCase()===env.SECUREPAY_COMMAND_KEY.toLowerCase())||
     env.SECUREPAY_CONTEXT_HMAC_SECRET.toLowerCase()===env.SECUREPAY_PIN_PEPPER.toLowerCase()||
     [env.SECUREPAY_CONTEXT_HMAC_SECRET,env.SECUREPAY_PIN_PEPPER].some(k=>k.toLowerCase()===(env.TENANT_CONTEXT_HMAC_SECRET??"").toLowerCase())||databaseUrl===env.DATABASE_URL)
   throw new Error("SecurePay sandbox configuration incomplete");
@@ -82,12 +84,13 @@ export function createSecurePayRouterFromEnv(env=process.env){
   const recoveryIssuer=env.SECUREPAY_RECOVERY_ISSUER;
   if(!recoveryIssuer||!recoveryAudience||recoveryAudience===audience||recoveryAudience===env.AUTH_AUDIENCE||!recoveryAcr||
      !hex.test(env.SECUREPAY_RECOVERY_KEY??"")||
-     [env.SECUREPAY_CONTEXT_HMAC_SECRET,env.SECUREPAY_PIN_PEPPER,env.TENANT_CONTEXT_HMAC_SECRET].some(k=>k?.toLowerCase()===env.SECUREPAY_RECOVERY_KEY.toLowerCase())||
+     [env.SECUREPAY_CONTEXT_HMAC_SECRET,env.SECUREPAY_PIN_PEPPER,env.SECUREPAY_COMMAND_KEY,env.TENANT_CONTEXT_HMAC_SECRET].some(k=>k?.toLowerCase()===env.SECUREPAY_RECOVERY_KEY.toLowerCase())||!validKeyId(env.SECUREPAY_RECOVERY_KEY_ID??"primary")||
      (recoveryJwks.protocol!=="https:"&&!(env.NODE_ENV==="test"&&recoveryJwks.protocol==="http:"&&["127.0.0.1","localhost"].includes(recoveryJwks.hostname))))
    throw new Error("SecurePay recovery configuration incomplete");
+  recovery.recoveryKeyId=env.SECUREPAY_RECOVERY_KEY_ID??"primary";
   recovery.recoveryKey=Buffer.from(env.SECUREPAY_RECOVERY_KEY,"hex");
   recovery.verifyRecovery=createRecoveryVerifier({issuer:recoveryIssuer,audience:recoveryAudience,requiredAcr:recoveryAcr,keyResolver:createRemoteJWKSet(recoveryJwks)});
  }
- const service=makePayerService({pool,signingKey:Buffer.from(env.SECUREPAY_CONTEXT_HMAC_SECRET,"hex"),pepper:Buffer.from(env.SECUREPAY_PIN_PEPPER,"hex"),...recovery});
+ const service=makePayerService({pool,signingKey:Buffer.from(env.SECUREPAY_CONTEXT_HMAC_SECRET,"hex"),pepper:Buffer.from(env.SECUREPAY_PIN_PEPPER,"hex"),contextKeyId:env.SECUREPAY_CONTEXT_KEY_ID??"primary",commandAuthority:{id:env.SECUREPAY_COMMAND_KEY_ID??"primary",key:Buffer.from(env.SECUREPAY_COMMAND_KEY,"hex")},...recovery});
  return createSecurePayRouter({enabled:true,service,verifyToken:createPayerTokenVerifier({issuer,audience,requiredAcr,keyResolver:createRemoteJWKSet(jwksUrl)})});
 }
