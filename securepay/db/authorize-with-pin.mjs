@@ -10,7 +10,7 @@ import {reserveSigned} from "./signed-commands.mjs";
 const denied=()=>({ok:false,code:"AUTHORIZATION_DENIED"});
 // Only use with a transaction whose caller commits returned denials, so failed
 // attempt counters persist. Throwing errors must roll back the entire transaction.
-async function authorizeInTransaction(c,scope,pepper) {
+async function authorizeInTransaction(c,scope,pepper,authority) {
   const {tenantId,milestoneId,customerId,pin,requestId,idempotencyKey,expectedAmountCents}=scope;
   if(!Buffer.isBuffer(pepper)||pepper.length<32||
      ![tenantId,milestoneId,customerId,requestId,idempotencyKey].every(x=>typeof x==="string"&&x.length>0)||
@@ -40,7 +40,7 @@ async function authorizeInTransaction(c,scope,pepper) {
       // Failed attempts MUST survive denial.
       return denied();
     }
-    if(restricted)return reserveSigned(c,{tenantId,customerId,milestoneId,amountCents:m.amount_cents,version:m.version,requestId,idempotencyKey,salt:k.salt,pinHash:k.pin_hash},pepper);
+    if(restricted)return reserveSigned(c,{tenantId,customerId,milestoneId,amountCents:m.amount_cents,version:m.version,requestId,idempotencyKey,salt:k.salt,pinHash:k.pin_hash},pepper,authority);
     await c.query("UPDATE securepay_customer_pins SET failed_attempts=0,locked_until=NULL WHERE tenant_id=$1 AND customer_id=$2",[tenantId,customerId]);
     const authorizationRef=randomUUID();
     await c.query("INSERT INTO securepay_release_proofs(proof_ref,tenant_id,milestone_id,customer_id,amount_cents,expires_at) VALUES($1,$2,$3,$4,$5,clock_timestamp()+interval '5 minutes')",[authorizationRef,tenantId,milestoneId,customerId,String(expectedAmountCents)]);
@@ -49,11 +49,11 @@ async function authorizeInTransaction(c,scope,pepper) {
       verifyAndConsume:({client,...s})=>consumeReleaseProof(client,s)});
     return {ok:true,...result};
 }
-export async function authorizePayerInTransaction(c,scope,pepper) {
+export async function authorizePayerInTransaction(c,scope,pepper,authority) {
   const {tenantId,subject,milestoneId,pin,requestId,idempotencyKey,expectedAmountCents}=scope;
   const customerId=await resolvePayer(c,{tenantId,subject});
   if(!customerId)return denied();
-  return authorizeInTransaction(c,{tenantId,customerId,milestoneId,pin,requestId,idempotencyKey,expectedAmountCents},pepper);
+  return authorizeInTransaction(c,{tenantId,customerId,milestoneId,pin,requestId,idempotencyKey,expectedAmountCents},pepper,authority);
 }
 // Isolated database fixture / legacy internal adapter. Never expose a route
 // accepting a raw customerId; use the verified-subject transaction entry above.
