@@ -40,7 +40,7 @@ let payerPool, notificationPool, providerPool, provider, disputePool, settlement
 const scanKey=randomBytes(32);
 const scanner=makeEvidenceScanner({key:scanKey,scan:async()=>"clean"});
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql","securepay-reporting-draft.sql","securepay-portal-draft.sql","securepay-work-completion-draft.sql","securepay-work-revision-draft.sql","securepay-payment-plan-draft.sql","securepay-quote-bridge-draft.sql","securepay-contract-changes-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql","securepay-reporting-draft.sql","securepay-portal-draft.sql","securepay-work-completion-draft.sql","securepay-work-revision-draft.sql","securepay-payment-plan-draft.sql","securepay-quote-bridge-draft.sql","securepay-contract-changes-draft.sql","securepay-funded-cancellation-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(key_id,secret) VALUES('primary',$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(key_id,secret) VALUES('primary',$1)",[deriveCommandKey(pepper)]);
@@ -1762,4 +1762,122 @@ test("full unfunded cancellation is independently accepted as zero commitment an
  assert.equal((await accept(p.change)).ok,true);
  const view=(await read()).view;assert.equal(view.state.effectiveTotalCents,"0");assert.ok(view.state.stages.every(x=>x.status==="cancelled"));
  for(const item of items)assert.deepEqual(await balanceFor({tenantId:contract.tenantId,milestoneId:item.milestoneId}),{funded_cents:"0",payout_cents:"0",refund_cents:"0",remaining_cents:"0"});
+});
+
+async function fundedCancellationFixture({approved=false}={}){
+ const {d,items,contract}=await acceptedContract(),item=items[0],s={...d.s,milestoneId:item.milestoneId,fundingRef:randomUUID()},payer={...d.payer,milestoneId:item.milestoneId};
+ assert.equal((await provider.event({...s,kind:"funded",amountCents:2000})).status,"applied");
+ if(approved){
+  const scope={tenantId:s.tenantId,milestoneId:s.milestoneId,completionId:randomUUID()};
+  assert.equal((await d.owner.start(scope)).ok,true);
+  const photo=await d.owner.upload({...scope,mediaType:"image/png",content:pngFixture()});assert.equal(photo.ok,true);
+  assert.equal((await d.owner.submit(scope)).ok,true);
+  const w=(await d.svc.completion({...payer,body:{}})).completion;
+  assert.equal((await d.svc.photo({...payer,body:{photoId:photo.photoId}})).ok,true);
+  assert.equal((await d.svc.approve({...payer,body:{completionId:w.completionId,manifestDigest:w.manifestDigest,expectedAmountCents:2000,version:w.version}})).ok,true);
+  const g=await changeGrant(s);assert.equal((await asPayer(s,c=>changePin(c,g,pepper))).ok,true);
+ }
+ const read=()=>d.owner.fundedCancellationStatus(contract);
+ const offer=async (terms={})=>d.owner.offerFundedCancellation({...contract,milestoneId:s.milestoneId,payoutCents:500,refundCents:1500,reason:"Mutually negotiated cancellation and refund",stateDigest:(await read()).view.stages[0].stateDigest,...terms});
+ const accept=o=>d.svc.acceptFundedCancellation({...payer,planId:contract.planId,body:{offerId:o.offerId,offerDigest:o.offerDigest,payoutCents:Number(o.payoutCents),refundCents:Number(o.refundCents)}});
+ const reserve=()=>d.svc.reserve({...payer,body:{pin:s.pin,expectedAmountCents:2000,idempotencyKey:randomUUID()}});
+ return {d,items,contract,s,payer,read,offer,accept,reserve};
+}
+async function cancellationReview(f,caseId){
+ const {s,d}=f,scope={tenantId:s.tenantId,milestoneId:s.milestoneId,caseId};
+ async function actor(role){
+  const actorId=randomUUID(),key=randomBytes(32);
+  await pool.query("INSERT INTO securepay_private.dispute_actors(tenant_id,actor_id,role,secret) VALUES($1,$2,$3,$4)",[s.tenantId,actorId,role,key]);
+  return {actorId,key,service:makeDisputeActor({pool:disputePool,key,actorId})};
+ }
+ const one=await actor("reviewer"),two=await actor("reviewer"),auth=await actor("settlement");
+ const assign=async a=>pool.query("INSERT INTO securepay_private.dispute_photo_reviewers(case_id,tenant_id,reviewer_id) VALUES($1,$2,$3)",[caseId,s.tenantId,a.actorId]);
+ const owner=makeDisputeActor({pool:disputePool,actorId:d.actorId,key:d.key});
+ const amounts={payoutCents:500,refundCents:1500},digest=randomBytes(32).toString("hex");
+ const review=(a,action,split=amounts)=>a.service.action({...scope,action,details:"Independent reasoned review of negotiated cancellation",evidenceDigest:digest,...split});
+ const settlement={...scope,settlementId:randomUUID(),...amounts};
+ const approval=makeSettlementAuthorizer({pool:settlementPool,key:auth.key,actorId:auth.actorId}),confirm=makeSettlementProvider({pool:providerPool,key:providerKey});
+ return {one,two,assign,owner,scope,review,settlement,approval,confirm};
+}
+test("negotiated funded cancellation conserves exact funds and requires independent review, consent, authority and provider receipts",async()=>{
+ const f=await fundedCancellationFixture(),{d,contract,s,payer,read,offer,accept}=f;
+ assert.equal((await offer({refundCents:1600})).ok,false);
+ assert.equal((await offer({stateDigest:"0".repeat(64)})).ok,false);
+ const proposed=await offer();assert.equal(proposed.ok,true);
+ assert.equal((await offer()).ok,false);
+ assert.equal((await state(s)).status,"planned");
+ assert.deepEqual(await balanceFor(s),{funded_cents:"2000",payout_cents:"0",refund_cents:"0",remaining_cents:"2000"});
+ assert.equal((await accept({...proposed.offer,refundCents:"1499"})).ok,false);
+ const foreign=await completionFixture();
+ assert.equal((await foreign.svc.acceptFundedCancellation({...foreign.payer,planId:contract.planId,body:{offerId:proposed.offer.offerId,offerDigest:proposed.offer.offerDigest,payoutCents:500,refundCents:1500}})).ok,false);
+ const results=await Promise.all([accept(proposed.offer),accept(proposed.offer)]);assert.equal(results.filter(x=>x.ok).length,1);
+ const caseId=results.find(x=>x.ok).negotiatedCase;
+ assert.equal((await state(s)).status,"disputed");
+ const r=await cancellationReview(f,caseId);
+ assert.equal((await r.approval.authorize(r.settlement)).ok,false);
+ assert.equal((await r.review(r.one,"decide")).ok,false);
+ await r.assign(r.one);await r.assign(r.two);
+ assert.equal((await r.review(r.one,"decide")).ok,true);
+ const view=(await read()).view.offers[0];assert.equal(view.caseStatus,"decided");assert.equal(view.decisionPayoutCents,"500");assert.equal(view.decisionRefundCents,"1500");
+ const ack=body=>d.svc.acknowledgeNegotiated({...payer,planId:contract.planId,body});
+ const body={offerId:proposed.offer.offerId,decisionId:view.decision.eventId,payoutCents:500,refundCents:1500};
+ assert.equal((await ack({...body,decisionId:randomUUID()})).ok,false);
+ assert.equal((await ack({...body,refundCents:1499})).ok,false);
+ assert.equal((await r.review(r.two,"finalize")).ok,false);
+ assert.equal((await ack(body)).ok,true);
+ assert.equal((await r.owner.action({...r.scope,action:"ack",details:"Owner accepts provisional decision"})).ok,true);
+ assert.equal((await r.review(r.one,"finalize")).ok,false);
+ assert.equal((await r.review(r.two,"finalize")).ok,true);
+ assert.equal((await r.confirm.dispatch({...r.settlement,kind:"refund"})).ok,false);
+ assert.equal((await r.approval.authorize(r.settlement)).ok,true);
+ const refund=await r.confirm.dispatch({...r.settlement,kind:"refund"});assert.equal(refund.ok,true);
+ const receipt=randomUUID();
+ assert.equal((await r.confirm.record({...r.settlement,...refund,outcome:"confirmed",receipt})).status,"applied");
+ assert.equal((await r.confirm.record({...r.settlement,...refund,outcome:"confirmed",receipt})).status,"duplicate");
+ assert.equal((await state(s)).status,"disputed");
+ assert.equal((await balanceFor(s)).remaining_cents,"500");
+ const payout=await r.confirm.dispatch({...r.settlement,kind:"payout"});assert.equal(payout.ok,true);
+ assert.equal((await r.confirm.record({...r.settlement,...payout,outcome:"confirmed",receipt:randomUUID()})).ok,true);
+ assert.equal((await state(s)).status,"settled");
+ assert.deepEqual(await balanceFor(s),{funded_cents:"2000",payout_cents:"500",refund_cents:"1500",remaining_cents:"0"});
+ const closed=(await read()).view.offers[0];assert.equal(closed.caseStatus,"settled");assert.equal(closed.confirmedRefundCents,"1500");assert.equal(closed.confirmedPayoutCents,"500");
+ assert.equal((await verifyAuditChain(auditPool,s.tenantId)).ok,true);
+});
+test("pending negotiated offer cannot survive changed work state, and accepted cancellation disables ordinary release",async()=>{
+ const f=await fundedCancellationFixture({approved:true}),{s,offer,accept,read,reserve,d,contract}=f;
+ const first=await offer();assert.equal(first.ok,true);
+ const pending=await reserve();assert.equal(pending.ok,true);
+ assert.equal((await accept(first.offer)).ok,false);
+ assert.equal((await read()).view.offers[0].current,false);
+ assert.equal((await d.owner.withdrawFundedCancellation({...contract,offerId:first.offer.offerId})).ok,true);
+ const second=await offer();assert.equal(second.ok,true);
+ const accepted=await accept(second.offer);assert.equal(accepted.ok,true);
+ assert.equal((await provider.beginDispatch({...s,requestId:pending.releaseRequestId})).ok,false);
+ assert.equal((await reserve()).ok,false);
+ assert.equal((await balanceFor(s)).remaining_cents,"2000");
+});
+test("concurrent negotiated cancellation and ordinary dispatch cannot both succeed",async()=>{
+ const f=await fundedCancellationFixture({approved:true}),{s,offer,accept,reserve}=f;
+ const pending=await reserve();assert.equal(pending.ok,true);const proposed=await offer();assert.equal(proposed.ok,true);
+ const [a,b]=await Promise.all([accept(proposed.offer),provider.beginDispatch({...s,requestId:pending.releaseRequestId})]);
+ assert.equal(Number(a.ok)+Number(b.ok),1);
+ assert.equal((await state(s)).status,a.ok?"disputed":"release_pending");
+});
+test("payer appeal prevents finalization until both sides give appeal evidence and independent reviewer decides",async()=>{
+ const f=await fundedCancellationFixture(),{d,contract,payer,read,offer,accept}=f;
+ const o=await offer(),a=await accept(o.offer),r=await cancellationReview(f,a.negotiatedCase);await r.assign(r.one);await r.assign(r.two);
+ assert.equal((await r.review(r.one,"decide")).ok,true);
+ const decision=(await read()).view.offers[0].decision.eventId;
+ const body={offerId:o.offer.offerId,decisionId:decision,reason:"Customer disputes the amount retained",evidenceDigest:randomBytes(32).toString("hex")};
+ assert.equal((await d.svc.appealNegotiated({...payer,planId:contract.planId,body})).ok,true);
+ assert.equal((await r.review(r.two,"finalize")).ok,false);
+ assert.equal((await r.owner.action({...r.scope,action:"evidence",details:"Owner response to appeal",evidenceDigest:randomBytes(32).toString("hex")})).ok,true);
+ const revised={payoutCents:0,refundCents:2000};
+ assert.equal((await r.review(r.two,"finalize",revised)).ok,true);
+ assert.equal((await r.approval.authorize(r.settlement)).ok,false);
+ const final={...r.settlement,...revised};assert.equal((await r.approval.authorize(final)).ok,true);
+ const leg=await r.confirm.dispatch({...final,kind:"refund"});assert.equal(leg.ok,true);
+ assert.equal((await r.confirm.dispatch({...final,kind:"payout"})).ok,false);
+ assert.equal((await r.confirm.record({...final,...leg,outcome:"confirmed",receipt:randomUUID()})).ok,true);
+ assert.equal((await balanceFor(f.s)).refund_cents,"2000");assert.equal((await state(f.s)).status,"settled");
 });
