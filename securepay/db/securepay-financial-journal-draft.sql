@@ -47,7 +47,7 @@ ALTER FUNCTION securepay_private.post_financial_journal() OWNER TO securepay_con
 REVOKE ALL ON FUNCTION securepay_private.post_financial_journal() FROM PUBLIC;
 CREATE TRIGGER sp_post_provider_journal AFTER INSERT ON securepay_private.provider_events FOR EACH ROW EXECUTE FUNCTION securepay_private.post_financial_journal();
 CREATE TRIGGER sp_post_leg_journal AFTER UPDATE OF status ON securepay_private.settlement_legs FOR EACH ROW EXECUTE FUNCTION securepay_private.post_financial_journal();
-CREATE TRIGGER sp_chain_financial_journal AFTER INSERT ON securepay_private.financial_journal FOR EACH ROW EXECUTE FUNCTION securepay_private.capture_audit_chain();
+CREATE TRIGGER sp_chain_financial_journal AFTER INSERT OR UPDATE OR DELETE ON securepay_private.financial_journal FOR EACH ROW EXECUTE FUNCTION securepay_private.capture_audit_chain();
 CREATE FUNCTION securepay_private.financial_balance(t uuid,m uuid)
  RETURNS TABLE(funded_cents numeric,payout_cents numeric,refund_cents numeric,remaining_cents numeric)
  LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
@@ -60,4 +60,35 @@ $$;
 ALTER FUNCTION securepay_private.financial_balance(uuid,uuid) OWNER TO securepay_context_owner;
 REVOKE ALL ON FUNCTION securepay_private.financial_balance(uuid,uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION securepay_private.financial_balance(uuid,uuid) TO securepay_audit_runtime;
+-- Independently compare journal rows to verified source events and confirmed legs.
+CREATE FUNCTION securepay_private.verify_financial_journal(t uuid,m uuid) RETURNS boolean
+ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
+ WITH expected AS (
+  SELECT CASE WHEN e.kind='funded' THEN 'funding' ELSE 'ordinary_payout' END AS kind,
+   CASE WHEN e.kind='funded' THEN e.funding_ref ELSE e.transaction_ref END AS source_ref,e.amount_cents
+  FROM securepay_private.provider_events e WHERE e.tenant_id=t AND e.milestone_id=m AND e.kind IN ('funded','released')
+  UNION ALL
+  SELECT 'settlement_'||l.kind,l.receipt,l.amount_cents
+  FROM securepay_private.settlement_legs l JOIN securepay_private.dispute_cases c ON c.case_id=l.case_id
+  WHERE c.tenant_id=t AND c.milestone_id=m AND l.status='confirmed'
+ ), actual AS (
+  SELECT j.kind,j.source_ref,j.amount_cents FROM securepay_private.financial_journal j WHERE j.tenant_id=t AND j.milestone_id=m
+ ), differences AS (
+  (SELECT * FROM expected EXCEPT ALL SELECT * FROM actual)
+  UNION ALL (SELECT * FROM actual EXCEPT ALL SELECT * FROM expected)
+ )
+ SELECT EXISTS(SELECT 1 FROM public.securepay_milestones WHERE tenant_id=t AND id=m)
+ AND NOT EXISTS(SELECT 1 FROM differences)
+ AND (SELECT remaining_cents>=0 FROM securepay_private.financial_balance(t,m))
+ AND NOT EXISTS(
+  SELECT 1 FROM securepay_private.provider_funding f
+  CROSS JOIN LATERAL securepay_private.financial_balance(t,m) b
+  WHERE f.tenant_id=t AND f.milestone_id=m
+  AND (f.amount_cents<>b.funded_cents OR (f.status IN ('settled','released') AND b.remaining_cents<>0))
+ )
+$$;
+ALTER FUNCTION securepay_private.verify_financial_journal(uuid,uuid) OWNER TO securepay_context_owner;
+REVOKE ALL ON FUNCTION securepay_private.verify_financial_journal(uuid,uuid) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION securepay_private.verify_financial_journal(uuid,uuid) TO securepay_audit_runtime;
+
 COMMIT;
