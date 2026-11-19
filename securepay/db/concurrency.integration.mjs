@@ -2405,3 +2405,87 @@ test("administrator succession HTTP route is restricted to independent administr
   assert.equal((await balanceFor(f.d.s)).remaining_cents,"5000");
  }finally{await new Promise(r=>s.close(r));}
 });
+
+async function participantFixture(){
+ const f=await governedFixture(),{d,t}=f,{makePayerService}=await import("../domain/payer-service.mjs");
+ const svc=makePayerService({pool:payerPool,signingKey:payerSigningKey,pepper,disputeScanner:scanner});
+ const completionScanner=makeEvidenceScanner({key:scanKey,scan:async()=>"clean",purpose:"completion"});
+ const owner=makeWorkCompletionOwner({pool:completionPool,actorId:d.owner.actorId,key:d.owner.key,scanner:completionScanner,disputeScanner:scanner});
+ const scope={tenantId:t,milestoneId:d.s.milestoneId},payer={...scope,identity:{subject:d.s.subject,authTime:Math.floor(Date.now()/1000)}};
+ const customer=(op,body={})=>svc.participant({...payer,op,body}),business=(op,body={})=>owner.participant({...scope,op,body});
+ const command=async(party,op,body={})=>{const v=(await party("view")).participant;return party(op,{caseId:v.case.caseId,stateDigest:v.stateDigest,reason:"Documented action and supporting explanation",...body});};
+ return {...f,svc,owner,payer,customer,business,command};
+}
+test("participant migration enforces scoped evidence upload, repair inspection and exact bilateral decision consent",async()=>{
+ await pool.query(await readFile(new URL("securepay-participant-draft.sql",import.meta.url),"utf8"));
+ const f=await participantFixture(),{d,t,caseId,customer,business,command}=f;
+ const own=await customer("view"),foreign=await participantFixture();
+ assert.equal(own.ok,true);assert.equal(own.participant.case.role,"customer");assert.equal((await business("view")).participant.case.role,"owner");
+ assert.equal((await foreign.svc.participant({...foreign.payer,milestoneId:d.s.milestoneId,op:"view",body:{}})).ok,false);
+ assert.equal((await foreign.owner.participant({tenantId:t,milestoneId:d.s.milestoneId,op:"view",body:{}})).ok,false);
+ const raw=pngFixture(),photo=await customer("upload",{caseId,mediaType:"image/png",content:raw.toString("base64")});assert.equal(photo.ok,true);
+ assert.deepEqual(Buffer.from((await business("photo",{caseId,photoId:photo.participant.photoId,source:"dispute"})).participant.content,"base64"),raw);
+ assert.equal((await customer("upload",{caseId,mediaType:"image/png",content:Buffer.from("not a valid png").toString("base64")})).ok,false);
+ assert.equal((await customer("evidence",{caseId,stateDigest:own.participant.stateDigest,reason:"Stale supporting materials"})).ok,false);
+ assert.equal((await command(customer,"evidence")).ok,true);
+ assert.equal((await command(business,"repair",{action:"propose",dueEpoch:Math.floor(Date.now()/1000)+3600,photoId:null})).ok,true);
+ assert.equal((await command(customer,"repair",{action:"accept_plan",dueEpoch:null,photoId:null})).ok,true);
+ const repair=await business("upload",{caseId,mediaType:"image/png",content:raw.toString("base64")});assert.equal(repair.ok,true);
+ const repairId=repair.participant.photoId;
+ assert.equal((await command(business,"repair",{action:"submit_repair",dueEpoch:null,photoId:repairId})).ok,true);
+ assert.equal((await command(customer,"repair",{action:"accept_repair",dueEpoch:null,photoId:repairId})).ok,false);
+ assert.equal((await d.customer.repairService.repair({...d.scope,action:"accept_repair",details:"Legacy repair consent",photoId:repairId})).ok,false);
+ assert.equal((await customer("photo",{caseId,photoId:repairId,source:"dispute"})).ok,true);
+ assert.equal((await command(customer,"repair",{action:"accept_repair",dueEpoch:null,photoId:repairId})).ok,true);
+ assert.equal((await f.action("enroll")).ok,true);for(const actor of [d.reviewer,d.second,d.authorizer])assert.equal((await f.action("assign",actor.actorId)).ok,true);
+ for(const x of [f.first,f.second,f.authorizer])assert.equal((await f.declare(x)).ok,true);
+ const review=async(a,action)=>{const v=await a.read(caseId);for(const p of [...v.case.photos,...v.case.linkedPhotos])if(!p.purged)assert.ok(await a.photo({caseId,photoId:p.photoId,source:p.source}));return a.decide({caseId,action,reason:"Reviewed completed repair and original evidence",payoutCents:5000,refundCents:0,stateDigest:v.stateDigest});};
+ assert.equal((await review(f.firstReview,"decide")).ok,true);
+ const v=(await customer("view")).participant,c=v.case,terms={decisionId:c.decision.eventId,payoutCents:5000,refundCents:0};
+ assert.equal((await d.call(d.customer,"ack","Legacy consent")).ok,false);
+ assert.equal((await command(customer,"ack",{...terms,payoutCents:4999})).ok,false);
+ assert.equal((await command(customer,"ack",terms)).ok,true);
+ assert.equal((await customer("ack",{caseId,stateDigest:v.stateDigest,reason:"Duplicate stale decision acceptance",...terms})).ok,false);
+ assert.equal((await command(business,"ack",terms)).ok,true);
+ assert.equal((await review(f.secondReview,"finalize")).ok,true);
+ assert.equal((await balanceFor(d.s)).remaining_cents,"5000");
+ assert.equal((await verifyAuditChain(auditPool,t)).ok,true);
+});
+test("ordinary participant appeals bind exact provisional decision and require fresh evidence from both sides",async()=>{
+ const f=await participantFixture(),{d,caseId,customer,business,command}=f;
+ assert.equal((await f.action("enroll")).ok,true);for(const x of [d.reviewer,d.second,d.authorizer])assert.equal((await f.action("assign",x.actorId)).ok,true);for(const x of [f.first,f.second,f.authorizer])assert.equal((await f.declare(x)).ok,true);
+ const review=async(a,action,payoutCents=3000,refundCents=2000)=>{const v=await a.read(caseId);for(const p of [...v.case.photos,...v.case.linkedPhotos])if(!p.purged)assert.ok(await a.photo({caseId,photoId:p.photoId,source:p.source}));return a.decide({caseId,action,reason:"Reasoned independent assessment of evidence",payoutCents,refundCents,stateDigest:v.stateDigest});};
+ assert.equal((await review(f.firstReview,"decide")).ok,true);
+ const terms={decisionId:(await customer("view")).participant.case.decision.eventId,payoutCents:3000,refundCents:2000};
+ assert.equal((await command(customer,"appeal",{...terms,decisionId:randomUUID()})).ok,false);
+ assert.equal((await command(customer,"appeal",terms)).ok,true);
+ assert.equal((await review(f.secondReview,"finalize",2500,2500)).ok,false);
+ assert.equal((await command(business,"evidence",{reason:"Owner responds to new appeal evidence"})).ok,true);
+ assert.equal((await review(f.secondReview,"finalize",2500,2500)).ok,true);
+ const after=(await customer("view")).participant.case;assert.equal(after.status,"final");assert.equal(after.refundCents,"2500");assert.equal(after.confirmedRefundCents,"0");
+});
+test("customer and owner dispute portals route screened uploads and exact scope through the gateway",async()=>{
+ const {createCompletionRouter}=await import("../../server/securepay-completion.js"),{createSecurePayRouter}=await import("../../server/securepay-router.js"),{createSecurePayGateway}=await import("../../server/securepay-gateway.js"),{createServer}=await import("node:http"),{default:express}=await import("express");
+ const {mkdtemp,rm}=await import("node:fs/promises"),{tmpdir}=await import("node:os"),{join}=await import("node:path");
+ const f=await participantFixture(),{d,t,caseId}=f,dir=await mkdtemp(join(tmpdir(),"sp-party-")),socket=join(dir,"authority.sock");
+ const a=express(),g=express(),o=express();
+ a.use("/v1/securepay",createSecurePayRouter({enabled:true,service:f.svc,verifyToken:async token=>({subject:token,authTime:Math.floor(Date.now()/1000)})}));
+ g.use("/v1/securepay",createSecurePayGateway({NODE_ENV:"test",SECUREPAY_SANDBOX_ENABLED:"true",SECUREPAY_AUTHORITY_SOCKET:socket}));
+ o.use("/v1/securepay-completion",createCompletionRouter({enabled:true,tenantId:t,subject:"owner",verifyToken:async token=>({subject:token}),owner:f.owner}));
+ const as=createServer(a),gs=createServer(g),os=createServer(o);await Promise.all([new Promise(r=>as.listen(socket,r)),new Promise(r=>gs.listen(0,"127.0.0.1",r)),new Promise(r=>os.listen(0,"127.0.0.1",r))]);
+ try{
+  const cb="http://127.0.0.1:"+gs.address().port+"/v1/securepay",ob="http://127.0.0.1:"+os.address().port+"/v1/securepay-completion";
+  const post=(url,body,token)=>fetch(url,{method:"POST",headers:{"content-type":"application/json",authorization:"Bearer "+token},body:JSON.stringify(body)});
+  const customer=(op,body={},token=d.s.subject)=>post(cb+"/tenants/"+t+"/milestones/"+d.s.milestoneId+"/case-"+op,body,token),owner=(op,body={},token="owner")=>post(ob+"/"+d.s.milestoneId+"/case-"+op,body,token);
+  assert.equal((await fetch(cb+"/disputes")).status,200);assert.equal((await fetch(ob+"/disputes")).status,200);
+  assert.equal((await customer("view",{},"other")).status,403);assert.equal((await owner("view",{},"other")).status,403);
+  const v=await customer("view");assert.equal(v.status,200);assert.equal((await v.json()).participant.case.caseId,caseId);
+  const p=await owner("upload",{caseId,mediaType:"image/png",content:pngFixture().toString("base64")});assert.equal(p.status,200);const {participant:pic}=await p.json();
+  const read=await customer("photo",{caseId,photoId:pic.photoId,source:"dispute"});assert.equal(read.status,200);assert.equal((await read.json()).participant.digest,pic.digest);
+  const upload=await customer("upload",{caseId,mediaType:"image/png",content:pngFixture().toString("base64")});assert.equal(upload.status,200);
+  const view=await owner("view");assert.equal(view.status,200);const current=(await view.json()).participant;
+  assert.equal((await owner("evidence",{caseId,stateDigest:current.stateDigest,reason:"Supporting evidence and response"})).status,200);
+  assert.equal((await owner("evidence",{caseId,stateDigest:current.stateDigest,reason:"Stale state replay"})).status,403);
+  assert.equal((await balanceFor(d.s)).remaining_cents,"5000");
+ }finally{await Promise.all([new Promise(r=>as.close(r)),new Promise(r=>gs.close(r)),new Promise(r=>os.close(r))]);await rm(dir,{recursive:true,force:true});}
+});
