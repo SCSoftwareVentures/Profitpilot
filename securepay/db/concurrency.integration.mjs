@@ -1951,6 +1951,11 @@ test("assigned reviewer queue, immutable evidence read and state-bound decision 
  assert.deepEqual(receiptRows.map(x=>x.photo_id).sort(),[p.photoId,extra.photoId].sort(),"Photo receipts must be persisted for both images");
  assert.ok(receiptRows.every(x=>x.source==="dispute"),"Receipt scope must match dispute source");
  assert.equal((await reviewer.read(d.scope.caseId)).stateDigest,current.stateDigest,"Photo reads must not change adjudication snapshot");
+ // The approved-work fixture also links the original completion photo to
+ // the dispute. Both evidence sources must be inspected independently.
+ assert.ok(current.case.linkedPhotos.length>0);
+ assert.equal((await reviewer.decide({...cmd,stateDigest:current.stateDigest})).ok,false);
+ for(const p of current.case.linkedPhotos)assert.ok(await reviewer.photo({caseId:d.scope.caseId,photoId:p.photoId,source:p.source}));
  assert.equal((await reviewer.decide({...cmd,stateDigest:current.stateDigest})).ok,true);
  assert.equal((await d.approval.authorize(d.settlement)).ok,false);
  assert.equal((await d.call(d.customer,"ack","Customer acknowledged")).ok,true);
@@ -1959,7 +1964,7 @@ test("assigned reviewer queue, immutable evidence read and state-bound decision 
  assert.equal((await reviewer.decide({...cmd,action:"finalize",stateDigest:same.stateDigest})).ok,false);
  const independent=await second.read(d.scope.caseId);
  assert.equal((await second.decide({...cmd,action:"finalize",stateDigest:independent.stateDigest})).ok,false);
- for(const p of independent.case.photos)assert.ok(await second.photo({caseId:d.scope.caseId,photoId:p.photoId,source:p.source}));
+ for(const p of [...independent.case.photos,...independent.case.linkedPhotos])assert.ok(await second.photo({caseId:d.scope.caseId,photoId:p.photoId,source:p.source}));
  assert.equal((await second.decide({...cmd,action:"finalize",stateDigest:independent.stateDigest})).ok,true);
  assert.equal((await state(d.s)).status,"disputed");
  for(const sql of ["SELECT * FROM securepay_private.dispute_cases","SELECT * FROM securepay_private.dispute_photos","SELECT * FROM securepay_private.dispute_actors","SELECT securepay_private.authorize_settlement(NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)"]){await assert.rejects(reviewerPool.query(sql),e=>e.code==="42501");}
@@ -2012,6 +2017,9 @@ test("separate reviewer HTTP service enforces distinct MFA audience, assigned ca
   const cmd={caseId:d.scope.caseId,action:"decide",reason:"Reasoned and proportionate resolution",payoutCents:3000,refundCents:2000,stateDigest:review.stateDigest};
   assert.equal((await post("decision",cmd)).status,403);
   const image=await post("photo",{caseId:d.scope.caseId,photoId:p.photoId,source:"dispute"});assert.equal(image.status,200);assert.equal((await image.json()).photo.digest,p.digest);
+  assert.ok(review.case.linkedPhotos.length>0);
+  assert.equal((await post("decision",cmd)).status,403);
+  for(const p of review.case.linkedPhotos){const linked=await post("photo",{caseId:d.scope.caseId,photoId:p.photoId,source:p.source});assert.equal(linked.status,200);assert.equal((await linked.json()).photo.digest,p.digest);}
   assert.equal((await post("decision",cmd)).status,200);
   assert.equal((await post("authorize",{})).status,404);assert.equal((await d.approval.authorize(d.settlement)).ok,false);
  }finally{if(service)await service.close();await new Promise(r=>jwks.close(r));}
