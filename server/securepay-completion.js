@@ -7,7 +7,9 @@ import {createServer} from "node:http";
 import {fileURLToPath} from "node:url";
 import {createPayerTokenVerifier} from "./securepay-router.js";
 import {authoritySecrets} from "./securepay-gateway.js";
-import {ownerCompletionPage,ownerQuotePage,ownerContractPage,ownerCancellationPage,sendPortalPage} from "./securepay-portal-page.js";
+import {ownerCompletionPage,ownerQuotePage,ownerContractPage,ownerCancellationPage,participantPage,sendPortalPage} from "./securepay-portal-page.js";
+import {validParticipantRequest,participantOps} from "../securepay/db/participant.mjs";
+import {projectParticipant} from "./securepay-participant-view.js";
 import {projectFundedCancellation} from "./securepay-funded-cancellation-view.js";
 import {projectContract} from "./securepay-contract-view.js";
 import {makeWorkCompletionOwner} from "../securepay/db/work-completion.mjs";
@@ -21,13 +23,14 @@ export function createCompletionRouter({enabled=false,tenantId,subject,verifyTok
  if(!enabled)return router;
  if(!uuid.test(tenantId)||typeof subject!=="string"||!subject||typeof verifyToken!=="function"||!owner)throw Error("Completion authority unavailable");
  router.use(rateLimit({windowMs:60000,limit:30,standardHeaders:true,legacyHeaders:false}));
+ router.get("/disputes",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,participantPage("owner")));
  router.get("/cancellations",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,ownerCancellationPage()));
  router.get("/contracts",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,ownerContractPage()));
  router.get("/quotes",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,ownerQuotePage()));
  router.get("/upload",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,ownerCompletionPage()));
  let uploading=false;
  router.post("/:milestoneId/:action",async(req,res,next)=>{
-  if(req.originalUrl.includes("?")||!uuid.test(req.params.milestoneId)||!["status","start","upload","submit","quote-status","publish-quote","offer-plan","withdraw-plan","contract-status","offer-change","withdraw-change","funded-cancellation-status","offer-funded-cancellation","withdraw-funded-cancellation","ack-negotiated"].includes(req.params.action))return res.status(404).json({error:"Not found"});
+  if(req.originalUrl.includes("?")||!uuid.test(req.params.milestoneId)||!["status","start","upload","submit","quote-status","publish-quote","offer-plan","withdraw-plan","contract-status","offer-change","withdraw-change","funded-cancellation-status","offer-funded-cancellation","withdraw-funded-cancellation","ack-negotiated",...participantOps.map(x=>"case-"+x)].includes(req.params.action))return res.status(404).json({error:"Not found"});
   try{
    const token=req.headers.authorization?.match(/^Bearer ([^\s]{1,8192})$/i)?.[1];
    if(!token)return res.status(401).json({error:"Authentication required"});
@@ -37,7 +40,7 @@ export function createCompletionRouter({enabled=false,tenantId,subject,verifyTok
    next();
   }catch{return res.status(401).json({error:"Authentication required"});}
  },(req,res,next)=>{
-  if(req.params.action!=="upload")return express.json({limit:req.params.action==="offer-plan"?"40kb":"8kb",strict:true})(req,res,next);
+  if(!["upload","case-upload"].includes(req.params.action))return express.json({limit:req.params.action==="offer-plan"?"40kb":"8kb",strict:true})(req,res,next);
   if(uploading)return res.status(429).json({error:"Upload busy"});
   uploading=true;
   let released=false,processing=false,closed=false;
@@ -51,6 +54,7 @@ export function createCompletionRouter({enabled=false,tenantId,subject,verifyTok
   const {milestoneId,action}=req.params,body=req.body,scope={tenantId,milestoneId};
   try{
    let result;
+   if(action.startsWith("case-")){const op=action.slice(5);if(!validParticipantRequest(op,body))return res.status(400).json({error:"Invalid request"});result=await owner.participant({...scope,op,body});if(!result?.ok)return res.status(403).json({error:"Authorization denied"});return res.json({mode:"sandbox",moneyMoved:false,participant:projectParticipant(op,result.participant,milestoneId,"owner",body)});}
    if(["funded-cancellation-status","offer-funded-cancellation","withdraw-funded-cancellation","ack-negotiated"].includes(action)){
     const planId=milestoneId;
     if(action==="funded-cancellation-status"){
@@ -139,10 +143,10 @@ export function createCompletionRouter({enabled=false,tenantId,subject,verifyTok
  router.use((err,req,res,next)=>res.status(err.type==="entity.too.large"?413:400).json({error:"Invalid request"}));
  return router;
 }
-export async function startCompletionService(env=process.env,{scanner}={}){
+export async function startCompletionService(env=process.env,{scanner,disputeScanner}={}){
  if(env.SECUREPAY_COMPLETION_SANDBOX_ENABLED!=="true"||!["development","test"].includes(env.NODE_ENV))throw Error("Completion disabled");
  if([...authoritySecrets,"DATABASE_URL","TENANT_CONTEXT_HMAC_SECRET","SECUREPAY_REPORT_ACTOR_KEY","SECUREPAY_REPORT_DATABASE_URL"].some(k=>env[k]!==undefined))throw Error("Payment, staff or reporting secrets forbidden");
- if(scanner&&env.NODE_ENV!=="test")throw Error("Injected scanner restricted to tests");
+ if((scanner||disputeScanner)&&env.NODE_ENV!=="test")throw Error("Injected scanner restricted to tests");
  const {SECUREPAY_COMPLETION_ISSUER:issuer,SECUREPAY_COMPLETION_AUDIENCE:audience,SECUREPAY_COMPLETION_REQUIRED_ACR:requiredAcr,SECUREPAY_COMPLETION_JWKS_URL:jwks,SECUREPAY_COMPLETION_SUBJECT:subject,SECUREPAY_COMPLETION_TENANT_ID:tenantId,SECUREPAY_COMPLETION_ACTOR_ID:actorId,SECUREPAY_COMPLETION_DATABASE_URL:databaseUrl,SECUREPAY_COMPLETION_ACTOR_KEY:key}=env;
  const port=Number(env.SECUREPAY_COMPLETION_PORT??"3082");
  if(!issuer||!audience||!env.SECUREPAY_AUTH_AUDIENCE||!env.SECUREPAY_OWNER_AUDIENCE||[env.SECUREPAY_AUTH_AUDIENCE,env.SECUREPAY_OWNER_AUDIENCE,env.SECUREPAY_RECOVERY_AUDIENCE,env.AUTH_AUDIENCE].includes(audience)||!requiredAcr||!subject||!uuid.test(tenantId)||!uuid.test(actorId)||!databaseUrl||!hex.test(key??"")||!Number.isInteger(port)||port<0||port>65535)throw Error("Completion configuration incomplete");
@@ -156,7 +160,8 @@ export async function startCompletionService(env=process.env,{scanner}={}){
  try{
   const {rows:[r]}=await pool.query("SELECT current_user AS role");if(r.role!=="securepay_completion_runtime")throw Error("Incorrect completion role");
   const app=express();app.disable("x-powered-by");
-  app.use("/v1/securepay-completion",createCompletionRouter({enabled:true,tenantId,subject,verifyToken:createPayerTokenVerifier({issuer,audience,requiredAcr,keyResolver:createRemoteJWKSet(url)}),owner:makeWorkCompletionOwner({pool,actorId,key:Buffer.from(key,"hex"),scanner})}));
+  if(!disputeScanner&&env.SECUREPAY_COMPLETION_DISPUTE_SCAN_KEY!==undefined){const dk=env.SECUREPAY_COMPLETION_DISPUTE_SCAN_KEY;if(!hex.test(dk)||[key,env.SECUREPAY_COMPLETION_SCAN_KEY].some(x=>x?.toLowerCase()===dk.toLowerCase()))throw Error("Independent dispute scan key required");disputeScanner=makeEvidenceScanner({key:Buffer.from(dk,"hex"),keyId:env.SECUREPAY_COMPLETION_DISPUTE_SCAN_KEY_ID??"primary",scan:clamavScanner({timeoutMs:7000}),normalizeJPEG:jpegNormalizer({timeoutMs:4000})});}
+  app.use("/v1/securepay-completion",createCompletionRouter({enabled:true,tenantId,subject,verifyToken:createPayerTokenVerifier({issuer,audience,requiredAcr,keyResolver:createRemoteJWKSet(url)}),owner:makeWorkCompletionOwner({pool,actorId,key:Buffer.from(key,"hex"),scanner,disputeScanner})}));
   const server=createServer(app);server.requestTimeout=15000;server.headersTimeout=5000;
   await new Promise((resolve,reject)=>{server.once("error",reject);server.listen(port,"127.0.0.1",resolve);});
   return {server,close:async()=>{await new Promise((resolve,reject)=>server.close(e=>e?reject(e):resolve()));await pool.end();}};
