@@ -93,6 +93,32 @@ ALTER FUNCTION securepay_private.store_dispute_photo(uuid,uuid,uuid,uuid,uuid,te
 REVOKE ALL ON FUNCTION securepay_private.store_dispute_photo(uuid,uuid,uuid,uuid,uuid,text,text,bytea,bigint,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION securepay_private.store_dispute_photo(uuid,uuid,uuid,uuid,uuid,text,text,bytea,bigint,text) TO securepay_dispute_runtime;
 
+-- Reviewers must have an explicit case assignment before reading photo bytes.
+CREATE TABLE securepay_private.dispute_photo_reviewers(
+ case_id uuid NOT NULL REFERENCES securepay_private.dispute_cases(case_id),
+ tenant_id uuid NOT NULL,reviewer_id uuid NOT NULL,
+ PRIMARY KEY(case_id,reviewer_id),
+ FOREIGN KEY(tenant_id,reviewer_id) REFERENCES securepay_private.dispute_actors(tenant_id,actor_id)
+);
+ALTER TABLE securepay_private.dispute_photo_reviewers OWNER TO securepay_context_owner;
+REVOKE ALL ON securepay_private.dispute_photo_reviewers FROM PUBLIC,securepay_dispute_runtime;
+CREATE FUNCTION securepay_private.read_dispute_photo(p uuid,t uuid,m uuid,d uuid,a uuid,expires bigint,sig text)
+ RETURNS TABLE(media_type text,digest text,content bytea)
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE c securepay_private.dispute_cases%ROWTYPE; role_name text;
+BEGIN
+ IF p IS NULL OR t IS NULL OR m IS NULL OR d IS NULL OR a IS NULL THEN RETURN; END IF;
+ role_name:=securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-photo-read-v1',p,t,m,d,a,expires),expires,sig);
+ IF role_name IS NULL OR role_name NOT IN ('owner','customer','reviewer') THEN RETURN; END IF;
+ SELECT * INTO c FROM securepay_private.dispute_cases WHERE case_id=d AND tenant_id=t AND milestone_id=m;
+ IF NOT FOUND OR (role_name='owner' AND a<>c.owner_id) OR (role_name='customer' AND a<>c.customer_id)
+ OR (role_name='reviewer' AND (a IN (c.owner_id,c.customer_id) OR NOT EXISTS(SELECT 1 FROM securepay_private.dispute_photo_reviewers v WHERE v.case_id=d AND v.tenant_id=t AND v.reviewer_id=a))) THEN RETURN; END IF;
+ RETURN QUERY SELECT q.media_type,q.digest,q.content FROM securepay_private.dispute_photos q WHERE q.photo_id=p AND q.case_id=d;
+END $$;
+ALTER FUNCTION securepay_private.read_dispute_photo(uuid,uuid,uuid,uuid,uuid,bigint,text) OWNER TO securepay_context_owner;
+REVOKE ALL ON FUNCTION securepay_private.read_dispute_photo(uuid,uuid,uuid,uuid,uuid,bigint,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION securepay_private.read_dispute_photo(uuid,uuid,uuid,uuid,uuid,bigint,text) TO securepay_dispute_runtime;
+
 CREATE FUNCTION securepay_private.repair_action(e uuid,t uuid,m uuid,d uuid,a uuid,op text,details text,due bigint,photo uuid,expires bigint,sig text) RETURNS boolean
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE c securepay_private.dispute_cases%ROWTYPE; role_name text; now_at timestamptz:=clock_timestamp(); photo_digest text;
