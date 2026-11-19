@@ -1,6 +1,7 @@
 // Unmounted customer service boundary. HTTP auth middleware must supply the
 // verified identity; never populate it from request data.
 // No live dispatch or external provider access.
+import {participantRequest} from "../db/participant.mjs";
 import {randomUUID} from "node:crypto";
 import {withPayer} from "../db/with-payer.mjs";
 import {authorizePayerInTransaction} from "../db/authorize-with-pin.mjs";
@@ -12,7 +13,7 @@ function exact(body,keys){
  return body!==null&&typeof body==="object"&&!Array.isArray(body)&&
  Object.keys(body).length===keys.length&&keys.every(k=>Object.hasOwn(body,k));
 }
-export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecovery,contextKeyId="primary",commandAuthority,recoveryKeyId="primary"}){
+export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecovery,contextKeyId="primary",commandAuthority,recoveryKeyId="primary",disputeScanner}){
  if(!pool?.connect||!Buffer.isBuffer(signingKey)||signingKey.length!==32||!validKeyId(contextKeyId)||
     !Buffer.isBuffer(pepper)||pepper.length<32||signingKey.equals(pepper))
   throw new Error("SecurePay service unavailable");
@@ -39,6 +40,15 @@ export function makePayerService({pool,signingKey,pepper,recoveryKey,verifyRecov
  });
  const bad=()=>{throw Object.assign(new Error("Invalid request"),{status:400});};
  return Object.freeze({
+  async participant({identity,tenantId,milestoneId,op,body}){
+   const ctx=context(identity,tenantId);if(typeof milestoneId!=="string"||!uuid.test(milestoneId))bad();
+   return authenticated(ctx,async c=>{
+    const {rows:[r]}=await c.query("SELECT securepay_private.current_payer($1) AS actor",[tenantId]);if(!r?.actor)return {ok:false};
+    const invoke=async(action,payload)=>(await c.query("SELECT securepay_private.payer_participant($1,$2,$3,$4::jsonb) AS result",[tenantId,milestoneId,action,JSON.stringify(payload)])).rows[0]?.result;
+    const result=await participantRequest({invoke,scanner:disputeScanner,tenantId,milestoneId,actorId:r.actor,op,body});
+    return result?{ok:true,participant:result}:{ok:false};
+   });
+  },
   async fundedCancellation({identity,tenantId,planId,body}){
    const ctx=context(identity,tenantId);if(typeof planId!=="string"||!uuid.test(planId)||!exact(body,[]))bad();
    return authenticated(ctx,async c=>{
