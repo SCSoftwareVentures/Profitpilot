@@ -9,10 +9,10 @@ export function createRecoveryVerifier({issuer,audience,requiredAcr,keyResolver}
     requiredClaims:["sub","exp","iat","auth_time","acr","jti"],maxTokenAge:"2m",clockTolerance:3});
   const now=Math.floor(Date.now()/1000);
   if(payload.sub!==subject||payload.acr!==requiredAcr||payload.tenant_id!==tenantId||payload.purpose!=="securepay-pin-"+purpose||
-     !["enroll","recover"].includes(purpose)||!Number.isInteger(payload.auth_time)||payload.auth_time<now-120||payload.auth_time>now+3||
+     !["enroll","recover"].includes(purpose)||!Number.isInteger(payload.auth_time)||payload.auth_time<now-120||payload.auth_time>now||
      !Number.isInteger(payload.exp)||payload.exp<=now||payload.exp>now+300||typeof payload.jti!=="string"||!payload.jti||payload.jti.length>200)
     throw new Error("Recovery assertion denied");
-  return Object.freeze({digest:createHash("sha256").update(JSON.stringify([issuer,payload.jti])).digest("hex"),expires:payload.exp});
+  return Object.freeze({digest:createHash("sha256").update(JSON.stringify([issuer,payload.jti])).digest("hex"),expires:payload.exp,authTime:payload.auth_time});
  };
 }
 export async function issueRecoveryGrant(c,{tenantId,subject,purpose,assertion},key){
