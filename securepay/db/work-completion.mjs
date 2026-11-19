@@ -7,6 +7,18 @@ export function makeWorkCompletionOwner({pool,actorId,key,scanner}){
  if(!pool?.query||!Buffer.isBuffer(key)||key.length!==32||typeof scanner?.attest!=="function")throw Error("Completion authority unavailable");
  const mac=args=>createHmac("sha256",key).update(args.join(":")).digest("hex");
  return Object.freeze({
+  async publishQuote({quoteId=randomUUID(),tenantId,jobId,previousDigest=null,description,totalCents}){
+   ids(quoteId,tenantId,jobId);
+   if((previousDigest!==null&&(typeof previousDigest!=="string"||!/^[a-f0-9]{64}$/.test(previousDigest)))||typeof description!=="string"||!description.trim()||description.length>4000||description.includes("\0")||!Number.isSafeInteger(totalCents)||totalCents<=0)throw Error("Invalid quote");
+   const exp=expiry(),args=[quoteId,tenantId,jobId,actorId,previousDigest,description,totalCents,exp];
+   const {rows:[r]}=await pool.query("SELECT securepay_private.publish_quote($1,$2,$3,$4,$5,$6,$7,$8,$9) AS quote",[...args,mac(["sp-quote-publish-v1",quoteId,tenantId,jobId,actorId,previousDigest??"-",Buffer.from(description).toString("hex"),totalCents,exp])]);
+   return r?.quote?{ok:true,quote:r.quote}:{ok:false};
+  },
+  async quoteStatus({tenantId,jobId}){
+   ids(tenantId,jobId);const exp=expiry(),args=[tenantId,jobId,actorId,exp];
+   const {rows:[r]}=await pool.query("SELECT securepay_private.owner_quote_view($1,$2,$3,$4,$5) AS view",[...args,mac(["sp-quote-view-v1",...args])]);
+   return r?.view?{ok:true,view:r.view}:{ok:false};
+  },
   async offerPlan({planId=randomUUID(),tenantId,jobId,items}){
    ids(planId,tenantId,jobId);
    if(!Array.isArray(items)||items.length<1||items.length>20||items.some(x=>!x||typeof x!=="object"||Object.keys(x).length!==4||!uuid.test(x.milestoneId)||!Number.isSafeInteger(x.amountCents)||x.amountCents<=0||typeof x.description!=="string"||!x.description.trim()||x.description.length>500||typeof x.final!=="boolean"))throw Error("Invalid milestone plan");
