@@ -153,4 +153,164 @@ REVOKE ALL ON FUNCTION securepay_private.admin_queue(uuid,uuid,bigint,text) FROM
 GRANT EXECUTE ON FUNCTION securepay_private.admin_queue(uuid,uuid,bigint,text) TO securepay_dispute_admin_runtime;
 ALTER FUNCTION securepay_private.governance_settlement_ok(uuid,uuid,uuid) OWNER TO securepay_context_owner;
 REVOKE ALL ON FUNCTION securepay_private.governance_settlement_ok(uuid,uuid,uuid) FROM PUBLIC;
+CREATE OR REPLACE FUNCTION securepay_private.read_dispute_photo(p uuid,t uuid,m uuid,d uuid,a uuid,expires bigint,sig text)
+ RETURNS TABLE(media_type text,digest text,content bytea)
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE c securepay_private.dispute_cases%ROWTYPE; role_name text; record_photo securepay_private.dispute_photos%ROWTYPE; secret_key bytea; plain bytea;
+BEGIN
+ IF p IS NULL OR t IS NULL OR m IS NULL OR d IS NULL OR a IS NULL THEN RETURN; END IF;
+ role_name:=securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-photo-read-v1',p,t,m,d,a,expires),expires,sig);
+ IF role_name IS NULL OR role_name NOT IN ('owner','customer','reviewer') THEN RETURN; END IF;
+ SELECT * INTO c FROM securepay_private.dispute_cases WHERE case_id=d AND tenant_id=t AND milestone_id=m;
+ IF NOT FOUND OR (role_name='owner' AND a<>c.owner_id) OR (role_name='customer' AND a<>c.customer_id)
+ OR (role_name='reviewer' AND NOT securepay_private.reviewer_assigned(t,d,a)) THEN RETURN; END IF;
+ SELECT q.* INTO record_photo FROM securepay_private.dispute_photos q WHERE q.photo_id=p AND q.case_id=d;
+ IF NOT FOUND OR record_photo.purged_at IS NOT NULL THEN RETURN; END IF;
+ SELECT secret INTO secret_key FROM securepay_private.evidence_keys WHERE key_id=record_photo.key_id AND read_enabled;
+ IF secret_key IS NULL THEN RAISE EXCEPTION 'Evidence unavailable' USING ERRCODE='22000'; END IF;
+ plain:=public.pgp_sym_decrypt_bytea(record_photo.content,encode(secret_key,'hex'));
+ IF octet_length(plain)<>record_photo.plaintext_size OR encode(public.digest(plain,'sha256'),'hex')<>record_photo.digest THEN
+  RAISE EXCEPTION 'Evidence integrity failure' USING ERRCODE='22000';
+ END IF;
+ PERFORM securepay_private.append_audit_chain(t,'dispute_photos','READ',encode(public.digest(convert_to(concat_ws(':',p,d,a,record_photo.digest),'UTF8'),'sha256'),'hex'));
+ RETURN QUERY SELECT record_photo.media_type,record_photo.digest,plain;
+END $$;
+CREATE OR REPLACE FUNCTION securepay_private.dispute_work_evidence(t uuid,m uuid,d uuid,a uuid,p uuid,expires bigint,sig text) RETURNS jsonb
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE c securepay_private.dispute_cases%ROWTYPE;role_name text;photo securepay_private.work_photos%ROWTYPE;k bytea;plain bytea;items jsonb;
+BEGIN
+ role_name:=securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-linked-work-v1',t,m,d,a,coalesce(p::text,'-'),expires),expires,sig);
+ IF role_name IS NULL OR t IS NULL OR m IS NULL OR d IS NULL OR a IS NULL THEN RETURN NULL; END IF;
+ PERFORM 1 FROM public.securepay_milestones WHERE tenant_id=t AND id=m FOR UPDATE;
+ IF NOT FOUND THEN RETURN NULL; END IF;
+ SELECT * INTO c FROM securepay_private.dispute_cases WHERE tenant_id=t AND milestone_id=m AND case_id=d FOR UPDATE;
+ IF NOT FOUND OR NOT ((role_name='customer' AND a=c.customer_id) OR (role_name='owner' AND a=c.owner_id) OR (role_name='reviewer' AND securepay_private.reviewer_assigned(t,d,a))) THEN RETURN NULL; END IF;
+ IF p IS NULL THEN
+  SELECT coalesce(jsonb_agg(jsonb_build_object('completionId',w.completion_id,'manifestDigest',l.manifest_digest,'comments',w.comments,'status',w.status,'rejectionReason',w.rejection_reason,
+   'photos',(SELECT coalesce(jsonb_agg(jsonb_build_object('photoId',q.photo_id,'digest',q.digest,'purged',q.purged_at IS NOT NULL) ORDER BY q.photo_id),'[]'::jsonb) FROM securepay_private.work_photos q WHERE q.completion_id=w.completion_id)) ORDER BY w.completion_id),'[]'::jsonb) INTO items
+  FROM securepay_private.work_dispute_links l JOIN securepay_private.work_completion w ON w.completion_id=l.completion_id WHERE l.case_id=d AND l.tenant_id=t;
+  RETURN jsonb_build_object('completions',items);
+ END IF;
+ SELECT q.* INTO photo FROM securepay_private.work_photos q JOIN securepay_private.work_dispute_links l ON l.completion_id=q.completion_id WHERE l.case_id=d AND l.tenant_id=t AND q.photo_id=p AND q.tenant_id=t;
+ IF NOT FOUND OR photo.purged_at IS NOT NULL THEN RETURN NULL; END IF;
+ SELECT secret INTO k FROM securepay_private.evidence_keys WHERE key_id=photo.key_id AND read_enabled;
+ IF k IS NULL THEN RAISE EXCEPTION 'Evidence unavailable'; END IF;
+ plain:=public.pgp_sym_decrypt_bytea(photo.content,encode(k,'hex'));
+ IF octet_length(plain)<>photo.plaintext_size OR encode(public.digest(plain,'sha256'),'hex')<>photo.digest THEN RAISE EXCEPTION 'Evidence integrity failure'; END IF;
+ PERFORM securepay_private.append_audit_chain(t,'work_photos','READ',encode(public.digest(convert_to(concat_ws(':',p,d,a,photo.digest),'UTF8'),'sha256'),'hex'));
+ RETURN jsonb_build_object('photoId',p,'digest',photo.digest,'content',replace(encode(plain,'base64'),chr(10),''));
+END $$;
+CREATE OR REPLACE FUNCTION securepay_private.authorize_settlement(s uuid,t uuid,m uuid,d uuid,a uuid,payout bigint,refund bigint,expires bigint,sig text) RETURNS boolean
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE c securepay_private.dispute_cases%ROWTYPE; milestone public.securepay_milestones%ROWTYPE;
+BEGIN
+ IF s IS NULL OR t IS NULL OR m IS NULL OR d IS NULL OR a IS NULL OR payout IS NULL OR refund IS NULL OR payout<0 OR refund<0 OR
+ securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-settlement-v1',s,t,m,d,a,payout,refund,expires),expires,sig) IS DISTINCT FROM 'settlement' THEN RETURN false; END IF;
+ SELECT * INTO milestone FROM public.securepay_milestones WHERE tenant_id=t AND id=m FOR UPDATE;
+ IF NOT FOUND OR milestone.status<>'disputed' OR payout::numeric+refund::numeric<>milestone.amount_cents THEN RETURN false; END IF;
+ PERFORM 1 FROM securepay_private.provider_funding WHERE tenant_id=t AND milestone_id=m AND status='funded' AND amount_cents=milestone.amount_cents FOR UPDATE;
+ IF NOT FOUND THEN RETURN false; END IF;
+ SELECT * INTO c FROM securepay_private.dispute_cases WHERE case_id=d AND tenant_id=t AND milestone_id=m FOR UPDATE;
+ IF NOT FOUND OR c.status<>'final' OR a IN (c.customer_id,c.owner_id,c.first_reviewer,c.final_reviewer) OR
+ payout<>c.payout_cents OR refund<>c.refund_cents OR NOT securepay_private.governance_settlement_ok(t,d,a) THEN RETURN false; END IF;
+ INSERT INTO securepay_private.dispute_settlements(settlement_id,case_id,authorizer,payout_cents,refund_cents,status) VALUES(s,d,a,payout,refund,'authorized');
+ UPDATE securepay_private.dispute_cases SET status='authorized' WHERE case_id=d;
+ RETURN true;
+EXCEPTION WHEN unique_violation THEN RETURN false;
+END $$;
+CREATE OR REPLACE FUNCTION securepay_private.dispatch_settlement_leg(s uuid,t uuid,m uuid,d uuid,k text)
+ RETURNS TABLE(leg_id uuid,attempt integer,amount_cents bigint)
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE amount bigint;
+BEGIN
+ IF k IS NULL OR k NOT IN ('payout','refund') THEN RETURN; END IF;
+ SELECT x.amount_cents INTO amount FROM public.securepay_milestones x WHERE x.tenant_id=t AND x.id=m AND x.status='disputed' FOR UPDATE;
+ IF NOT FOUND THEN RETURN; END IF;
+ PERFORM 1 FROM securepay_private.provider_funding f WHERE f.tenant_id=t AND f.milestone_id=m AND f.status='funded' AND f.amount_cents=amount FOR UPDATE;
+ IF NOT FOUND THEN RETURN; END IF;
+ PERFORM 1 FROM securepay_private.dispute_cases c WHERE c.case_id=d AND c.tenant_id=t AND c.milestone_id=m AND c.status='authorized' FOR UPDATE;
+ IF NOT FOUND THEN RETURN; END IF;
+ PERFORM 1 FROM securepay_private.dispute_settlements x WHERE x.settlement_id=s AND x.case_id=d AND x.status IN ('authorized','submitted') FOR UPDATE;
+ IF NOT FOUND THEN RETURN; END IF;
+ IF NOT EXISTS(SELECT 1 FROM securepay_private.dispute_settlements st WHERE st.settlement_id=s AND securepay_private.governance_settlement_ok(t,d,st.authorizer)) THEN RETURN; END IF;
+ IF EXISTS(SELECT 1 FROM securepay_private.settlement_legs x WHERE x.settlement_id=s AND x.status IN ('unknown','not_executed'))
+ OR EXISTS(SELECT 1 FROM securepay_private.settlement_leg_conflicts x WHERE x.case_id=d AND x.resolved_at IS NULL) THEN RETURN; END IF;
+ RETURN QUERY UPDATE securepay_private.settlement_legs x SET status='submitted',attempts=x.attempts+1
+ WHERE x.settlement_id=s AND x.kind=k AND x.status='pending' AND x.attempts<4
+ RETURNING x.leg_id,x.attempts,x.amount_cents;
+ IF FOUND THEN UPDATE securepay_private.dispute_settlements SET status='submitted' WHERE settlement_id=s AND status='authorized'; END IF;
+END $$;
+CREATE FUNCTION securepay_private.governance_my_cases(t uuid,a uuid,expires bigint,sig text) RETURNS jsonb
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE wanted text;r jsonb;
+BEGIN
+ wanted:=securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-governance-my-v1',t,a,expires),expires,sig);
+ IF wanted IS NULL OR wanted NOT IN ('reviewer','settlement') THEN RETURN NULL; END IF;
+ SELECT coalesce(jsonb_agg(to_jsonb(q) ORDER BY q."caseId"),'[]'::jsonb) INTO r FROM (
+ SELECT c.case_id AS "caseId",c.status,c.severity,x.declaration_at IS NOT NULL AS declared,securepay_private.governance_eligible(t,c.case_id,a,wanted) AS eligible
+ FROM securepay_private.case_governance_assignments x JOIN securepay_private.dispute_cases c ON c.case_id=x.case_id AND c.tenant_id=x.tenant_id
+ WHERE x.tenant_id=t AND x.actor_id=a AND x.role=wanted AND c.status<>'settled' ORDER BY c.case_id LIMIT 101) q;
+ IF jsonb_array_length(r)>100 THEN RAISE EXCEPTION 'Assignment capacity exceeded'; END IF;
+ RETURN r;
+END $$;
+CREATE FUNCTION securepay_private.settlement_dashboard_snapshot(t uuid,d uuid,a uuid) RETURNS jsonb
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE r jsonb;
+BEGIN
+ IF NOT securepay_private.governance_cleared(t,d,a,'settlement') THEN RETURN NULL; END IF;
+ SELECT jsonb_build_object('caseId',c.case_id,'milestoneId',c.milestone_id,'caseStatus',c.status,'fundingStatus',f.status,'amountCents',m.amount_cents::text,'payoutCents',c.payout_cents::text,'refundCents',c.refund_cents::text,
+ 'journalVerified',securepay_private.verify_financial_journal(t,m.id),'fundedCents',b.funded_cents::text,'remainingCents',b.remaining_cents::text,
+ 'confirmedPayoutCents',b.payout_cents::text,'confirmedRefundCents',b.refund_cents::text,
+ 'unresolved',EXISTS(SELECT 1 FROM securepay_private.provider_reconciliation x WHERE x.tenant_id=t AND x.milestone_id=m.id AND x.resolved_at IS NULL) OR EXISTS(SELECT 1 FROM securepay_private.settlement_leg_conflicts x WHERE x.case_id=d AND x.resolved_at IS NULL),
+ 'independent',securepay_private.governance_settlement_ok(t,d,a),
+ 'decision',(SELECT jsonb_build_object('eventId',e.event_id,'reason',e.details,'digest',e.evidence_digest) FROM securepay_private.dispute_events e WHERE e.case_id=d AND e.action='finalize' ORDER BY e.occurred_at DESC,e.event_id DESC LIMIT 1),
+ 'settlementId',st.settlement_id,'settlementStatus',st.status,
+ 'legs',(SELECT coalesce(jsonb_agg(jsonb_build_object('kind',l.kind,'amountCents',l.amount_cents::text,'status',l.status) ORDER BY l.kind),'[]'::jsonb) FROM securepay_private.settlement_legs l WHERE l.case_id=d))
+ INTO r FROM securepay_private.dispute_cases c JOIN public.securepay_milestones m ON m.tenant_id=c.tenant_id AND m.id=c.milestone_id JOIN securepay_private.provider_funding f ON f.tenant_id=c.tenant_id AND f.milestone_id=c.milestone_id CROSS JOIN LATERAL securepay_private.financial_balance(t,m.id) b LEFT JOIN securepay_private.dispute_settlements st ON st.case_id=c.case_id WHERE c.tenant_id=t AND c.case_id=d;
+ RETURN r;
+END $$;
+CREATE FUNCTION securepay_private.settlement_dashboard_read(t uuid,d uuid,a uuid,expires bigint,sig text) RETURNS jsonb
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE r jsonb;mid uuid;
+BEGIN
+ IF securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-settlement-dashboard-v1',t,d,a,expires),expires,sig) IS DISTINCT FROM 'settlement' OR NOT securepay_private.governance_cleared(t,d,a,'settlement') THEN RETURN NULL; END IF;
+ SELECT milestone_id INTO mid FROM securepay_private.dispute_cases WHERE tenant_id=t AND case_id=d;
+ PERFORM 1 FROM public.securepay_milestones WHERE tenant_id=t AND id=mid FOR UPDATE;
+ PERFORM 1 FROM securepay_private.provider_funding WHERE tenant_id=t AND milestone_id=mid FOR UPDATE;
+ PERFORM 1 FROM securepay_private.dispute_cases WHERE tenant_id=t AND case_id=d FOR UPDATE;
+ r:=securepay_private.settlement_dashboard_snapshot(t,d,a);
+ IF r IS NULL THEN RETURN NULL; END IF;
+ PERFORM securepay_private.append_audit_chain(t,'settlement_dashboard','READ',encode(public.digest(convert_to(concat_ws(':',d,a),'UTF8'),'sha256'),'hex'));
+ RETURN jsonb_build_object('case',r,'stateDigest',encode(public.digest(convert_to(r::text,'UTF8'),'sha256'),'hex'));
+END $$;
+CREATE FUNCTION securepay_private.settlement_dashboard_authorize(s uuid,t uuid,d uuid,a uuid,payout bigint,refund bigint,state_hash text,expires bigint,sig text) RETURNS boolean
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE mid uuid;r jsonb;k bytea;inner_sig text;
+BEGIN
+ IF s IS NULL OR t IS NULL OR d IS NULL OR a IS NULL OR payout IS NULL OR refund IS NULL OR payout<0 OR refund<0 OR state_hash IS NULL OR state_hash !~ '^[a-f0-9]{64}$'
+ OR securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-settlement-dashboard-authorize-v1',s,t,d,a,payout,refund,state_hash,expires),expires,sig) IS DISTINCT FROM 'settlement' OR NOT securepay_private.governance_cleared(t,d,a,'settlement') THEN RETURN false; END IF;
+ SELECT milestone_id INTO mid FROM securepay_private.dispute_cases WHERE tenant_id=t AND case_id=d;
+ PERFORM 1 FROM public.securepay_milestones WHERE tenant_id=t AND id=mid FOR UPDATE;
+ PERFORM 1 FROM securepay_private.provider_funding WHERE tenant_id=t AND milestone_id=mid FOR UPDATE;
+ PERFORM 1 FROM securepay_private.dispute_cases WHERE tenant_id=t AND case_id=d FOR UPDATE;
+ r:=securepay_private.settlement_dashboard_snapshot(t,d,a);
+ IF r IS NULL OR encode(public.digest(convert_to(r::text,'UTF8'),'sha256'),'hex')<>state_hash
+ OR r->>'caseStatus'<>'final' OR r->>'fundingStatus'<>'funded' OR NOT (r->>'journalVerified')::boolean OR (r->>'unresolved')::boolean OR NOT (r->>'independent')::boolean
+ OR r->>'payoutCents' IS DISTINCT FROM payout::text OR r->>'refundCents' IS DISTINCT FROM refund::text OR (r->>'remainingCents')::numeric<>payout::numeric+refund::numeric OR r->'decision'='null'::jsonb THEN RETURN false; END IF;
+ SELECT secret INTO k FROM securepay_private.dispute_actors WHERE tenant_id=t AND actor_id=a AND active AND role='settlement';
+ IF k IS NULL THEN RETURN false; END IF;
+ inner_sig:=encode(public.hmac(convert_to(concat_ws(':','sp-settlement-v1',s,t,mid,d,a,payout,refund,expires),'UTF8'),k,'sha256'),'hex');
+ RETURN securepay_private.authorize_settlement(s,t,mid,d,a,payout,refund,expires,inner_sig);
+END $$;
+ALTER FUNCTION securepay_private.governance_my_cases(uuid,uuid,bigint,text) OWNER TO securepay_context_owner;
+REVOKE ALL ON FUNCTION securepay_private.governance_my_cases(uuid,uuid,bigint,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION securepay_private.governance_my_cases(uuid,uuid,bigint,text) TO securepay_reviewer_runtime,securepay_settlement_dashboard_runtime;
+ALTER FUNCTION securepay_private.settlement_dashboard_snapshot(uuid,uuid,uuid) OWNER TO securepay_context_owner;
+REVOKE ALL ON FUNCTION securepay_private.settlement_dashboard_snapshot(uuid,uuid,uuid) FROM PUBLIC;
+ALTER FUNCTION securepay_private.settlement_dashboard_read(uuid,uuid,uuid,bigint,text) OWNER TO securepay_context_owner;
+REVOKE ALL ON FUNCTION securepay_private.settlement_dashboard_read(uuid,uuid,uuid,bigint,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION securepay_private.settlement_dashboard_read(uuid,uuid,uuid,bigint,text) TO securepay_settlement_dashboard_runtime;
+ALTER FUNCTION securepay_private.settlement_dashboard_authorize(uuid,uuid,uuid,uuid,bigint,bigint,text,bigint,text) OWNER TO securepay_context_owner;
+REVOKE ALL ON FUNCTION securepay_private.settlement_dashboard_authorize(uuid,uuid,uuid,uuid,bigint,bigint,text,bigint,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION securepay_private.settlement_dashboard_authorize(uuid,uuid,uuid,uuid,bigint,bigint,text,bigint,text) TO securepay_settlement_dashboard_runtime;
 COMMIT;
