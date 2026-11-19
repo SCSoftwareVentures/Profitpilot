@@ -1,6 +1,7 @@
 import {createHmac,createHash,randomBytes} from "node:crypto";
 import {hasRecentMfa} from "./auth.js";
 import {invoiceIntakeFields} from "../src/invoice-intake.js";
+import {supplierCostFields} from "../src/supplier-cost.js";
 import {workspaceJobFields} from "../src/workspace-jobs.js";
 import {WORKSPACE_KINDS,workspaceRecordFields,workspaceVersionFields} from "../src/workspace-records.js";
 import {canonicalAllocationMapping} from "../src/payroll-allocation-mapping.js";
@@ -228,4 +229,12 @@ export function invoiceIntakeStatusProof(tenant,batch,order,identity,env=process
 export function invoiceIntakeStepProof(tenant,batch,order,input,scope,step,identity,env=process.env,now=Math.floor(Date.now()/1000)){
  const f=invoiceIntakeFields(input);if(![tenant,batch,order].every(x=>typeof x==="string"&&uuid.test(x))||!f)denied();
  return [tenant,batch,order,...f,scope,step,...securityWorkProof(tenant,order,"privileged_operation",scope,step,identity,env,now).slice(5)];
+}
+
+export function supplierCostStepProof(t,b,o,input,step,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ const fields=supplierCostFields(input);if(![t,b,o].every(x=>typeof x==="string"&&uuid.test(x))||!fields)denied();
+ const scope=createHash("sha256").update(["supplier-cost-v1",b,...fields].join("\n")).digest("hex");return [t,b,o,...fields,scope,step,...securityWorkProof(t,o,"privileged_operation",scope,step,identity,env,now).slice(5)];
+}
+export function supplierCostStatusProof(t,b,o,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ if(![t,b,o].every(x=>typeof x==="string"&&uuid.test(x)))denied();const scope=createHash("sha256").update(["supplier-cost-status-v1",b].join("\n")).digest("hex");return [...signedAction("profitpilot-sensitive-api-v1",[t,o,"supplier_cost_status",scope],identity,env,now),b];
 }

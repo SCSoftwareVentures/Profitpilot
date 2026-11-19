@@ -14,7 +14,7 @@ export async function verifyFinanceWebDriver({base,tenant,token,run,traceDigest}
  const proc=spawn(driver,kind==="firefox"?["--host","127.0.0.1","--port",String(port)]:["--host=127.0.0.1","--port="+port],{stdio:"ignore",detached:true});
  let launchError,session,closing=false;proc.on("error",e=>{launchError=e;});
  const command=async(method,path,body)=>{
-  const res=await fetch(endpoint+path,{method,headers:{...(body===undefined?{}:{"Content-Type":"application/json"})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(20000)});
+  let res;try{res=await fetch(endpoint+path,{method,headers:{...(body===undefined?{}:{"Content-Type":"application/json"})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(path==="/session"?60000:25000)});}catch(e){throw Error("WebDriver transport failed: "+method+" "+path.replace(/\/session\/[^/]+/,"/session")+" ("+e.name+")");}
   const x=await res.json();
   if(!res.ok||x.value?.error)throw Error("WebDriver "+method+" "+path.replace(/\/session\/[^/]+/,"/session")+(x.value?.error?": "+x.value.error:" failed"));
   return x.value;

@@ -1180,6 +1180,42 @@ paths:
         "200": { description: Review state; accepted only after consumption }
         "403": { description: Authority denied }
         "409": { description: Ineligible source or conflicting state }
+  /tenants/{tenantId}/supplier-costs/{batchId}/orders/{orderId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: batchId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: orderId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Read reviewed supplier cost disposition
+      responses:
+        '200': { description: "Exact reviewed status; not included in calculation" }
+        '403': { description: Authority denied }
+    post:
+      summary: Request, independently approve, reject or record supplier cost disposition
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [intakeScopeDigest, classification, evidenceDigest, confirm, step]
+              properties:
+                intakeScopeDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                classification: { enum: [direct_site, overhead_pending, payroll_overlap, excluded] }
+                evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                confirm: { const: true }
+                step: { enum: [request, approve, reject, consume] }
+      responses:
+        '200': { description: "Reviewed disposition; no financial calculation or payment" }
+        '403': { description: Authority denied }
+        '409': { description: Conflicting classification }
 components:
   schemas:
     ErrorResponse:
