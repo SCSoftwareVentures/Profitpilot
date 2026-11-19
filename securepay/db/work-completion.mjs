@@ -7,6 +7,11 @@ export function makeWorkCompletionOwner({pool,actorId,key,scanner}){
  if(!pool?.query||!Buffer.isBuffer(key)||key.length!==32||typeof scanner?.attest!=="function")throw Error("Completion authority unavailable");
  const mac=args=>createHmac("sha256",key).update(args.join(":")).digest("hex");
  return Object.freeze({
+  async status({tenantId,milestoneId}){
+   ids(tenantId,milestoneId);const exp=expiry(),args=[tenantId,milestoneId,actorId,exp];
+   const {rows:[r]}=await pool.query("SELECT securepay_private.owner_work_status($1,$2,$3,$4,$5) AS result",[...args,mac(["sp-work-status-v1",...args])]);
+   return r?.result?{ok:true,view:r.result}:{ok:false};
+  },
   async start({completionId=randomUUID(),tenantId,milestoneId}){
    ids(completionId,tenantId,milestoneId);const exp=expiry(),args=[completionId,tenantId,milestoneId,actorId,exp];
    const {rows:[r]}=await pool.query("SELECT securepay_private.start_work_completion($1,$2,$3,$4,$5,$6) AS ok",[...args,mac(["sp-work-start-v1",...args])]);
