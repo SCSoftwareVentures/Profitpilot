@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {Script,createContext} from "node:vm";
 import {createHash,randomUUID} from "node:crypto";
-import {customerPortalPage,ownerDashboardPage,customerQuotePage,ownerQuotePage,customerContractPage,ownerContractPage,customerCancellationPage,reviewerPage,disputeAdminPage,settlementAuthorizationPage,postAuthorizationPage} from "../../server/securepay-portal-page.js";
+import {customerPortalPage,ownerDashboardPage,customerQuotePage,ownerQuotePage,customerContractPage,ownerContractPage,customerCancellationPage,reviewerPage,disputeAdminPage,settlementAuthorizationPage,postAuthorizationPage,administratorSuccessionPage} from "../../server/securepay-portal-page.js";
 import {createPayerTokenVerifier} from "../../server/securepay-router.js";
 import {generateKeyPair,SignJWT} from "jose";
 function ui(page,responses){
@@ -175,4 +175,16 @@ test("post-authorisation authoriser cannot reaffirm until both independent revie
  const h=ui(postAuthorizationPage("settlement"),[response({postAuth:{review,stateDigest:digest,votes:[v]}}),response({postAuth:{review,stateDigest:digest,votes:[v,v]}})]);
  h.get("case-ref").value=caseId;h.get("token").value="fixture";h.get("outcome").value="reaffirm";await h.fire("load");h.get("confirm").checked=true;await h.fire("confirm","change");assert.equal(h.get("vote").disabled,true);
  await h.fire("load");h.get("confirm").checked=true;await h.fire("confirm","change");assert.equal(h.get("vote").disabled,false);
+});
+
+test("succession dashboard refuses its own approval and requires current exact request plus separate consent",async()=>{
+ const caseId=randomUUID(),requestId=randomUUID(),nominee=randomUUID(),stateDigest="a".repeat(64),previousAdmin=randomUUID(),q={caseId,requestId,nominee,stateDigest,previousAdmin,caseStatus:"final",reason:"Inactive administrator replacement",requestedByMe:false,current:true};
+ const reply=x=>({code:200,data:{mode:"sandbox",moneyMoved:false,...x}});
+ const h=ui(administratorSuccessionPage(),[reply({cases:[{...q,requestedByMe:true}]}),reply({cases:[q]}),reply({succession:{requestId,status:"approved"}}),reply({cases:[]})]);
+ h.get("token").value="fixture";await h.fire("load");h.get("case-ref").value=caseId;h.get("request-ref").value=requestId;h.get("action").value="approve";h.get("reason").value="Independent verification of the replacement administrator";h.get("confirm").checked=true;await h.fire("confirm","change");
+ await h.fire("submit");assert.equal(h.calls.length,1);
+ await h.fire("load");assert.equal(h.get("submit").disabled,true);
+ h.get("confirm").checked=true;await h.fire("confirm","change");await h.fire("submit");
+ assert.deepEqual(JSON.parse(h.calls[2].opts.body),{caseId,requestId,nominee,stateDigest,action:"approve",reason:"Independent verification of the replacement administrator"});
+ assert.match(h.get("message").textContent,/No payment moved/);
 });
