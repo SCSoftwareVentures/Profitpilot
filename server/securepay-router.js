@@ -52,6 +52,10 @@ export function createSecurePayRouter({enabled=false,verifyToken,service,takeBud
    const result=await fn(req);
    if(!result?.ok)return res.status(403).json({error:"Authorization denied"});
    // Response whitelist: never return credentials, proof references or raw SQL errors.
+   if(result.fundedCancellation)return res.json({mode:"sandbox",moneyMoved:false,cancellation:result.fundedCancellation});
+   if(result.negotiatedCase)return res.json({mode:"sandbox",moneyMoved:false,status:"negotiation_opened",caseId:result.negotiatedCase});
+   if(result.negotiatedAcknowledged)return res.json({mode:"sandbox",moneyMoved:false,status:"decision_acknowledged"});
+   if(result.negotiatedAppealed)return res.json({mode:"sandbox",moneyMoved:false,status:"decision_appealed"});
    if(result.contract)return res.json({mode:"sandbox",moneyMoved:false,contract:result.contract});
    if(result.changeAccepted)return res.json({mode:"sandbox",moneyMoved:false,status:"change_accepted",changeId:result.changeAccepted});
    if(result.plan){if(!result.plan.quote)return res.status(403).json({error:"Authorization denied"});return res.json({mode:"sandbox",moneyMoved:false,...result.plan});}
@@ -73,6 +77,7 @@ export function createSecurePayRouter({enabled=false,verifyToken,service,takeBud
    return res.status(status).json({error:status===400?"Invalid request":status===409?"Conflicting request":status===403?"Authorization denied":"SecurePay unavailable"});
   }
  };
+ for(const [route,method] of [["funded-cancellation","fundedCancellation"],["accept-funded-cancellation","acceptFundedCancellation"],["ack-negotiated","acknowledgeNegotiated"],["appeal-negotiated","appealNegotiated"]])router.post("/tenants/:tenantId/plans/:planId/"+route,handle(req=>service[method]({identity:req.payerIdentity,tenantId:req.params.tenantId,planId:req.params.planId,body:req.body})));
  router.post("/tenants/:tenantId/plans/:planId/contract",handle(req=>service.contract({identity:req.payerIdentity,tenantId:req.params.tenantId,planId:req.params.planId,body:req.body})));
  router.post("/tenants/:tenantId/plans/:planId/accept-change",handle(req=>service.acceptChange({identity:req.payerIdentity,tenantId:req.params.tenantId,planId:req.params.planId,body:req.body})));
  router.post("/tenants/:tenantId/plans/:planId/view",handle(req=>service.plan({identity:req.payerIdentity,tenantId:req.params.tenantId,planId:req.params.planId,body:req.body})));
