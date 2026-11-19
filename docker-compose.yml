@@ -95,6 +95,7 @@ services:
       - ./database/migrations/077_business_overhead_calculation.sql:/docker-entrypoint-initdb.d/079-business-overhead-calculation.sql:ro
       - ./database/migrations/078_financial_coverage.sql:/docker-entrypoint-initdb.d/080-financial-coverage.sql:ro
       - ./database/migrations/079_reviewed_invoice_credits.sql:/docker-entrypoint-initdb.d/081-reviewed-invoice-credits.sql:ro
+      - ./database/migrations/080_invoice_credit_reversals.sql:/docker-entrypoint-initdb.d/082-invoice-credit-reversals.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s

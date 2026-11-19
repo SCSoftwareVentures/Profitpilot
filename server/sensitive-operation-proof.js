@@ -1,7 +1,7 @@
 import {createHmac,createHash,randomBytes} from "node:crypto";
 import {hasRecentMfa} from "./auth.js";
 import {invoiceIntakeFields} from "../src/invoice-intake.js";
-import {invoiceCreditFields} from "../src/invoice-credit.js";
+import {invoiceCreditFields,invoiceCreditReversalFields} from "../src/invoice-credit.js";
 import {supplierCostFields} from "../src/supplier-cost.js";
 import {sharedCostFields,sharedCostCorrectionFields} from "../src/shared-cost.js";
 import {workspaceJobFields} from "../src/workspace-jobs.js";
@@ -273,4 +273,10 @@ export function invoiceCreditStatusProof(t,l,o,identity,env=process.env,now=Math
  if(![t,l,o].every(x=>typeof x==="string"&&uuid.test(x)))denied();
  const scope=createHash("sha256").update(["invoice-credit-status-v1",l].join("\n")).digest("hex");
  return [...signedAction("profitpilot-sensitive-api-v1",[t,o,"invoice_credit_status",scope],identity,env,now),l];
+}
+
+export function invoiceCreditReversalProof(t,l,o,input,step,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ const f=invoiceCreditReversalFields(input);if(![t,l,o].every(x=>typeof x==="string"&&uuid.test(x))||!f||o===f[0])denied();
+ const scope=createHash("sha256").update(["invoice-credit-reversal-v1",l,...f].join("\n")).digest("hex");
+ return [t,l,o,...f,scope,step,...securityWorkProof(t,o,"privileged_operation",scope,step,identity,env,now).slice(5)];
 }

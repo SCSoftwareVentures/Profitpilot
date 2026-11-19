@@ -209,6 +209,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/077_business_overhead_calculation.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/078_financial_coverage.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/079_reviewed_invoice_credits.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/080_invoice_credit_reversals.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/public-runtime-grants.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/private-privilege.catalog.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f tests/invoice-privacy.sql
@@ -382,6 +383,12 @@ jobs:
         run: |
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/invoice-credit-api.integration.test.js
 
+      - name: Verify reviewed full credit reversals and reconciliation
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
+        run: |
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/invoice-credit-reversal-api.integration.test.js
+
       - name: Verify real Firefox report workflow
         env:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
@@ -398,8 +405,8 @@ jobs:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
           set -eu
-          sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends webkitgtk-webdriver xvfb xauth
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update -qq
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y --no-install-recommends webkitgtk-webdriver xvfb xauth
           WEBKIT_DRIVER="$(command -v WebKitWebDriver)"
           test -n "$WEBKIT_DRIVER"
           xvfb-run -a --server-args="-screen 0 1280x960x24" env PROFITPILOT_CI_WEBDRIVER="$WEBKIT_DRIVER" PROFITPILOT_CI_BROWSER=webkit TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/invoice-intake-api.integration.test.js
