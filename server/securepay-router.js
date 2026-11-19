@@ -14,9 +14,9 @@ export function createPayerTokenVerifier({issuer,audience,requiredAcr,keyResolve
   const now=clock();
   if(typeof payload.sub!=="string"||!payload.sub||payload.sub.length>512||
      payload.acr!==requiredAcr||!Number.isInteger(payload.auth_time)||
-     payload.auth_time>now+5||payload.auth_time<now-300)
+     payload.auth_time>now||payload.auth_time<now-300)
    throw new Error("Recent customer assurance required");
-  return {subject:payload.sub};
+  return {subject:payload.sub,authTime:payload.auth_time};
  };
 }
 export function createSecurePayRouter({enabled=false,verifyToken,service}={}){
