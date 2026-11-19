@@ -222,7 +222,7 @@ paths:
       - $ref: '#/components/parameters/TenantId'
     post:
       summary: Create a versioned contract/site/period calculation run
-      description: Server calculates from immutable input versions; no client-supplied output totals are trusted. The approved contract version tax basis must be explicit and must match every confirmed invoice source basis; unknown or mixed tax basis is blocked. Optional includeApprovedSupplierCosts true selects version 0.3.0 and includes independently classified direct supplier expenses; default false preserves version 0.2.0. Optional useSharedCostAllocations true selects version 0.4.0, requires active reviewed site payroll and overhead allocations, and includes direct supplier expenses. Optional useBusinessOverhead true selects formula 0.5.0, also requires all eligible reviewed business-wide overhead allocations, and charges only the selected site and contract share. useInvoiceCredits true selects formula 0.6.0, includes all reviewed cost allocations, and restates accepted original-period customer/direct supplier credits.
+      description: Server calculates from immutable input versions; no client-supplied output totals are trusted. The approved contract version tax basis must be explicit and must match every confirmed invoice source basis; unknown or mixed tax basis is blocked. Optional includeApprovedSupplierCosts true selects version 0.3.0 and includes independently classified direct supplier expenses; default false preserves version 0.2.0. Optional useSharedCostAllocations true selects version 0.4.0, requires active reviewed site payroll and overhead allocations, and includes direct supplier expenses. Optional useBusinessOverhead true selects formula 0.5.0, also requires all eligible reviewed business-wide overhead allocations, and charges only the selected site and contract share. useInvoiceCredits true selects formula 0.6.0, includes all reviewed cost allocations, and restates accepted original-period customer/direct supplier credits. useSharedOverheadCredits true selects formula 0.7.0 and also includes independently reviewed overhead credit shares.
       responses:
         "201":
           description: Incomplete management calculation run created with headline contribution and margin withheld
@@ -1315,6 +1315,8 @@ paths:
                 creditReferenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
                 amount: { type: string, pattern: '^(0|[1-9][0-9]{0,11})[.][0-9]{2}$' }
                 evidenceDigest: { type: string, pattern: '^[a-f0-9]{64}$' }
+                allocationOrderId: { type: string, format: uuid, description: Active overhead allocation for a shared credit; mutually exclusive with reversesOrderId }
+                shares: { type: array, minItems: 1, maxItems: 100, description: 'Ordered site, contract, baseline and amount tuples; three null identifiers for the optional unallocated remainder.', items: { type: array, minItems: 4, maxItems: 4 } }
                 reversesOrderId: { type: string, format: uuid, description: Optional recorded original credit order. Supply on each reversal step; amount must equal the original credit. }
                 confirm: { const: true }
                 step: { enum: [request, approve, reject, consume] }
