@@ -91,6 +91,7 @@ services:
       - ./database/migrations/073_shared_cost_allocation.sql:/docker-entrypoint-initdb.d/075-shared-cost-allocation.sql:ro
       - ./database/migrations/074_shared_cost_calculation.sql:/docker-entrypoint-initdb.d/076-shared-cost-calculation.sql:ro
       - ./database/migrations/075_shared_cost_corrections.sql:/docker-entrypoint-initdb.d/077-shared-cost-corrections.sql:ro
+      - ./database/migrations/076_business_overhead_allocation.sql:/docker-entrypoint-initdb.d/078-business-overhead-allocation.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
