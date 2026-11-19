@@ -109,3 +109,26 @@ test("draft RLS denies restricted role reads and mutations",async()=>{
   }finally{await c.query("ROLLBACK");c.release();}
   assert.equal((await state(s)).status,"approved");
 });
+
+test("proof that expires while waiting for the milestone lock is rejected",async()=>{
+  const s=await fixture(), a=await proof(s);
+  const blocker=await pool.connect();
+  let attempt;
+  try {
+    await blocker.query("BEGIN");
+    await blocker.query("SELECT id FROM securepay_milestones WHERE id=$1 FOR UPDATE",[s.milestoneId]);
+    await pool.query("UPDATE securepay_release_proofs SET expires_at=clock_timestamp()+interval '1 second' WHERE proof_ref=$1",[a.authorizationRef]);
+    attempt=reserveAuthorizedRelease(pool,a).then(value=>({value}),error=>({error}));
+    let waiting=false;
+    for(let i=0;i<30;i++){
+      const {rows:[r]}=await pool.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid<>pg_backend_pid() AND datname=current_database() AND wait_event_type='Lock' AND query LIKE 'SELECT id, amount_cents, status FROM securepay_milestones%'");
+      if(r.n>=1){waiting=true;break;}
+      await new Promise(r=>setTimeout(r,20));
+    }
+    assert.equal(waiting,true);
+    // Use the database clock rather than a client-side estimate.
+    await pool.query("SELECT pg_sleep(GREATEST(0,extract(epoch FROM (expires_at-clock_timestamp())))+0.1) FROM securepay_release_proofs WHERE proof_ref=$1",[a.authorizationRef]);
+  } finally {await blocker.query("ROLLBACK");blocker.release();}
+  assert.match((await attempt).error?.message??"",/Authorization rejected/);
+  assert.deepEqual(await state(s),{status:"approved",version:"0",requests:0,consumed:0});
+});
