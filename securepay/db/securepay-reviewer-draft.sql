@@ -62,25 +62,25 @@ BEGIN
  PERFORM securepay_private.append_audit_chain(t,'reviewer_case','READ',encode(public.digest(convert_to(concat_ws(':',d,a),'UTF8'),'sha256'),'hex'));
  RETURN jsonb_build_object('case',r,'stateDigest',encode(public.digest(convert_to(r::text,'UTF8'),'sha256'),'hex'));
 END $$;
-CREATE FUNCTION securepay_private.reviewer_photo(t uuid,d uuid,a uuid,p uuid,source text,expires bigint,sig text) RETURNS jsonb
+CREATE FUNCTION securepay_private.reviewer_photo(t uuid,d uuid,a uuid,p uuid,photo_source text,expires bigint,sig text) RETURNS jsonb
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE mid uuid;k bytea;inner_sig text;r jsonb;
 BEGIN
- IF source IS NULL OR source NOT IN ('dispute','completion') OR p IS NULL OR securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-review-photo-v1',t,d,a,p,source,expires),expires,sig) IS DISTINCT FROM 'reviewer' OR NOT securepay_private.reviewer_assigned(t,d,a) THEN RETURN NULL; END IF;
+ IF photo_source IS NULL OR photo_source NOT IN ('dispute','completion') OR p IS NULL OR securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-review-photo-v1',t,d,a,p,photo_source,expires),expires,sig) IS DISTINCT FROM 'reviewer' OR NOT securepay_private.reviewer_assigned(t,d,a) THEN RETURN NULL; END IF;
  SELECT milestone_id INTO mid FROM securepay_private.dispute_cases WHERE tenant_id=t AND case_id=d;
  PERFORM 1 FROM public.securepay_milestones WHERE tenant_id=t AND id=mid FOR UPDATE;
  PERFORM 1 FROM securepay_private.dispute_cases WHERE tenant_id=t AND case_id=d FOR UPDATE;
  IF NOT securepay_private.reviewer_assigned(t,d,a) THEN RETURN NULL; END IF;
  SELECT secret INTO k FROM securepay_private.dispute_actors WHERE tenant_id=t AND actor_id=a AND active AND role='reviewer';
  IF k IS NULL THEN RETURN NULL; END IF;
- IF source='completion' THEN
+ IF photo_source='completion' THEN
   inner_sig:=encode(public.hmac(convert_to(concat_ws(':','sp-linked-work-v1',t,mid,d,a,p,expires),'UTF8'),k,'sha256'),'hex');
   r:=securepay_private.dispute_work_evidence(t,mid,d,a,p,expires,inner_sig);
  ELSE
  inner_sig:=encode(public.hmac(convert_to(concat_ws(':','sp-photo-read-v1',p,t,mid,d,a,expires),'UTF8'),k,'sha256'),'hex');
  SELECT jsonb_build_object('photoId',p,'digest',q.digest,'content',replace(encode(q.content,'base64'),chr(10),'')) INTO r FROM securepay_private.read_dispute_photo(p,t,mid,d,a,expires,inner_sig) q WHERE q.media_type='image/png';
  END IF;
- IF r IS NOT NULL THEN INSERT INTO securepay_private.reviewer_photo_reads(tenant_id,case_id,reviewer_id,source,photo_id,digest) VALUES(t,d,a,source,p,r->>'digest') ON CONFLICT DO NOTHING; END IF;
+ IF r IS NOT NULL THEN INSERT INTO securepay_private.reviewer_photo_reads(tenant_id,case_id,reviewer_id,source,photo_id,digest) VALUES(t,d,a,photo_source,p,r->>'digest') ON CONFLICT DO NOTHING; END IF;
  RETURN r;
 END $$;
 CREATE FUNCTION securepay_private.reviewer_decision(e uuid,t uuid,d uuid,a uuid,op text,reason text,payout bigint,refund bigint,state_hash text,expires bigint,sig text) RETURNS boolean
@@ -96,7 +96,7 @@ BEGIN
  s:=securepay_private.reviewer_snapshot(t,d,a);
  IF s IS NULL THEN RETURN false; END IF;
  h:=encode(public.digest(convert_to(s::text,'UTF8'),'sha256'),'hex');
- IF h<>state_hash OR EXISTS(SELECT 1 FROM jsonb_array_elements((s->'photos')||(s->'linkedPhotos')) p WHERE NOT (p->>'purged')::boolean AND NOT EXISTS(SELECT 1 FROM securepay_private.reviewer_photo_reads r WHERE r.tenant_id=t AND r.case_id=d AND r.reviewer_id=a AND r.source=p->>'source' AND r.photo_id=(p->>'photoId')::uuid AND r.digest=p->>'digest')) THEN RETURN false; END IF;
+ IF h<>state_hash OR EXISTS(SELECT 1 FROM jsonb_array_elements((s->'photos')||(s->'linkedPhotos')) AS item(photo) WHERE NOT (item.photo->>'purged')::boolean AND NOT EXISTS(SELECT 1 FROM securepay_private.reviewer_photo_reads r WHERE r.tenant_id=t AND r.case_id=d AND r.reviewer_id=a AND r.source=(item.photo->>'source') AND r.photo_id=(item.photo->>'photoId')::uuid AND r.digest=(item.photo->>'digest'))) THEN RETURN false; END IF;
  SELECT secret INTO k FROM securepay_private.dispute_actors WHERE tenant_id=t AND actor_id=a AND active AND role='reviewer';
  IF k IS NULL THEN RETURN false; END IF;
  inner_sig:=encode(public.hmac(convert_to(concat_ws(':','sp-dispute-v1',e,t,mid,d,a,op,encode(convert_to(reason,'UTF8'),'hex'),h,payout,refund,expires),'UTF8'),k,'sha256'),'hex');
