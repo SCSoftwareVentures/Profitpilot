@@ -107,4 +107,108 @@ GRANT EXECUTE ON FUNCTION securepay_private.reviewer_photo(uuid,uuid,uuid,uuid,t
 ALTER FUNCTION securepay_private.reviewer_decision(uuid,uuid,uuid,uuid,text,text,bigint,bigint,text,bigint,text) OWNER TO securepay_context_owner;
 REVOKE ALL ON FUNCTION securepay_private.reviewer_decision(uuid,uuid,uuid,uuid,text,text,bigint,bigint,text,bigint,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION securepay_private.reviewer_decision(uuid,uuid,uuid,uuid,text,text,bigint,bigint,text,bigint,text) TO securepay_reviewer_runtime;
+CREATE OR REPLACE FUNCTION securepay_private.dispute_action(e uuid,t uuid,m uuid,d uuid,a uuid,op text,details text,digest text,payout bigint,refund bigint,expires bigint,sig text) RETURNS boolean
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE role_name text; milestone public.securepay_milestones%ROWTYPE; c securepay_private.dispute_cases%ROWTYPE; owner uuid;
+BEGIN
+ IF e IS NULL OR t IS NULL OR m IS NULL OR d IS NULL OR a IS NULL OR op IS NULL OR details IS NULL
+ OR length(details)>4000 OR (digest IS NOT NULL AND digest !~ '^[a-f0-9]{64}$') THEN RETURN false; END IF;
+ role_name:=securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-dispute-v1',e,t,m,d,a,op,encode(convert_to(details,'UTF8'),'hex'),coalesce(digest,'-'),coalesce(payout::text,'-'),coalesce(refund::text,'-'),expires),expires,sig);
+ IF role_name IS NULL OR role_name='settlement' THEN RETURN false; END IF;
+ SELECT * INTO milestone FROM public.securepay_milestones WHERE tenant_id=t AND id=m FOR UPDATE;
+ IF NOT FOUND THEN RETURN false; END IF;
+ PERFORM 1 FROM securepay_private.provider_funding WHERE tenant_id=t AND milestone_id=m AND status IN ('funded','held') FOR UPDATE;
+ IF NOT FOUND THEN RETURN false; END IF;
+ IF op='open' THEN
+  IF role_name<>'customer' OR a IS DISTINCT FROM milestone.payer_customer_id OR details NOT IN ('minor','moderate','serious') OR digest IS NULL
+  OR payout IS NOT NULL OR refund IS NOT NULL OR milestone.status NOT IN ('submitted','approved','release_pending')
+  OR EXISTS(SELECT 1 FROM public.securepay_release_requests WHERE tenant_id=t AND milestone_id=m AND status IN ('submitted','confirmed','failed')) THEN RETURN false; END IF;
+  SELECT owner_id INTO owner FROM securepay_private.dispute_parties WHERE tenant_id=t AND milestone_id=m;
+  IF owner IS NULL OR owner=a OR NOT EXISTS(SELECT 1 FROM securepay_private.dispute_actors WHERE tenant_id=t AND actor_id=owner AND role='owner' AND active) THEN RETURN false; END IF;
+  INSERT INTO securepay_private.dispute_cases(case_id,tenant_id,milestone_id,customer_id,owner_id,severity,status,customer_evidence)
+  VALUES(d,t,m,a,owner,details,'open',true);
+  UPDATE public.securepay_release_requests SET status='failed' WHERE tenant_id=t AND milestone_id=m AND status='pending';
+  DELETE FROM public.securepay_release_proofs WHERE tenant_id=t AND milestone_id=m AND consumed_at IS NULL;
+  UPDATE public.securepay_milestones SET status='disputed',version=version+1,updated_at=clock_timestamp() WHERE id=m;
+ ELSE
+  SELECT * INTO c FROM securepay_private.dispute_cases WHERE case_id=d AND tenant_id=t AND milestone_id=m FOR UPDATE;
+  IF NOT FOUND OR milestone.status<>'disputed' THEN RETURN false; END IF;
+  IF op='evidence' THEN
+   IF c.status NOT IN ('open','appealed') OR digest IS NULL OR length(btrim(details))=0 OR payout IS NOT NULL OR refund IS NOT NULL THEN RETURN false; END IF;
+   IF role_name='customer' AND a=c.customer_id THEN UPDATE securepay_private.dispute_cases SET customer_evidence=true,customer_appeal_evidence=customer_appeal_evidence OR c.status='appealed' WHERE case_id=d;
+   ELSIF role_name='owner' AND a=c.owner_id THEN UPDATE securepay_private.dispute_cases SET owner_evidence=true,owner_appeal_evidence=owner_appeal_evidence OR c.status='appealed' WHERE case_id=d;
+   ELSE RETURN false; END IF;
+  ELSIF op IN ('decide','finalize') THEN
+   IF NOT securepay_private.reviewer_assigned(t,d,a) THEN RETURN false; END IF;
+   IF role_name<>'reviewer' OR a IN (c.owner_id,c.customer_id) OR NOT c.customer_evidence OR NOT c.owner_evidence
+   OR length(btrim(details))<10 OR digest IS NULL OR payout IS NULL OR refund IS NULL OR payout<0 OR refund<0
+   OR payout::numeric+refund::numeric<>milestone.amount_cents THEN RETURN false; END IF;
+   IF op='decide' AND c.status='open' AND c.repair_phase IN ('none','escalated','accepted')
+    AND (c.repair_phase<>'accepted' OR (payout=milestone.amount_cents AND refund=0)) THEN
+    UPDATE securepay_private.dispute_cases SET status='decided',first_reviewer=a,payout_cents=payout,refund_cents=refund WHERE case_id=d;
+   ELSIF op='finalize' AND c.status IN ('decided','appealed') AND a IS DISTINCT FROM c.first_reviewer
+    AND ((c.status='appealed' AND c.customer_appeal_evidence AND c.owner_appeal_evidence) OR (c.status='decided' AND c.customer_ack AND c.owner_ack))
+    AND (c.status='appealed' OR (payout=c.payout_cents AND refund=c.refund_cents)) THEN
+    UPDATE securepay_private.dispute_cases SET status='final',final_reviewer=a,payout_cents=payout,refund_cents=refund WHERE case_id=d;
+   ELSE RETURN false; END IF;
+  ELSIF op IN ('ack','appeal') THEN
+   IF op='ack' AND EXISTS(SELECT 1 FROM securepay_private.funded_cancellation_offers WHERE case_id=d) THEN RETURN false; END IF;
+   IF c.status<>'decided' OR payout IS NOT NULL OR refund IS NOT NULL OR length(btrim(details))=0
+   OR NOT ((role_name='customer' AND a=c.customer_id) OR (role_name='owner' AND a=c.owner_id)) THEN RETURN false; END IF;
+   IF op='appeal' THEN
+    IF digest IS NULL THEN RETURN false; END IF;
+    UPDATE securepay_private.dispute_cases SET status='appealed',customer_appeal_evidence=(a=c.customer_id),owner_appeal_evidence=(a=c.owner_id) WHERE case_id=d;
+   ELSIF a=c.customer_id THEN UPDATE securepay_private.dispute_cases SET customer_ack=true WHERE case_id=d;
+   ELSE UPDATE securepay_private.dispute_cases SET owner_ack=true WHERE case_id=d; END IF;
+  ELSE RETURN false; END IF;
+ END IF;
+ INSERT INTO securepay_private.dispute_events(event_id,case_id,actor_id,action,details,evidence_digest,payout_cents,refund_cents)
+ VALUES(e,d,a,op,details,digest,payout,refund);
+ RETURN true;
+EXCEPTION WHEN unique_violation THEN RETURN false;
+END $$;
+CREATE OR REPLACE FUNCTION securepay_private.repair_action(e uuid,t uuid,m uuid,d uuid,a uuid,op text,details text,due bigint,photo uuid,expires bigint,sig text) RETURNS boolean
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE c securepay_private.dispute_cases%ROWTYPE; role_name text; now_at timestamptz:=clock_timestamp(); photo_digest text;
+BEGIN
+ IF e IS NULL OR t IS NULL OR m IS NULL OR d IS NULL OR a IS NULL OR op IS NULL OR details IS NULL OR length(btrim(details))=0 OR length(details)>4000 THEN RETURN false; END IF;
+ role_name:=securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-repair-v1',e,t,m,d,a,op,encode(convert_to(details,'UTF8'),'hex'),coalesce(due::text,'-'),coalesce(photo::text,'-'),expires),expires,sig);
+ IF role_name IS NULL OR role_name NOT IN ('owner','customer','reviewer') THEN RETURN false; END IF;
+ PERFORM 1 FROM public.securepay_milestones WHERE tenant_id=t AND id=m AND status='disputed' FOR UPDATE;
+ IF NOT FOUND THEN RETURN false; END IF;
+ SELECT * INTO c FROM securepay_private.dispute_cases WHERE case_id=d AND tenant_id=t AND milestone_id=m AND status='open' FOR UPDATE;
+ IF NOT FOUND OR (role_name='owner' AND a<>c.owner_id) OR (role_name='customer' AND a<>c.customer_id)
+ OR (role_name='reviewer' AND NOT securepay_private.reviewer_assigned(t,d,a)) THEN RETURN false; END IF;
+ now_at:=clock_timestamp();
+ IF op IN ('propose','reviewer_plan') THEN
+  IF due IS NULL OR due<=extract(epoch FROM now_at) OR due>extract(epoch FROM now_at+interval '90 days') OR photo IS NOT NULL THEN RETURN false; END IF;
+  IF op='propose' AND role_name='owner' AND c.severity<>'serious' AND c.repair_phase='none' THEN
+   UPDATE securepay_private.dispute_cases SET repair_phase='proposed',repair_due_at=to_timestamp(due) WHERE case_id=d;
+  ELSIF op='reviewer_plan' AND role_name='reviewer' AND c.repair_phase IN ('none','proposed') THEN
+   UPDATE securepay_private.dispute_cases SET repair_phase='active',repair_due_at=to_timestamp(due),repair_started_at=now_at WHERE case_id=d;
+  ELSE RETURN false; END IF;
+ ELSIF op='accept_plan' THEN
+  IF role_name<>'customer' OR c.repair_phase<>'proposed' OR c.repair_due_at<=now_at OR due IS NOT NULL OR photo IS NOT NULL THEN RETURN false; END IF;
+  UPDATE securepay_private.dispute_cases SET repair_phase='active',repair_started_at=now_at WHERE case_id=d;
+ ELSIF op='submit_repair' THEN
+  IF role_name<>'owner' OR c.repair_phase<>'active' OR due IS NOT NULL OR photo IS NULL THEN RETURN false; END IF;
+  SELECT digest INTO photo_digest FROM securepay_private.dispute_photos WHERE photo_id=photo AND case_id=d AND actor_id=a AND created_at>=c.repair_started_at;
+  IF NOT FOUND THEN RETURN false; END IF;
+  IF c.repair_due_at<=now_at THEN
+   INSERT INTO securepay_private.dispute_deadline_events(case_id,kind,due_at) VALUES(d,'repair_overdue',c.repair_due_at) ON CONFLICT DO NOTHING;
+   UPDATE securepay_private.dispute_cases SET repair_phase='escalated',repair_photo_id=photo,owner_evidence=true WHERE case_id=d;
+  ELSE
+   UPDATE securepay_private.dispute_cases SET repair_phase='submitted',repair_photo_id=photo,owner_evidence=true,repair_review_due_at=securepay_private.business_deadline(now_at,2) WHERE case_id=d;
+  END IF;
+ ELSIF op='accept_repair' THEN
+  IF role_name<>'customer' OR c.repair_phase<>'submitted' OR c.repair_review_due_at<=now_at OR photo IS DISTINCT FROM c.repair_photo_id OR due IS NOT NULL THEN RETURN false; END IF;
+  UPDATE securepay_private.dispute_cases SET repair_phase='accepted' WHERE case_id=d;
+ ELSIF op='escalate' THEN
+  IF c.repair_phase NOT IN ('proposed','active','submitted') OR due IS NOT NULL OR photo IS NOT NULL THEN RETURN false; END IF;
+  UPDATE securepay_private.dispute_cases SET repair_phase='escalated' WHERE case_id=d;
+ ELSE RETURN false; END IF;
+ INSERT INTO securepay_private.dispute_events(event_id,case_id,actor_id,action,details,evidence_digest) VALUES(e,d,a,'repair_'||op,details,photo_digest);
+ RETURN true;
+EXCEPTION WHEN unique_violation THEN RETURN false;
+END $$;
 COMMIT;
