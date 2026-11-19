@@ -6,7 +6,7 @@ import {runQuarantineCycle} from "../scripts/quarantine-worker.js";
 import {generateKeyPair,exportJWK,SignJWT} from "jose";
 import pg from "pg";
 
-test("scanned customer invoice through reviewed exact materialization and independent mapping",{skip:!process.env.TEST_ADMIN_DATABASE_URL||!process.env.TEST_APP_DATABASE_URL,timeout:90000},async()=>{
+test("scanned customer invoice through reviewed exact materialization and independent mapping",{skip:!process.env.TEST_ADMIN_DATABASE_URL||!process.env.TEST_APP_DATABASE_URL,timeout:120000},async()=>{
  const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL,max:2});
  const t=randomUUID(),other=randomUUID(),owner=randomUUID(),reviewer=randomUUID(),analyst=randomUUID(),reader=randomUUID();
  const identities={owner,reviewer,analyst,reader};const subjects=Object.fromEntries(Object.entries(identities).map(([k,v])=>[k,"ci-sensitive-"+v]));
@@ -184,6 +184,7 @@ test("scanned customer invoice through reviewed exact materialization and indepe
    assert.equal(exported.calculationId,first.id);assert.equal(exported.revenue,"0.30");assert.equal(exported.deliveryCost,"0.10");
    assert.equal(exported.indicativeContribution,"0.20");assert.equal(exported.completeness,"incomplete");
    assert.equal(exported.contribution,null);assert.equal(exported.marginPercent,null);assert.deepEqual(exported.sourceTrace,trace);
+   if(process.env.PROFITPILOT_CI_CHROME){const {verifyFinanceBrowser}=await import("./support/finance-browser.mjs");await verifyFinanceBrowser({base,tenant:t,token:await auth("owner"),run:first.id,traceDigest:trace.digest});}
    assert.equal((await admin.query("SELECT private.verify_audit_chain($1) AS ok",[t])).rows[0].ok,true);
    console.log("Full managed workspace, scanned invoice, payroll reconciliation, independent allocation approval, exact deterministic contribution, scoped read and audited export passed");
   }finally{scanner.release();}
