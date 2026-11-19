@@ -300,7 +300,7 @@ BEGIN
  SELECT secret INTO k FROM securepay_private.dispute_actors WHERE tenant_id=t AND actor_id=a AND active AND role='settlement';
  IF k IS NULL THEN RETURN false; END IF;
  inner_sig:=encode(public.hmac(convert_to(concat_ws(':','sp-settlement-v1',s,t,mid,d,a,payout,refund,expires),'UTF8'),k,'sha256'),'hex');
- RETURN securepay_private.authorize_settlement(s,t,mid,d,a,payout,refund,expires,inner_sig);
+ RETURN securepay_private.authorize_settlement_internal(s,t,mid,d,a,payout,refund,expires,inner_sig);
 END $$;
 ALTER FUNCTION securepay_private.governance_my_cases(uuid,uuid,bigint,text) OWNER TO securepay_context_owner;
 REVOKE ALL ON FUNCTION securepay_private.governance_my_cases(uuid,uuid,bigint,text) FROM PUBLIC;
@@ -313,4 +313,50 @@ GRANT EXECUTE ON FUNCTION securepay_private.settlement_dashboard_read(uuid,uuid,
 ALTER FUNCTION securepay_private.settlement_dashboard_authorize(uuid,uuid,uuid,uuid,bigint,bigint,text,bigint,text) OWNER TO securepay_context_owner;
 REVOKE ALL ON FUNCTION securepay_private.settlement_dashboard_authorize(uuid,uuid,uuid,uuid,bigint,bigint,text,bigint,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION securepay_private.settlement_dashboard_authorize(uuid,uuid,uuid,uuid,bigint,bigint,text,bigint,text) TO securepay_settlement_dashboard_runtime;
+-- Keep legacy internal adapters only for ungoverned synthetic cases.
+ALTER FUNCTION securepay_private.dispute_action(uuid,uuid,uuid,uuid,uuid,text,text,text,bigint,bigint,bigint,text) RENAME TO dispute_action_internal;
+REVOKE EXECUTE ON FUNCTION securepay_private.dispute_action_internal(uuid,uuid,uuid,uuid,uuid,text,text,text,bigint,bigint,bigint,text) FROM securepay_dispute_runtime;
+CREATE FUNCTION securepay_private.dispute_action(e uuid,t uuid,m uuid,d uuid,a uuid,op text,details text,digest text,payout bigint,refund bigint,expires bigint,sig text) RETURNS boolean
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+BEGIN
+ IF op IN ('decide','finalize') THEN
+  PERFORM 1 FROM public.securepay_milestones WHERE tenant_id=t AND id=m FOR UPDATE;
+  IF EXISTS(SELECT 1 FROM securepay_private.governed_cases WHERE case_id=d) THEN RETURN false; END IF;
+ END IF;
+ RETURN securepay_private.dispute_action_internal(e,t,m,d,a,op,details,digest,payout,refund,expires,sig);
+END $$;
+ALTER FUNCTION securepay_private.dispute_action(uuid,uuid,uuid,uuid,uuid,text,text,text,bigint,bigint,bigint,text) OWNER TO securepay_context_owner;
+REVOKE ALL ON FUNCTION securepay_private.dispute_action(uuid,uuid,uuid,uuid,uuid,text,text,text,bigint,bigint,bigint,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION securepay_private.dispute_action(uuid,uuid,uuid,uuid,uuid,text,text,text,bigint,bigint,bigint,text) TO securepay_dispute_runtime;
+CREATE OR REPLACE FUNCTION securepay_private.reviewer_decision(e uuid,t uuid,d uuid,a uuid,op text,reason text,payout bigint,refund bigint,state_hash text,expires bigint,sig text) RETURNS boolean
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE mid uuid;k bytea;s jsonb;h text;inner_sig text;
+BEGIN
+ IF e IS NULL OR op IS NULL OR op NOT IN ('decide','finalize') OR reason IS NULL OR length(btrim(reason)) NOT BETWEEN 10 AND 4000 OR payout IS NULL OR refund IS NULL OR payout<0 OR refund<0 OR state_hash IS NULL OR state_hash !~ '^[a-f0-9]{64}$'
+ OR securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-review-decision-v1',e,t,d,a,op,encode(convert_to(reason,'UTF8'),'hex'),payout,refund,state_hash,expires),expires,sig) IS DISTINCT FROM 'reviewer' OR NOT securepay_private.reviewer_assigned(t,d,a) THEN RETURN false; END IF;
+ SELECT milestone_id INTO mid FROM securepay_private.dispute_cases WHERE tenant_id=t AND case_id=d;
+ PERFORM 1 FROM public.securepay_milestones WHERE tenant_id=t AND id=mid FOR UPDATE;
+ PERFORM 1 FROM securepay_private.provider_funding WHERE tenant_id=t AND milestone_id=mid FOR UPDATE;
+ PERFORM 1 FROM securepay_private.dispute_cases WHERE tenant_id=t AND case_id=d FOR UPDATE;
+ s:=securepay_private.reviewer_snapshot(t,d,a);
+ IF s IS NULL THEN RETURN false; END IF;
+ h:=encode(public.digest(convert_to(s::text,'UTF8'),'sha256'),'hex');
+ IF h<>state_hash OR EXISTS(SELECT 1 FROM jsonb_array_elements((s->'photos')||(s->'linkedPhotos')) AS item(photo) WHERE NOT (item.photo->>'purged')::boolean AND NOT EXISTS(SELECT 1 FROM securepay_private.reviewer_photo_reads r WHERE r.tenant_id=t AND r.case_id=d AND r.reviewer_id=a AND r.source=(item.photo->>'source') AND r.photo_id=(item.photo->>'photoId')::uuid AND r.digest=(item.photo->>'digest'))) THEN RETURN false; END IF;
+ SELECT secret INTO k FROM securepay_private.dispute_actors WHERE tenant_id=t AND actor_id=a AND active AND role='reviewer';
+ IF k IS NULL THEN RETURN false; END IF;
+ inner_sig:=encode(public.hmac(convert_to(concat_ws(':','sp-dispute-v1',e,t,mid,d,a,op,encode(convert_to(reason,'UTF8'),'hex'),h,payout,refund,expires),'UTF8'),k,'sha256'),'hex');
+ RETURN securepay_private.dispute_action_internal(e,t,mid,d,a,op,reason,h,payout,refund,expires,inner_sig);
+END $$;
+ALTER FUNCTION securepay_private.authorize_settlement(uuid,uuid,uuid,uuid,uuid,bigint,bigint,bigint,text) RENAME TO authorize_settlement_internal;
+REVOKE EXECUTE ON FUNCTION securepay_private.authorize_settlement_internal(uuid,uuid,uuid,uuid,uuid,bigint,bigint,bigint,text) FROM securepay_settlement_runtime;
+CREATE FUNCTION securepay_private.authorize_settlement(s uuid,t uuid,m uuid,d uuid,a uuid,payout bigint,refund bigint,expires bigint,sig text) RETURNS boolean
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+BEGIN
+ PERFORM 1 FROM public.securepay_milestones WHERE tenant_id=t AND id=m FOR UPDATE;
+ IF EXISTS(SELECT 1 FROM securepay_private.governed_cases WHERE case_id=d) THEN RETURN false; END IF;
+ RETURN securepay_private.authorize_settlement_internal(s,t,m,d,a,payout,refund,expires,sig);
+END $$;
+ALTER FUNCTION securepay_private.authorize_settlement(uuid,uuid,uuid,uuid,uuid,bigint,bigint,bigint,text) OWNER TO securepay_context_owner;
+REVOKE ALL ON FUNCTION securepay_private.authorize_settlement(uuid,uuid,uuid,uuid,uuid,bigint,bigint,bigint,text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION securepay_private.authorize_settlement(uuid,uuid,uuid,uuid,uuid,bigint,bigint,bigint,text) TO securepay_settlement_runtime;
 COMMIT;
