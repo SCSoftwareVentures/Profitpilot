@@ -55,7 +55,7 @@ test("concurrent distinct valid proofs reserve exactly one payment",async()=>{
     // Wait for two competing sessions to be blocked on the row lock.
     let waiting=false;
     for(let i=0;i<100;i++){
-      const {rows:[r]}=await blocker.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid<>pg_backend_pid() AND datname=current_database() AND wait_event_type='Lock' AND query LIKE 'SELECT id, amount_cents, status FROM securepay_milestones%'");
+      const {rows:[r]}=await pool.query("SELECT count(*)::int AS n FROM pg_stat_activity WHERE pid<>pg_backend_pid() AND datname=current_database() AND wait_event_type='Lock' AND query LIKE 'SELECT id, amount_cents, status FROM securepay_milestones%'");
       if(r.n>=2){waiting=true;break;}
       await new Promise(r=>setTimeout(r,25));
     }
