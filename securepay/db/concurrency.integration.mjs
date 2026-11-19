@@ -720,5 +720,7 @@ test("provider hold blocks pending dispatch; failed provider operation freezes r
  assert.equal((await providerEvent(other,"released",{requestId:r.releaseRequestId,transactionRef:randomUUID()})).status,"denied");
  const {rows:[record]}=await pool.query("SELECT r.status,f.status AS funding_status FROM securepay_release_requests r JOIN securepay_private.provider_funding f ON f.milestone_id=r.milestone_id WHERE r.id=$1",[r.releaseRequestId]);
  assert.deepEqual(record,{status:"failed",funding_status:"held"});
+ const reconciliation=await pool.query("SELECT reason FROM securepay_private.provider_reconciliation WHERE tenant_id=$1 AND milestone_id=$2 ORDER BY opened_at",[other.tenantId,other.milestoneId]);
+ assert.deepEqual(reconciliation.rows.map(r=>r.reason),["hold_after_dispatch","provider_failure"]);
  assert.equal((await state(other)).status,"release_pending");
 });
