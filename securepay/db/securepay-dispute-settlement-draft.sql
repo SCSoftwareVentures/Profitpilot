@@ -51,6 +51,27 @@ ALTER TABLE securepay_private.dispute_events OWNER TO securepay_context_owner;
 REVOKE ALL ON securepay_private.dispute_events FROM PUBLIC,securepay_payer_runtime,securepay_provider_runtime,securepay_notification_runtime,securepay_dispute_runtime,securepay_settlement_runtime;
 ALTER TABLE securepay_private.dispute_settlements OWNER TO securepay_context_owner;
 REVOKE ALL ON securepay_private.dispute_settlements FROM PUBLIC,securepay_payer_runtime,securepay_provider_runtime,securepay_notification_runtime,securepay_dispute_runtime,securepay_settlement_runtime;
+-- A synthetic provider receipt is globally single-use across ordinary releases
+-- and aggregate dispute settlements, including concurrent confirmations.
+CREATE TABLE securepay_private.provider_receipts(receipt uuid PRIMARY KEY);
+ALTER TABLE securepay_private.provider_receipts OWNER TO securepay_context_owner;
+REVOKE ALL ON securepay_private.provider_receipts FROM PUBLIC,securepay_payer_runtime,securepay_provider_runtime,securepay_notification_runtime,securepay_dispute_runtime,securepay_settlement_runtime;
+INSERT INTO securepay_private.provider_receipts(receipt) SELECT transaction_ref FROM securepay_private.provider_events WHERE transaction_ref IS NOT NULL;
+CREATE FUNCTION securepay_private.register_provider_receipt() RETURNS trigger
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $
+BEGIN
+ IF TG_TABLE_NAME='provider_events' THEN
+  IF NEW.transaction_ref IS NOT NULL THEN INSERT INTO securepay_private.provider_receipts VALUES(NEW.transaction_ref); END IF;
+ ELSIF NEW.provider_receipt IS NOT NULL AND NEW.provider_receipt IS DISTINCT FROM OLD.provider_receipt THEN
+  INSERT INTO securepay_private.provider_receipts VALUES(NEW.provider_receipt);
+ END IF;
+ RETURN NEW;
+END $;
+ALTER FUNCTION securepay_private.register_provider_receipt() OWNER TO securepay_context_owner;
+REVOKE ALL ON FUNCTION securepay_private.register_provider_receipt() FROM PUBLIC;
+CREATE TRIGGER sp_unique_ordinary_receipt BEFORE INSERT ON securepay_private.provider_events FOR EACH ROW EXECUTE FUNCTION securepay_private.register_provider_receipt();
+CREATE TRIGGER sp_unique_dispute_receipt BEFORE UPDATE OF provider_receipt ON securepay_private.dispute_settlements FOR EACH ROW EXECUTE FUNCTION securepay_private.register_provider_receipt();
+
 CREATE FUNCTION securepay_private.dispute_actor_valid(t uuid,a uuid,payload text,expires bigint,sig text) RETURNS text
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE k bytea; actor_role text; n bigint;
