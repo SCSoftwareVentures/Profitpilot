@@ -1,0 +1,27 @@
+# Use the reviewed PostgreSQL filesystem and distribution-signed C utility.
+FROM postgres:16-alpine@sha256:81e77a4833487b8132fe4b00bedd39dc3f74b8641e387f19312a48f7de218c2e AS hardened
+RUN apk add --no-cache su-exec=0.3-r0 \
+    && test -x /sbin/su-exec \
+    && grep -q 'exec gosu postgres' /usr/local/bin/docker-entrypoint.sh \
+    && sed -i 's/exec gosu postgres/exec su-exec postgres/' /usr/local/bin/docker-entrypoint.sh \
+    && ! grep -w gosu /usr/local/bin/docker-entrypoint.sh \
+    && rm -f /usr/local/bin/gosu \
+    && test ! -e /usr/local/bin/gosu \
+    && test "$(su-exec postgres id -u)" = "$(id -u postgres)" \
+    && test "$(su-exec postgres id -g)" = "$(id -g postgres)" \
+    && test "$(su-exec postgres id -u)" != 0
+
+# Copy only the resulting merged filesystem, not the vulnerable parent layers.
+# Restore upstream PostgreSQL runtime settings explicitly; the entrypoint
+# initializes empty volumes and drops root privileges before database startup.
+FROM scratch
+COPY --from=hardened / /
+ENV PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    LANG=en_US.utf8 \
+    PG_MAJOR=16 \
+    PGDATA=/var/lib/postgresql/data
+VOLUME ["/var/lib/postgresql/data"]
+ENTRYPOINT ["docker-entrypoint.sh"]
+STOPSIGNAL SIGINT
+EXPOSE 5432
+CMD ["postgres"]

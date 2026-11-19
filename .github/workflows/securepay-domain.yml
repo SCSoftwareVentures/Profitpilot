@@ -1,0 +1,81 @@
+name: SecurePay domain tests
+on:
+  pull_request:
+    paths:
+      - 'securepay/**'
+      - 'server/securepay-*.js'
+      - 'package.json'
+      - '.github/workflows/securepay-domain.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'securepay/**'
+      - 'server/securepay-*.js'
+      - 'package.json'
+jobs:
+  state-machine:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Run SecurePay domain tests
+        run: node --experimental-strip-types --test securepay/domain/*.test.mjs securepay/db/*.test.mjs
+  postgresql-concurrency:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: securepay_ci
+          POSTGRES_PASSWORD: disposable-ci-password
+          POSTGRES_DB: securepay_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U securepay_ci -d securepay_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      SECUREPAY_CI_REPORT_EXPORT: "true"
+      SECUREPAY_TEST_DATABASE: securepay_ci
+      SECUREPAY_TEST_DATABASE_URL: postgresql://securepay_ci:disposable-ci-password@127.0.0.1:5432/securepay_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Test real PostgreSQL concurrency and rollback
+        run: node --test securepay/db/concurrency.integration.mjs
+      - name: Publish synthetic buyer reporting demonstration
+        uses: actions/upload-artifact@v4
+        with:
+          name: securepay-report-demo
+          path: securepay-ci-report/
+          if-no-files-found: error
+          retention-days: 7
+  evidence-engines:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install real decoder and scanner engines
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3-pil clamav
+      - name: Exercise real decoder and antivirus against isolated synthetic signatures
+        run: node --test securepay/db/evidence-engines.integration.mjs

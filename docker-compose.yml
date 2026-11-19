@@ -1,6 +1,9 @@
 services:
   db:
-    image: postgres:16-alpine
+    image: profitpilot-postgres:local
+    build:
+      context: ./database
+      dockerfile: Dockerfile.postgres
     environment:
       POSTGRES_DB: profitpilot
       POSTGRES_USER: profitpilot_admin
@@ -20,6 +23,67 @@ services:
       - ./database/migrations/005_prevent_duplicate_confirmations.sql:/docker-entrypoint-initdb.d/007-confirmation-uniqueness.sql:ro
       - ./database/migrations/006_tenant_actor_membership_fks.sql:/docker-entrypoint-initdb.d/008-tenant-actor-fks.sql:ro
       - ./database/migrations/007_users_self_rls.sql:/docker-entrypoint-initdb.d/009-users-self-rls.sql:ro
+      - ./database/migrations/008_runtime_least_privilege.sql:/docker-entrypoint-initdb.d/010-runtime-least-privilege.sql:ro
+      - ./database/migrations/009_import_metadata_status.sql:/docker-entrypoint-initdb.d/011-import-metadata-status.sql:ro
+      - ./database/migrations/010_payroll_source_row_ledger.sql:/docker-entrypoint-initdb.d/012-payroll-source-row-ledger.sql:ro
+      - ./database/migrations/011_payroll_confirmation_integrity.sql:/docker-entrypoint-initdb.d/013-payroll-confirmation-integrity.sql:ro
+      - ./database/migrations/012_contract_tax_basis.sql:/docker-entrypoint-initdb.d/014-contract-tax-basis.sql:ro
+      - ./database/migrations/013_actor_authorization.sql:/docker-entrypoint-initdb.d/015-actor-authorization.sql:ro
+      - ./database/migrations/014_match_decision_audit.sql:/docker-entrypoint-initdb.d/016-match-decision-audit.sql:ro
+      - ./database/migrations/015_shared_rate_limits.sql:/docker-entrypoint-initdb.d/017-shared-rate-limits.sql:ro
+      - ./database/migrations/016_tenant_key_lifecycle.sql:/docker-entrypoint-initdb.d/018-tenant-key-lifecycle.sql:ro
+      - ./database/migrations/017_invoice_import_privacy.sql:/docker-entrypoint-initdb.d/019-invoice-import-privacy.sql:ro
+      - ./database/migrations/018_import_disposal_controls.sql:/docker-entrypoint-initdb.d/020-import-disposal-controls.sql:ro
+      - ./database/migrations/019_calculation_export.sql:/docker-entrypoint-initdb.d/021-calculation-export.sql:ro
+      - ./database/migrations/020_private_file_quarantine.sql:/docker-entrypoint-initdb.d/022-private-file-quarantine.sql:ro
+      - ./database/migrations/021_quarantine_scanner_lifecycle.sql:/docker-entrypoint-initdb.d/023-quarantine-scanner-lifecycle.sql:ro
+      - ./database/migrations/022_quarantine_content_validation.sql:/docker-entrypoint-initdb.d/024-quarantine-content-validation.sql:ro
+      - ./database/migrations/023_identity_session_revocation.sql:/docker-entrypoint-initdb.d/025-identity-session-revocation.sql:ro
+      - ./database/migrations/024_audit_chain_integrity.sql:/docker-entrypoint-initdb.d/026-audit-chain-integrity.sql:ro
+      - ./database/migrations/025_identity_admin_recovery.sql:/docker-entrypoint-initdb.d/027-identity-admin-recovery.sql:ro
+      - ./database/migrations/026_quarantine_promotion.sql:/docker-entrypoint-initdb.d/028-quarantine-promotion.sql:ro
+      - ./database/migrations/027_audit_checkpoint_reader.sql:/docker-entrypoint-initdb.d/029-audit-checkpoint-reader.sql:ro
+      - ./database/migrations/028_quarantine_expiry_recovery.sql:/docker-entrypoint-initdb.d/030-quarantine-expiry-recovery.sql:ro
+      - ./database/migrations/029_private_privilege_boundary.sql:/docker-entrypoint-initdb.d/031-private-privilege-boundary.sql:ro
+      - ./database/migrations/030_invoice_batch_budget.sql:/docker-entrypoint-initdb.d/032-invoice-batch-budget.sql:ro
+      - ./database/migrations/031_minimized_financial_reads.sql:/docker-entrypoint-initdb.d/033-minimized-financial-reads.sql:ro
+      - ./database/migrations/032_financial_access_budgets.sql:/docker-entrypoint-initdb.d/034-financial-access-budgets.sql:ro
+      - ./database/migrations/033_startup_key_attestation.sql:/docker-entrypoint-initdb.d/035-startup-key-attestation.sql:ro
+      - ./database/migrations/034_public_runtime_grants.sql:/docker-entrypoint-initdb.d/036-public-runtime-grants.sql:ro
+      - ./database/migrations/035_actor_threat_containment.sql:/docker-entrypoint-initdb.d/037-actor-threat-containment.sql:ro
+      - ./database/migrations/036_privacy_recovery_inventory.sql:/docker-entrypoint-initdb.d/038-privacy-recovery-inventory.sql:ro
+      - ./database/migrations/037_automated_mapping_integrity.sql:/docker-entrypoint-initdb.d/039-automated-mapping-integrity.sql:ro
+      - ./database/migrations/038_session_bound_promotion.sql:/docker-entrypoint-initdb.d/040-session-bound-promotion.sql:ro
+      - ./database/migrations/039_live_security_catalog.sql:/docker-entrypoint-initdb.d/041-live-security-catalog.sql:ro
+      - ./database/migrations/040_emergency_tenant_containment.sql:/docker-entrypoint-initdb.d/042-emergency-tenant-containment.sql:ro
+      - ./database/migrations/041_security_command_snapshot.sql:/docker-entrypoint-initdb.d/043-security-command-snapshot.sql:ro
+      - ./database/migrations/042_security_catalog_internal_integrity.sql:/docker-entrypoint-initdb.d/044-security-catalog-internal-integrity.sql:ro
+      - ./database/migrations/043_security_recovery_inventory.sql:/docker-entrypoint-initdb.d/045-security-recovery-inventory.sql:ro
+      - ./database/migrations/044_recovery_catalog_gate.sql:/docker-entrypoint-initdb.d/046-recovery-catalog-gate.sql:ro
+      - ./database/migrations/045_payroll_proposal_review.sql:/docker-entrypoint-initdb.d/047-payroll-proposal-review.sql:ro
+      - ./database/migrations/046_payroll_attested_confirmation.sql:/docker-entrypoint-initdb.d/048-payroll-attested-confirmation.sql:ro
+      - ./database/migrations/047_security_work_authority.sql:/docker-entrypoint-initdb.d/049-security-work-authority.sql:ro
+      - ./database/migrations/048_sensitive_api_capabilities.sql:/docker-entrypoint-initdb.d/050-sensitive-api-capabilities.sql:ro
+      - ./database/migrations/049_privacy_rights_cases.sql:/docker-entrypoint-initdb.d/051-privacy-rights-cases.sql:ro
+      - ./database/migrations/050_payroll_correction_supersession.sql:/docker-entrypoint-initdb.d/052-payroll-correction-supersession.sql:ro
+      - ./database/migrations/051_sensitive_recovery_fence.sql:/docker-entrypoint-initdb.d/053-sensitive-recovery-fence.sql:ro
+      - ./database/migrations/052_payroll_correction_operator_api.sql:/docker-entrypoint-initdb.d/054-payroll-correction-operator-api.sql:ro
+      - ./database/migrations/053_financial_retention_register.sql:/docker-entrypoint-initdb.d/055-financial-retention-register.sql:ro
+      - ./database/migrations/054_retention_work_authority.sql:/docker-entrypoint-initdb.d/056-retention-work-authority.sql:ro
+      - ./database/migrations/055_financial_dependency_backup_plan.sql:/docker-entrypoint-initdb.d/057-financial-dependency-backup-plan.sql:ro
+      - ./database/migrations/056_privacy_delivery_authority.sql:/docker-entrypoint-initdb.d/058-privacy-delivery-authority.sql:ro
+      - ./database/migrations/057_privacy_delivery_operator_api.sql:/docker-entrypoint-initdb.d/059-privacy-delivery-operator-api.sql:ro
+      - ./database/migrations/058_privacy_receipt_evidence.sql:/docker-entrypoint-initdb.d/060-privacy-receipt-evidence.sql:ro
+      - ./database/migrations/059_privacy_receipt_operator_api.sql:/docker-entrypoint-initdb.d/061-privacy-receipt-operator-api.sql:ro
+      - ./database/migrations/060_privacy_dispatch_fence.sql:/docker-entrypoint-initdb.d/062-privacy-dispatch-fence.sql:ro
+      - ./database/migrations/061_privacy_dispatch_operator_api.sql:/docker-entrypoint-initdb.d/063-privacy-dispatch-operator-api.sql:ro
+      - ./database/migrations/062_privacy_key_lifecycle.sql:/docker-entrypoint-initdb.d/064-privacy-key-lifecycle.sql:ro
+      - ./database/migrations/063_reviewed_payroll_intake.sql:/docker-entrypoint-initdb.d/065-reviewed-payroll-intake.sql:ro
+      - ./database/migrations/064_payroll_intake_operator_api.sql:/docker-entrypoint-initdb.d/066-payroll-intake-operator-api.sql:ro
+      - ./database/migrations/065_payroll_allocation_builder.sql:/docker-entrypoint-initdb.d/067-payroll-allocation-builder.sql:ro
+      - ./database/migrations/066_workspace_commercial_baselines.sql:/docker-entrypoint-initdb.d/068-workspace-commercial-baselines.sql:ro
+      - ./database/migrations/067_workspace_job_readiness.sql:/docker-entrypoint-initdb.d/069-workspace-job-readiness.sql:ro
+      - ./database/migrations/068_reviewed_invoice_intake.sql:/docker-entrypoint-initdb.d/070-reviewed-invoice-intake.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
@@ -29,7 +93,9 @@ services:
   api:
     build: .
     environment:
-      NODE_ENV: production
+      # Local loopback development only; production requires a separate TLS-enabled deployment.
+      NODE_ENV: development
+      SYNTHETIC_SECURITY_UI_ENABLED: ${SYNTHETIC_SECURITY_UI_ENABLED:-false}
       PORT: 8080
       DATABASE_URL: postgres://profitpilot_app:${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD}@db:5432/profitpilot
       DATABASE_SSL: "false"
@@ -41,6 +107,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 100
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     ports:
       - "127.0.0.1:8080:8080"
     restart: unless-stopped
