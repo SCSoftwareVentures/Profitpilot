@@ -166,13 +166,24 @@ test("scanned customer invoice through reviewed exact materialization and indepe
    assert.equal(summary.outputs.revenue,"0.30");assert.equal(summary.outputs.deliveryCost,"0.10");
    assert.equal(summary.outputs.indicativeContribution,"0.20");assert.equal(summary.outputs.contribution,null);
    assert.equal(summary.outputs.marginPercent,null);assert.equal(Object.hasOwn(summary,"inputs"),false);
+   const trace=summary.sourceTrace;assert.equal(trace.status,"captured");assert.equal(trace.baselineId,version);
+   assert.match(trace.digest,/^[a-f0-9]{64}$/);assert.equal(trace.invoiceLineCount,2);assert.equal(trace.reviewedInvoiceLineCount,2);assert.equal(trace.allocationLineCount,1);
+   assert.equal((await expect("owner","/calculations/"+second.id,200)).sourceTrace.digest,trace.digest);
+   const receipt=(await admin.query("SELECT source_snapshot,snapshot_digest,encode(public.digest(convert_to(source_snapshot::text,'UTF8'),'sha256'),'hex') AS computed FROM private.calculation_source_receipts WHERE calculation_id=$1",[first.id])).rows[0];
+   assert.equal(receipt.snapshot_digest,receipt.computed);assert.equal(receipt.snapshot_digest,trace.digest);
+   assert.deepEqual(new Set(receipt.source_snapshot.invoices.map(x=>x[1])),new Set(links.map(x=>x.line_id)));
+   assert.equal(receipt.source_snapshot.allocations.length,1);assert.equal(receipt.source_snapshot.allocations[0][3],"0.10");
+   assert.equal(Object.hasOwn(trace,"source_snapshot"),false);
+   await assert.rejects(()=>runtime.query("SELECT * FROM private.calculation_source_receipts"),e=>e.code==="42501");
+   await assert.rejects(()=>admin.query("UPDATE private.calculation_source_receipts SET snapshot_digest=$1 WHERE calculation_id=$2",[hash("forged"),first.id]),e=>e.code==="55000");
+   await assert.rejects(()=>admin.query("UPDATE public.calculation_runs SET outputs='{}' WHERE id=$1",[first.id]),e=>e.code==="55000");
    await expect("reviewer",reportPath,404,{tenant:other});
    await expect("reader",reportPath+"/export",403,{body:{purpose:"internal_review"}});
    await expect("owner",reportPath+"/export",403,{body:{purpose:"internal_review"},claims:{amr:["pwd"]}});
    const exported=await expect("owner",reportPath+"/export",200,{body:{purpose:"internal_review"}});
    assert.equal(exported.calculationId,first.id);assert.equal(exported.revenue,"0.30");assert.equal(exported.deliveryCost,"0.10");
    assert.equal(exported.indicativeContribution,"0.20");assert.equal(exported.completeness,"incomplete");
-   assert.equal(exported.contribution,null);assert.equal(exported.marginPercent,null);
+   assert.equal(exported.contribution,null);assert.equal(exported.marginPercent,null);assert.deepEqual(exported.sourceTrace,trace);
    assert.equal((await admin.query("SELECT private.verify_audit_chain($1) AS ok",[t])).rows[0].ok,true);
    console.log("Full managed workspace, scanned invoice, payroll reconciliation, independent allocation approval, exact deterministic contribution, scoped read and audited export passed");
   }finally{scanner.release();}

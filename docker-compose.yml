@@ -84,6 +84,7 @@ services:
       - ./database/migrations/066_workspace_commercial_baselines.sql:/docker-entrypoint-initdb.d/068-workspace-commercial-baselines.sql:ro
       - ./database/migrations/067_workspace_job_readiness.sql:/docker-entrypoint-initdb.d/069-workspace-job-readiness.sql:ro
       - ./database/migrations/068_reviewed_invoice_intake.sql:/docker-entrypoint-initdb.d/070-reviewed-invoice-intake.sql:ro
+      - ./database/migrations/069_calculation_source_receipts.sql:/docker-entrypoint-initdb.d/071-calculation-source-receipts.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
