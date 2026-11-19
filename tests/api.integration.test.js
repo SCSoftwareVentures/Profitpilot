@@ -272,6 +272,41 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal((await post("/rows",{startRow:1,rows:[row1]})).status,200,"exact retry remains safe after sealing");
     assert.equal((await request(`/v1/tenants/${tenantA}/imports/not-a-uuid/rows`,{subject:"ci-api-analyst",method:"POST",body:{rows:[row1]}})).status,400);
 
+
+    // Calculation success and fail-closed period/currency checks.
+    async function insertFixture(sql,values){return (await admin.query(sql+" RETURNING id",values)).rows[0].id;}
+    const siteA=await insertFixture("INSERT INTO sites(tenant_id,business_id,name) VALUES ($1,$2,'CI reconciliation site')",[tenantA,businessA]);
+    const versionA=await insertFixture("INSERT INTO contract_versions(tenant_id,contract_id,version_no,effective_from,effective_to,price,billing_basis,approved_by,approved_at) VALUES ($1,$2,1,'2026-02-05','2026-02-28',100,'monthly',$3,now())",[tenantA,contractA,userA]);
+    const poolA=await insertFixture("INSERT INTO payroll_pools(tenant_id,batch_id,period_start,period_end,total_amount,currency,source_ref) VALUES ($1,$2,'2026-02-01','2026-02-28',50,'USD','ci')",[tenantA,createdBody.batch.id]);
+    const allocationA=await insertFixture("INSERT INTO allocation_runs(tenant_id,payroll_pool_id,method_version,status,direct_amount,residual_amount) VALUES ($1,$2,'ci','confirmed',50,0)",[tenantA,poolA]);
+    await insertFixture("INSERT INTO allocation_lines(tenant_id,allocation_run_id,site_id,bucket_type,amount) VALUES ($1,$2,$3,'direct',50)",[tenantA,allocationA,siteA]);
+    const invoiceA=await insertFixture("INSERT INTO invoices(tenant_id,direction,invoice_number,invoice_date,total_amount,tax_basis,source_ref) VALUES ($1,'customer','CI-A','2026-02-14',100,'gst_exclusive','ci')",[tenantA]);
+    const lineA=await insertFixture("INSERT INTO invoice_lines(tenant_id,invoice_id,line_number,description,amount) VALUES ($1,$2,1,'CI line',100)",[tenantA,invoiceA]);
+    await insertFixture("INSERT INTO match_reviews(tenant_id,invoice_line_id,contract_id,site_id,service_period_start,service_period_end,confidence,decision,reviewer_id,reviewed_at) VALUES ($1,$2,$3,$4,'2026-02-01','2026-02-28','HIGH','confirmed',$5,now())",[tenantA,lineA,contractA,siteA,userA]);
+    const calculate=()=>request(`/v1/tenants/${tenantA}/calculations`,{subject:"ci-api-analyst",method:"POST",body:{contractId:contractA,siteId:siteA,periodStart:"2026-02-01",periodEnd:"2026-02-28"}});
+    const partial=await calculate();
+    assert.equal(partial.status,422);
+    assert.match((await partial.json()).error,/entire requested period/);
+    await admin.query("UPDATE contract_versions SET effective_from='2026-02-01' WHERE id=$1",[versionA]);
+    const mixed=await calculate();
+    assert.equal(mixed.status,422);
+    assert.match((await mixed.json()).error,/Payroll currency/);
+    await admin.query("UPDATE payroll_pools SET currency='AUD' WHERE id=$1",[poolA]);
+    const overlapping=await insertFixture("INSERT INTO contract_versions(tenant_id,contract_id,version_no,effective_from,effective_to,price,billing_basis,approved_by,approved_at) VALUES ($1,$2,2,'2026-02-15','2026-02-28',100,'monthly',$3,now())",[tenantA,contractA,userA]);
+    const ambiguous=await calculate();
+    assert.equal(ambiguous.status,422);
+    assert.match((await ambiguous.json()).error,/Overlapping contract versions/);
+    await admin.query("DELETE FROM contract_versions WHERE id=$1",[overlapping]);
+    const validRun=await calculate();
+    assert.equal(validRun.status,201);
+    const validRunBody=await validRun.json();
+    assert.equal(validRunBody.outputs.revenue,100);
+    assert.equal(validRunBody.outputs.deliveryCost,50);
+    assert.equal(validRunBody.outputs.contribution,50);
+    assert.equal(validRunBody.outputs.marginPercent,50);
+    const storedRun=await admin.query("SELECT completeness FROM calculation_runs WHERE id=$1",[validRunBody.id]);
+    assert.equal(storedRun.rows[0].completeness,"incomplete","limited contribution must not claim full financial completeness");
+
     const readerWrite=await request(`/v1/tenants/${tenantA}/imports`,{
       subject:"ci-api-reader",method:"POST",
       body:{...importBody,sha256:"c".repeat(64)}
