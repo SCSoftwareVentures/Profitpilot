@@ -11,6 +11,7 @@ import {createRecoveryVerifier,issueRecoveryGrant} from "./recovery-grant.mjs";
 import {makeNotificationWorker} from "./notification-worker.mjs";
 import {makeSandboxProvider} from "./sandbox-provider.mjs";
 import {makeDisputeActor,makeSettlementAuthorizer,makeSettlementProvider} from "./dispute-settlement.mjs";
+import {makeRectificationActor,scanDisputeDeadlines} from "./rectification.mjs";
 import {verifyPinCredential} from "../domain/pin-credential.mjs";
 import {readFile} from "node:fs/promises";
 import pg from "pg";
@@ -27,9 +28,9 @@ const pool=new pg.Pool({connectionString:url.href,max:8,connectionTimeoutMillis:
 const payerSigningKey=randomBytes(32);
 const recoveryKey=randomBytes(32);
 const providerKey=randomBytes(32);
-let payerPool, notificationPool, providerPool, provider, disputePool, settlementPool;
+let payerPool, notificationPool, providerPool, provider, disputePool, settlementPool, escalationPool;
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(key_id,secret) VALUES('primary',$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(key_id,secret) VALUES('primary',$1)",[deriveCommandKey(pepper)]);
@@ -56,13 +57,14 @@ before(async()=>{
   }
   disputePool=await rolePool("securepay_dispute_runtime");
   settlementPool=await rolePool("securepay_settlement_runtime");
+  escalationPool=await rolePool("securepay_escalation_runtime");
   await pool.query("CREATE TABLE securepay_ci_staff_only(secret text); INSERT INTO securepay_ci_staff_only VALUES ('fixture')");
   // Fixture admin bypasses RLS solely to exercise transaction semantics.
   // No permissive policies are installed; restricted role tested below.
   await pool.query("CREATE ROLE securepay_ci_restricted NOLOGIN NOBYPASSRLS");
   await pool.query("GRANT SELECT, INSERT, UPDATE ON securepay_milestones, securepay_release_requests, securepay_release_proofs, securepay_customer_pins, securepay_payer_identities, securepay_pin_change_grants TO securepay_ci_restricted");
 });
-after(async()=>{if(disputePool)await disputePool.end();if(settlementPool)await settlementPool.end();if(providerPool)await providerPool.end();if(notificationPool)await notificationPool.end();if(payerPool)await payerPool.end();await pool.end();});
+after(async()=>{if(escalationPool)await escalationPool.end();if(disputePool)await disputePool.end();if(settlementPool)await settlementPool.end();if(providerPool)await providerPool.end();if(notificationPool)await notificationPool.end();if(payerPool)await payerPool.end();await pool.end();});
 async function fixture(status="approved",tenantId=randomUUID()) {
   const milestoneId=randomUUID(), customerId=randomUUID();
   await pool.query("INSERT INTO securepay_milestones(id,tenant_id,job_id,amount_cents,status) VALUES($1,$2,$3,5000,$4)",
@@ -740,7 +742,7 @@ async function disputeFixture(){
  async function actor(role,actorId=randomUUID()){
   const key=randomBytes(32);
   await pool.query("INSERT INTO securepay_private.dispute_actors(tenant_id,actor_id,role,secret) VALUES($1,$2,$3,$4)",[s.tenantId,actorId,role,key]);
-  return {actorId,key,service:makeDisputeActor({pool:disputePool,key,actorId})};
+  return {actorId,key,service:makeDisputeActor({pool:disputePool,key,actorId}),repairService:makeRectificationActor({pool:disputePool,key,actorId})};
  }
  const customer=await actor("customer",s.customerId),owner=await actor("owner"),reviewer=await actor("reviewer"),second=await actor("reviewer"),authorizer=await actor("settlement");
  await pool.query("INSERT INTO securepay_private.dispute_parties(tenant_id,milestone_id,owner_id) VALUES($1,$2,$3)",[s.tenantId,s.milestoneId,owner.actorId]);
@@ -824,4 +826,70 @@ test("provider hold cannot be overridden by dispute finality; cross-tenant and r
  assert.equal((await providerEvent(d.s,"held")).status,"applied");
  assert.equal((await d.approval.authorize(d.settlement)).ok,false);
  assert.equal((await state(d.s)).status,"disputed");
+});
+
+const pngFixture=()=>Buffer.concat([Buffer.from("89504e470d0a1a0a","hex"),randomBytes(32)]);
+const repair=(d,actor,action,extra={})=>actor.repairService.repair({...d.scope,action,details:"Documented repair action",...extra});
+const photo=(d,actor,content=pngFixture())=>actor.repairService.storePhoto({...d.scope,mediaType:"image/png",content});
+const repairState=async d=>(await pool.query("SELECT status,repair_phase,repair_photo_id,owner_responded_at,response_escalated_at FROM securepay_private.dispute_cases WHERE case_id=$1",[d.scope.caseId])).rows[0];
+test("rectification requires agreed plan and fresh owner photo; accepted repairs require full payout but never release automatically",async()=>{
+ const d=await disputeFixture();assert.equal((await openCase(d)).ok,true);
+ const before=await photo(d,d.owner);assert.equal(before.ok,true);
+ const dueEpoch=Math.floor(Date.now()/1000)+86400;
+ assert.equal((await repair(d,d.owner,"propose",{dueEpoch})).ok,true);
+ assert.equal((await repair(d,d.owner,"accept_plan")).ok,false);
+ assert.equal((await evidence(d)).ok,true);
+ assert.equal((await decide(d)).ok,false);
+ assert.equal((await repair(d,d.customer,"accept_plan")).ok,true);
+ assert.equal((await repair(d,d.owner,"submit_repair",{photoId:before.photoId})).ok,false);
+ const p=await photo(d,d.owner);assert.equal(p.ok,true);
+ const other=await photo(d,d.customer);assert.equal(other.ok,true);
+ assert.equal((await repair(d,d.owner,"submit_repair",{photoId:other.photoId})).ok,false);
+ assert.equal((await repair(d,d.owner,"submit_repair",{photoId:p.photoId})).ok,true);
+ assert.equal((await repair(d,d.customer,"accept_repair",{photoId:other.photoId})).ok,false);
+ assert.equal((await repair(d,d.customer,"accept_repair",{photoId:p.photoId})).ok,true);
+ assert.equal((await repairState(d)).repair_phase,"accepted");
+ assert.equal((await decide(d)).ok,false);
+ assert.equal((await decide(d,{payoutCents:5000,refundCents:0})).ok,true);
+ assert.equal((await state(d.s)).status,"disputed");
+ assert.equal((await d.approval.authorize({...d.settlement,payoutCents:5000,refundCents:0})).ok,false);
+});
+test("photo bytes are hash-bound, bounded and readable only by case parties or assigned reviewers",async()=>{
+ const d=await disputeFixture(),other=await disputeFixture();assert.equal((await openCase(d)).ok,true);assert.equal((await openCase(other)).ok,true);
+ const content=pngFixture(),p=await photo(d,d.owner,content);assert.equal(p.ok,true);
+ assert.equal((await photo(d,d.owner,content)).ok,false);
+ assert.equal((await photo(d,d.owner,Buffer.from("invalid image"))).ok,false);
+ await assert.rejects(photo(d,d.owner,Buffer.alloc(2097153)),/Invalid evidence/);
+ const query={...d.scope,photoId:p.photoId};
+ assert.deepEqual((await d.customer.repairService.readPhoto(query)).content,content);
+ assert.equal(await d.reviewer.repairService.readPhoto(query),null);
+ assert.equal(await other.customer.repairService.readPhoto(query),null);
+ await pool.query("INSERT INTO securepay_private.dispute_photo_reviewers(case_id,tenant_id,reviewer_id) VALUES($1,$2,$3)",[d.scope.caseId,d.scope.tenantId,d.reviewer.actorId]);
+ assert.equal((await d.reviewer.repairService.readPhoto(query)).digest,p.digest);
+ await assert.rejects(disputePool.query("SELECT content FROM securepay_private.dispute_photos"),e=>e.code==="42501");
+ await assert.rejects(disputePool.query("UPDATE securepay_private.dispute_photos SET content=$1",[content]),e=>e.code==="42501");
+});
+test("business deadlines exclude weekends and configured holidays; overdue actions escalate without payout",async()=>{
+ const due=async n=>(await pool.query("SELECT securepay_private.business_deadline($1,$2) AS due",["2026-11-20T00:00:00Z",n])).rows[0].due.toISOString();
+ assert.equal(await due(1),"2026-11-23T06:00:00.000Z");
+ assert.equal(await due(2),"2026-11-24T06:00:00.000Z");
+ await pool.query("INSERT INTO securepay_private.dispute_holidays VALUES ('2026-11-23')");
+ try{assert.equal(await due(2),"2026-11-25T06:00:00.000Z");}finally{await pool.query("DELETE FROM securepay_private.dispute_holidays WHERE day='2026-11-23'");}
+ const d=await disputeFixture();
+ assert.equal((await d.call(d.customer,"open","serious",{evidenceDigest:d.digest})).ok,true);
+ const dueEpoch=Math.floor(Date.now()/1000)+86400;
+ assert.equal((await repair(d,d.owner,"propose",{dueEpoch})).ok,false);
+ assert.equal((await repair(d,d.reviewer,"reviewer_plan",{dueEpoch})).ok,true);
+ await pool.query("UPDATE securepay_private.dispute_cases SET response_due_at=clock_timestamp()-interval '1 second',repair_due_at=clock_timestamp()-interval '1 second' WHERE case_id=$1",[d.scope.caseId]);
+ const checks=await Promise.all([scanDisputeDeadlines(escalationPool),scanDisputeDeadlines(escalationPool)]);
+ assert.equal(checks[0]+checks[1],1);
+ const row=await repairState(d);assert.equal(row.repair_phase,"escalated");assert.ok(row.response_escalated_at);assert.equal(row.status,"open");
+ const events=await pool.query("SELECT kind FROM securepay_private.dispute_deadline_events WHERE case_id=$1 ORDER BY kind",[d.scope.caseId]);
+ assert.deepEqual(events.rows.map(r=>r.kind),["owner_response_overdue","repair_overdue"]);
+ assert.equal(await scanDisputeDeadlines(escalationPool),0);
+ assert.equal((await state(d.s)).status,"disputed");
+ assert.equal((await d.approval.authorize(d.settlement)).ok,false);
+ assert.equal((await evidence(d)).ok,true);assert.ok((await repairState(d)).owner_responded_at);
+ assert.equal((await decide(d)).ok,true);
+ await assert.rejects(escalationPool.query("SELECT * FROM securepay_private.dispute_cases"),e=>e.code==="42501");
 });
