@@ -3,7 +3,7 @@ import test,{after,before} from "node:test";
 import assert from "node:assert/strict";
 import {randomUUID,randomBytes} from "node:crypto";
 import {createPinCredential} from "../domain/pin-credential.mjs";
-import {authorizeWithPin} from "./authorize-with-pin.mjs";
+import {authorizeWithPin,authorizePayerInTransaction} from "./authorize-with-pin.mjs";
 import {changePin,resolvePayer} from "./change-pin.mjs";
 import {verifyPinCredential} from "../domain/pin-credential.mjs";
 import {readFile} from "node:fs/promises";
@@ -226,4 +226,17 @@ test("PIN recovery requires separate grant, invalidates unused approvals, and re
  assert.equal(await verifyPinCredential({...s,pin:next.pin,pepper},{salt:k.salt,pinHash:k.pin_hash}),true);
  assert.equal((await pool.query("SELECT 1 FROM securepay_release_proofs WHERE proof_ref=$1",[p.authorizationRef])).rowCount,0);
  assert.equal(k.failed_attempts,0);assert.equal(k.locked_until,null);
+});
+
+test("verified-subject release ignores supplied customer ID and denies inactive payer",async()=>{
+ const s=await identityFixture();
+ assert.equal((await change(await changeGrant(s))).ok,true);
+ await pool.query("UPDATE securepay_milestones SET payer_customer_id=$2 WHERE id=$1",[s.milestoneId,s.customerId]);
+ const release=(patch={})=>tx(c=>authorizePayerInTransaction(c,{...s,expectedAmountCents:5000,requestId:randomUUID(),idempotencyKey:randomUUID(),...patch},pepper));
+ assert.equal((await release({subject:"forged",customerId:s.customerId})).ok,false);
+ await pool.query("UPDATE securepay_payer_identities SET active=false WHERE tenant_id=$1 AND customer_id=$2",[s.tenantId,s.customerId]);
+ assert.equal((await release()).ok,false);
+ await pool.query("UPDATE securepay_payer_identities SET active=true WHERE tenant_id=$1 AND customer_id=$2",[s.tenantId,s.customerId]);
+ assert.equal((await release({customerId:randomUUID()})).ok,true);
+ assert.equal((await state(s)).requests,1);
 });
