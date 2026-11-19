@@ -17,6 +17,7 @@ import {makeSharedCustomerBudget} from "./shared-budget.mjs";
 import {createHash} from "node:crypto";
 import {deflateSync} from "node:zlib";
 import {verifyAuditChain} from "./audit-chain.mjs";
+import {loadReconciliationReport,summarizeReport,renderReconciliationDashboard} from "./reconciliation-report.mjs";
 import {prepareRecovery,signProviderRecovery,signReviewerRecovery,applyRecovery} from "./settlement-recovery.mjs";
 import {verifyPinCredential} from "../domain/pin-credential.mjs";
 import {readFile} from "node:fs/promises";
@@ -34,11 +35,11 @@ const pool=new pg.Pool({connectionString:url.href,max:8,connectionTimeoutMillis:
 const payerSigningKey=randomBytes(32);
 const recoveryKey=randomBytes(32);
 const providerKey=randomBytes(32);
-let payerPool, notificationPool, providerPool, provider, disputePool, settlementPool, escalationPool, auditPool, retentionPool, reconciliationPool;
+let payerPool, notificationPool, providerPool, provider, disputePool, settlementPool, escalationPool, auditPool, retentionPool, reconciliationPool, reportingPool;
 const scanKey=randomBytes(32);
 const scanner=makeEvidenceScanner({key:scanKey,scan:async()=>"clean"});
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql","securepay-reporting-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(key_id,secret) VALUES('primary',$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(key_id,secret) VALUES('primary',$1)",[deriveCommandKey(pepper)]);
@@ -69,6 +70,7 @@ before(async()=>{
   auditPool=await rolePool("securepay_audit_runtime");
   retentionPool=await rolePool("securepay_retention_runtime");
   reconciliationPool=await rolePool("securepay_reconciliation_runtime");
+  reportingPool=await rolePool("securepay_reporting_runtime");
   await pool.query("INSERT INTO securepay_private.evidence_scan_keys(key_id,secret) VALUES('primary',$1)",[scanKey]);
   await pool.query("INSERT INTO securepay_private.evidence_keys(key_id,secret,write_enabled) VALUES('primary',$1,true)",[randomBytes(32)]);
   await pool.query("CREATE TABLE securepay_ci_staff_only(secret text); INSERT INTO securepay_ci_staff_only VALUES ('fixture')");
@@ -77,7 +79,7 @@ before(async()=>{
   await pool.query("CREATE ROLE securepay_ci_restricted NOLOGIN NOBYPASSRLS");
   await pool.query("GRANT SELECT, INSERT, UPDATE ON securepay_milestones, securepay_release_requests, securepay_release_proofs, securepay_customer_pins, securepay_payer_identities, securepay_pin_change_grants TO securepay_ci_restricted");
 });
-after(async()=>{if(reconciliationPool)await reconciliationPool.end();if(retentionPool)await retentionPool.end();if(auditPool)await auditPool.end();if(escalationPool)await escalationPool.end();if(disputePool)await disputePool.end();if(settlementPool)await settlementPool.end();if(providerPool)await providerPool.end();if(notificationPool)await notificationPool.end();if(payerPool)await payerPool.end();await pool.end();});
+after(async()=>{if(reportingPool)await reportingPool.end();if(reconciliationPool)await reconciliationPool.end();if(retentionPool)await retentionPool.end();if(auditPool)await auditPool.end();if(escalationPool)await escalationPool.end();if(disputePool)await disputePool.end();if(settlementPool)await settlementPool.end();if(providerPool)await providerPool.end();if(notificationPool)await notificationPool.end();if(payerPool)await payerPool.end();await pool.end();});
 async function fixture(status="approved",tenantId=randomUUID()) {
   const milestoneId=randomUUID(), customerId=randomUUID();
   await pool.query("INSERT INTO securepay_milestones(id,tenant_id,job_id,amount_cents,status) VALUES($1,$2,$3,5000,$4)",
@@ -1237,4 +1239,52 @@ test("signed dual hold recovery cannot dispatch during uncertainty and lifts onl
  assert.equal((await d.confirm.record({...d.settlement,...refund,outcome:"confirmed",receipt:randomUUID()})).ok,true);
  assert.equal((await state(d.s)).status,"settled");assert.equal((await balanceFor(d.s)).remaining_cents,"0");
  const hold=(await pool.query("SELECT resolved_at FROM securepay_private.provider_reconciliation WHERE tenant_id=$1 AND milestone_id=$2",[d.scope.tenantId,d.scope.milestoneId])).rows[0];assert.ok(hold.resolved_at);
+});
+
+async function reportingActor(tenantId){
+ const actorId=randomUUID(),key=randomBytes(32);
+ await pool.query("INSERT INTO securepay_private.reporting_actors(tenant_id,actor_id,secret) VALUES($1,$2,$3)",[tenantId,actorId,key]);
+ return {tenantId,actorId,key};
+}
+test("tenant-scoped reconciliation snapshot exposes exact balances and no other tenant or sensitive records",async()=>{
+ const d=await authorizedDispute(),other=await authorizedDispute();
+ const payout=await d.confirm.dispatch({...d.settlement,kind:"payout"});
+ assert.equal((await d.confirm.record({...d.settlement,...payout,outcome:"confirmed",receipt:randomUUID()})).ok,true);
+ const refund=await d.confirm.dispatch({...d.settlement,kind:"refund"});
+ assert.equal((await d.confirm.record({...d.settlement,...refund,outcome:"unknown"})).ok,true);
+ const actor=await reportingActor(d.s.tenantId);
+ const report=await loadReconciliationReport(reportingPool,actor);
+ assert.equal(report.milestones.length,1);
+ assert.equal(report.milestones[0].milestoneId,d.s.milestoneId);
+ assert.deepEqual(summarizeReport(report),{fundedCents:"5000",payoutCents:"3000",refundCents:"0",remainingCents:"2000",unresolvedIssues:"0",milestoneCount:1,mismatches:0,uncertainLegs:1,disputedMilestones:1});
+ assert.equal(JSON.stringify(report).includes(other.s.milestoneId),false);
+ assert.equal(JSON.stringify(report).includes(d.s.customerId),false);
+ assert.equal(renderReconciliationDashboard(report,{buyerSummary:true}).includes(d.s.milestoneId),false);
+ assert.equal((await verifyAuditChain(auditPool,d.s.tenantId,{checkpoint:report.checkpoint})).ok,true);
+ await assert.rejects(loadReconciliationReport(reportingPool,{...actor,tenantId:other.s.tenantId}),/Reporting denied/);
+ await assert.rejects(loadReconciliationReport(reportingPool,{...actor,key:randomBytes(32)}),/Reporting denied/);
+ await assert.rejects(reportingPool.query("SELECT * FROM securepay_private.financial_journal"),e=>e.code==="42501");
+ await assert.rejects(reportingPool.query("SELECT * FROM securepay_private.dispute_photos"),e=>e.code==="42501");
+ await assert.rejects(reportingPool.query("SELECT * FROM securepay_private.provider_key"),e=>e.code==="42501");
+ await pool.query("UPDATE securepay_private.reporting_actors SET active=false WHERE tenant_id=$1 AND actor_id=$2",[actor.tenantId,actor.actorId]);
+ await assert.rejects(loadReconciliationReport(reportingPool,actor),/Reporting denied/);
+});
+test("report access is audited and replayed signed report IDs are denied; journal mismatches are surfaced",async()=>{
+ const d=await authorizedDispute(),actor=await reportingActor(d.s.tenantId);
+ await finishSettlement(d);
+ const clean=await loadReconciliationReport(reportingPool,actor);assert.equal(summarizeReport(clean).mismatches,0);
+ await pool.query("UPDATE securepay_private.financial_journal SET amount_cents=amount_cents-1 WHERE tenant_id=$1 AND kind='settlement_refund'",[d.s.tenantId]);
+ const changed=await loadReconciliationReport(reportingPool,actor);assert.equal(summarizeReport(changed).mismatches,1);
+ assert.equal(summarizeReport(changed).remainingCents,"1");
+ const access=(await pool.query("SELECT count(*)::int AS n FROM securepay_private.reporting_access WHERE tenant_id=$1",[actor.tenantId])).rows[0];assert.equal(access.n,2);
+ const {createHmac}=await import("node:crypto"),expiry=Math.floor(Date.now()/1000)+20;
+ const args=[clean.reportId,actor.tenantId,actor.actorId,expiry];
+ const mac=createHmac("sha256",actor.key).update(["sp-report-v1",...args].join(":")).digest("hex");
+ const client=await reportingPool.connect();
+ try{
+  await client.query("BEGIN ISOLATION LEVEL REPEATABLE READ");
+  const {rows:[r]}=await client.query("SELECT securepay_private.reconciliation_report($1,$2,$3,$4,$5) AS report",[...args,mac]);
+  assert.equal(r.report,null);await client.query("ROLLBACK");
+ }finally{client.release();}
+ assert.equal((await verifyAuditChain(auditPool,d.s.tenantId,{checkpoint:clean.checkpoint})).ok,true);
 });
