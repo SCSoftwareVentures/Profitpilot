@@ -28,6 +28,8 @@ const expected=new Map([
   ["POST /v1/tenants/:tenantId/privacy/cases/:caseId","step-up"],
   ["GET /v1/tenants/:tenantId/privacy/cases/:caseId","step-up"],
   ["POST /v1/tenants/:tenantId/invoice-intakes/:batchId/orders/:orderId/preview","step-up"],
+  ["GET /v1/tenants/:tenantId/shared-costs/:kind/:sourceId/orders/:orderId","step-up"],
+  ["POST /v1/tenants/:tenantId/shared-costs/:kind/:sourceId/orders/:orderId","step-up"],
   ["GET /v1/tenants/:tenantId/supplier-costs/:batchId/orders/:orderId","step-up"],
   ["POST /v1/tenants/:tenantId/supplier-costs/:batchId/orders/:orderId","step-up"],
   ["GET /v1/tenants/:tenantId/invoice-intakes/:batchId/orders/:orderId","step-up"],

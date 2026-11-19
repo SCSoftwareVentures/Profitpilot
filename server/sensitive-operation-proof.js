@@ -2,6 +2,7 @@ import {createHmac,createHash,randomBytes} from "node:crypto";
 import {hasRecentMfa} from "./auth.js";
 import {invoiceIntakeFields} from "../src/invoice-intake.js";
 import {supplierCostFields} from "../src/supplier-cost.js";
+import {sharedCostFields} from "../src/shared-cost.js";
 import {workspaceJobFields} from "../src/workspace-jobs.js";
 import {WORKSPACE_KINDS,workspaceRecordFields,workspaceVersionFields} from "../src/workspace-records.js";
 import {canonicalAllocationMapping} from "../src/payroll-allocation-mapping.js";
@@ -237,4 +238,15 @@ export function supplierCostStepProof(t,b,o,input,step,identity,env=process.env,
 }
 export function supplierCostStatusProof(t,b,o,identity,env=process.env,now=Math.floor(Date.now()/1000)){
  if(![t,b,o].every(x=>typeof x==="string"&&uuid.test(x)))denied();const scope=createHash("sha256").update(["supplier-cost-status-v1",b].join("\n")).digest("hex");return [...signedAction("profitpilot-sensitive-api-v1",[t,o,"supplier_cost_status",scope],identity,env,now),b];
+}
+
+export function sharedCostStepProof(t,k,s,o,input,step,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ const f=sharedCostFields(k,s,input);if(![t,s,o].every(x=>typeof x==="string"&&uuid.test(x))||!f)denied();
+ const scope=createHash("sha256").update(f.canonical).digest("hex");
+ return [t,k,s,o,JSON.stringify(f.shares),f.evidence,scope,step,...securityWorkProof(t,o,"privileged_operation",scope,step,identity,env,now).slice(5)];
+}
+export function sharedCostStatusProof(t,k,s,o,identity,env=process.env,now=Math.floor(Date.now()/1000)){
+ if(![t,s,o].every(x=>typeof x==="string"&&uuid.test(x))||!["payroll","overhead"].includes(k))denied();
+ const scope=createHash("sha256").update(["shared-cost-status-v1",k,s].join("\n")).digest("hex");
+ return [...signedAction("profitpilot-sensitive-api-v1",[t,o,"shared_cost_status",scope],identity,env,now),k,s];
 }
