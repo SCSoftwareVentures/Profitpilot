@@ -83,10 +83,10 @@ CREATE OR REPLACE FUNCTION securepay_private.dispute_action(e uuid,t uuid,m uuid
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 BEGIN
  IF op IN ('decide','finalize') THEN RETURN false; END IF;
- IF op='ack' AND EXISTS(SELECT 1 FROM securepay_private.case_reassessments WHERE case_id=d AND status='approved') THEN
+ IF op='ack' THEN
   IF securepay_private.dispute_actor_valid(t,a,concat_ws(':','sp-dispute-v1',e,t,m,d,a,op,encode(convert_to(details,'UTF8'),'hex'),coalesce(digest,'-'),coalesce(payout::text,'-'),coalesce(refund::text,'-'),expires),expires,sig) NOT IN ('customer','owner') THEN RETURN false; END IF;
   PERFORM 1 FROM public.securepay_milestones WHERE tenant_id=t AND id=m FOR UPDATE;
-  IF digest IS NULL OR digest IS DISTINCT FROM (SELECT evidence_digest FROM securepay_private.dispute_events WHERE case_id=d AND action='decide' ORDER BY occurred_at DESC,event_id DESC LIMIT 1) THEN RETURN false; END IF;
+  IF EXISTS(SELECT 1 FROM securepay_private.case_reassessments WHERE case_id=d AND status='approved') AND (digest IS NULL OR digest IS DISTINCT FROM (SELECT evidence_digest FROM securepay_private.dispute_events WHERE case_id=d AND action='decide' ORDER BY occurred_at DESC,event_id DESC LIMIT 1)) THEN RETURN false; END IF;
  END IF;
  RETURN securepay_private.dispute_action_internal(e,t,m,d,a,op,details,digest,payout,refund,expires,sig);
 END $$;
@@ -94,7 +94,7 @@ CREATE OR REPLACE FUNCTION securepay_private.authorize_settlement(s uuid,t uuid,
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 BEGIN
  RETURN false;
-END $;
+END $$;
 CREATE OR REPLACE FUNCTION securepay_private.payer_ack_negotiated(t uuid,z uuid,v uuid,e uuid,decision uuid,payout bigint,refund bigint) RETURNS boolean
  LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE c uuid;o securepay_private.funded_cancellation_offers%ROWTYPE;d securepay_private.dispute_cases%ROWTYPE;
@@ -252,4 +252,29 @@ GRANT EXECUTE ON FUNCTION securepay_private.reassessment_queue(uuid,uuid,bigint,
 ALTER FUNCTION securepay_private.self_report_conflict(uuid,uuid,uuid,text,bigint,text) OWNER TO securepay_context_owner;
 REVOKE ALL ON FUNCTION securepay_private.self_report_conflict(uuid,uuid,uuid,text,bigint,text) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION securepay_private.self_report_conflict(uuid,uuid,uuid,text,bigint,text) TO securepay_reviewer_runtime,securepay_settlement_dashboard_runtime;
+CREATE OR REPLACE FUNCTION securepay_private.funded_cancel_view(t uuid,z uuid) RETURNS jsonb
+ LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog AS $$
+ SELECT jsonb_build_object('planId',z,'stages',(SELECT jsonb_agg(jsonb_build_object('milestoneId',m.id,'amountCents',m.amount_cents::text,'description',l.description,'status',m.status,'stateDigest',securepay_private.funded_cancel_state(t,z,m.id)) ORDER BY l.stage)
+ FROM securepay_private.payment_plan_milestones l JOIN public.securepay_milestones m ON m.tenant_id=l.tenant_id AND m.id=l.milestone_id WHERE l.tenant_id=t AND l.plan_id=z),
+ 'offers',(SELECT coalesce(jsonb_agg(jsonb_build_object('offerId',o.offer_id,'milestoneId',o.milestone_id,'payoutCents',o.payout_cents::text,'refundCents',o.refund_cents::text,'reason',o.reason,'offerDigest',o.offer_digest,'status',o.status,
+ 'current',coalesce(o.status='offered' AND o.state_digest=securepay_private.funded_cancel_state(t,z,o.milestone_id),false),'caseId',o.case_id,'caseStatus',c.status,'decisionPayoutCents',c.payout_cents::text,'decisionRefundCents',c.refund_cents::text,'customerAcknowledged',c.customer_ack,'ownerAcknowledged',c.owner_ack,'decision',(SELECT jsonb_build_object('eventId',e.event_id,'reason',e.details,'evidenceDigest',e.evidence_digest) FROM securepay_private.dispute_events e WHERE e.case_id=c.case_id AND c.status<>'open' AND e.action IN ('decide','finalize') ORDER BY e.occurred_at DESC,e.event_id DESC LIMIT 1),'confirmedPayoutCents',b.payout_cents::text,'confirmedRefundCents',b.refund_cents::text,'remainingCents',b.remaining_cents::text) ORDER BY o.created_at,o.offer_id),'[]'::jsonb)
+ FROM securepay_private.funded_cancellation_offers o LEFT JOIN securepay_private.dispute_cases c ON c.case_id=o.case_id
+ CROSS JOIN LATERAL securepay_private.financial_balance(t,o.milestone_id) b WHERE o.tenant_id=t AND o.plan_id=z))
+$$;
+CREATE OR REPLACE FUNCTION securepay_private.settlement_dashboard_snapshot(t uuid,d uuid,a uuid) RETURNS jsonb
+ LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
+DECLARE r jsonb;
+BEGIN
+ IF NOT securepay_private.governance_cleared(t,d,a,'settlement') THEN RETURN NULL; END IF;
+ SELECT jsonb_build_object('caseId',c.case_id,'milestoneId',c.milestone_id,'caseStatus',c.status,'fundingStatus',f.status,'amountCents',m.amount_cents::text,'payoutCents',c.payout_cents::text,'refundCents',c.refund_cents::text,
+ 'journalVerified',securepay_private.verify_financial_journal(t,m.id),'fundedCents',b.funded_cents::text,'remainingCents',b.remaining_cents::text,
+ 'confirmedPayoutCents',b.payout_cents::text,'confirmedRefundCents',b.refund_cents::text,
+ 'unresolved',EXISTS(SELECT 1 FROM securepay_private.provider_reconciliation x WHERE x.tenant_id=t AND x.milestone_id=m.id AND x.resolved_at IS NULL) OR EXISTS(SELECT 1 FROM securepay_private.settlement_leg_conflicts x WHERE x.case_id=d AND x.resolved_at IS NULL),
+ 'independent',securepay_private.governance_settlement_ok(t,d,a),
+ 'decision',(SELECT jsonb_build_object('eventId',e.event_id,'reason',e.details,'digest',e.evidence_digest) FROM securepay_private.dispute_events e WHERE e.case_id=d AND c.status IN ('final','authorized','settled') AND e.action='finalize' ORDER BY e.occurred_at DESC,e.event_id DESC LIMIT 1),
+ 'settlementId',st.settlement_id,'settlementStatus',st.status,
+ 'legs',(SELECT coalesce(jsonb_agg(jsonb_build_object('kind',l.kind,'amountCents',l.amount_cents::text,'status',l.status) ORDER BY l.kind),'[]'::jsonb) FROM securepay_private.settlement_legs l WHERE l.case_id=d))
+ INTO r FROM securepay_private.dispute_cases c JOIN public.securepay_milestones m ON m.tenant_id=c.tenant_id AND m.id=c.milestone_id JOIN securepay_private.provider_funding f ON f.tenant_id=c.tenant_id AND f.milestone_id=c.milestone_id CROSS JOIN LATERAL securepay_private.financial_balance(t,m.id) b LEFT JOIN securepay_private.dispute_settlements st ON st.case_id=c.case_id WHERE c.tenant_id=t AND c.case_id=d;
+ RETURN r;
+END $$;
 COMMIT;
