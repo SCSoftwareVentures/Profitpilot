@@ -51,6 +51,7 @@ export function createSecurePayRouter({enabled=false,verifyToken,service,takeBud
    const result=await fn(req);
    if(!result?.ok)return res.status(403).json({error:"Authorization denied"});
    // Response whitelist: never return credentials, proof references or raw SQL errors.
+   if(result.view)return res.status(200).json({mode:"sandbox",moneyMoved:false,...result.view});
    if(result.releaseRequestId)return res.status(202).json({
       mode:"sandbox",status:"reserved",releaseRequestId:result.releaseRequestId,
       milestoneId:result.milestoneId,amountCents:String(result.amountCents),moneyMoved:false
@@ -64,6 +65,7 @@ export function createSecurePayRouter({enabled=false,verifyToken,service,takeBud
  };
  router.post("/tenants/:tenantId/pin/grant",handle(req=>service.issueGrant({identity:req.payerIdentity,tenantId:req.params.tenantId,body:req.body})));
  router.post("/tenants/:tenantId/pin",handle(req=>service.setPin({identity:req.payerIdentity,tenantId:req.params.tenantId,body:req.body})));
+ router.post("/tenants/:tenantId/milestones/:milestoneId/view",handle(req=>service.view({identity:req.payerIdentity,tenantId:req.params.tenantId,milestoneId:req.params.milestoneId,body:req.body})));
  router.post("/tenants/:tenantId/milestones/:milestoneId/reserve",handle(req=>service.reserve({identity:req.payerIdentity,tenantId:req.params.tenantId,milestoneId:req.params.milestoneId,body:req.body})));
  router.use((err,req,res,next)=>res.status(err.type==="entity.too.large"?413:400).json({error:"Invalid request"}));
  return router;
