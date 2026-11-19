@@ -17,7 +17,10 @@ export async function withPayer(pool,{tenantId,subject,signingKey},fn) {
   const payload=["securepay-payer-v1",tenantId,Buffer.from(subject,"utf8").toString("hex"),expires,nonce].join(":");
   const signature=createHmac("sha256",signingKey).update(payload).digest("hex");
   await c.query("SELECT set_config('sp.tenant',$1,true),set_config('sp.subject',$2,true),set_config('sp.expiry',$3,true),set_config('sp.nonce',$4,true),set_config('sp.signature',$5,true)",[tenantId,subject,expires,nonce,signature]);
+  const verify=async()=>{const {rows:[p]}=await c.query("SELECT securepay_private.current_payer($1::uuid) AS payer",[tenantId]);if(!p.payer)throw new Error("Payer context denied");return p.payer;};
+  const initial=await verify();
   const result=await fn(c);
+  if(await verify()!==initial)throw new Error("Payer context changed");
   await c.query("COMMIT");begun=false;return result;
  }catch(e){
   if(begun)try{await c.query("ROLLBACK");}catch(r){discard=r;throw new AggregateError([e,r],"Payer transaction rollback failed");}
