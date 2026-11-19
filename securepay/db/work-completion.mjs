@@ -7,6 +7,13 @@ export function makeWorkCompletionOwner({pool,actorId,key,scanner}){
  if(!pool?.query||!Buffer.isBuffer(key)||key.length!==32||typeof scanner?.attest!=="function")throw Error("Completion authority unavailable");
  const mac=args=>createHmac("sha256",key).update(args.join(":")).digest("hex");
  return Object.freeze({
+  async acknowledgeFundedCancellation({tenantId,planId,offerId,decisionId,payoutCents,refundCents}){
+   const eventId=randomUUID();ids(tenantId,planId,offerId,eventId,decisionId);
+   if(![payoutCents,refundCents].every(x=>Number.isSafeInteger(x)&&x>=0))throw Error("Invalid decision amount");
+   const exp=expiry(),args=[tenantId,planId,offerId,eventId,decisionId,actorId,payoutCents,refundCents,exp];
+   const {rows:[r]}=await pool.query("SELECT securepay_private.owner_ack_negotiated($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) AS ok",[...args,mac(["sp-negotiated-ack-v1",...args])]);
+   return {ok:r?.ok===true,moneyMoved:false};
+  },
   async fundedCancellationStatus({tenantId,planId}){
    ids(tenantId,planId);const exp=expiry(),args=[tenantId,planId,actorId,exp];
    const {rows:[r]}=await pool.query("SELECT securepay_private.owner_funded_cancel_view($1,$2,$3,$4,$5) AS view",[...args,mac(["sp-funded-cancel-view-v1",...args])]);
