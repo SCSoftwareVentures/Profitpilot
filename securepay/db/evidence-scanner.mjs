@@ -43,12 +43,12 @@ export function validEvidencePNG(bytes){
 }
 // Explicit opt-in only. Fixed executable, no shell, no filenames or output logs.
 // ClamAV signature database and executable integrity must be provisioned separately.
-export function clamavScanner({executable="/usr/bin/clamscan",timeoutMs=15000}={}){
- if(!executable.startsWith("/")||!Number.isInteger(timeoutMs)||timeoutMs<100||timeoutMs>30000)throw Error("Invalid scanner configuration");
+export function clamavScanner({executable="/usr/bin/clamscan",timeoutMs=15000,database}={}){
+ if(!executable.startsWith("/")||(database!==undefined&&(typeof database!=="string"||!database.startsWith("/")))||!Number.isInteger(timeoutMs)||timeoutMs<100||timeoutMs>30000)throw Error("Invalid scanner configuration");
  return bytes=>new Promise(resolve=>{
   let child,done=false,timer;
   const finish=result=>{if(done)return;done=true;clearTimeout(timer);resolve(result);};
-  try{child=spawn(executable,["--no-summary","--stdout","-"],{stdio:["pipe","ignore","ignore"],shell:false});}
+  try{child=spawn(executable,["--no-summary","--stdout",...(database?["--database="+database]:[]),"-"],{stdio:["pipe","ignore","ignore"],shell:false});}
   catch{return finish("unavailable");}
   timer=setTimeout(()=>{child.kill("SIGKILL");finish("unavailable");},timeoutMs);
   child.on("error",()=>finish("unavailable"));
