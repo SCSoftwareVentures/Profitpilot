@@ -9,7 +9,7 @@ function ui(page,responses){
  const nodes=new Map(),calls=[];
  function node(){
   return {value:"",checked:false,hidden:false,disabled:false,textContent:"",children:[],handlers:{},
-   addEventListener(name,fn){this.handlers[name]=fn;},append(...x){this.children.push(...x);},replaceChildren(){this.children=[];}};
+   decode:async()=>{},addEventListener(name,fn){this.handlers[name]=fn;},append(...x){this.children.push(...x);},replaceChildren(){this.children=[];}};
  }
  const get=id=>{if(!nodes.has(id))nodes.set(id,node());return nodes.get(id);};
  const script=page.html.match(/<script>([\s\S]*?)<\/script>/)[1];
@@ -46,4 +46,18 @@ test("JWT verification denies mixed payer and owner audiences",async()=>{
  const make=aud=>new SignJWT({acr,auth_time:Math.floor(Date.now()/1000)}).setProtectedHeader({alg:"ES256"}).setIssuer(issuer).setAudience(aud).setSubject("owner-fixture").setIssuedAt().setExpirationTime("5m").sign(privateKey);
  assert.equal((await verify(await make("owner"))).subject,"owner-fixture");
  await assert.rejects(verify(await make(["owner","payer"])),/assurance/);
+});
+
+test("customer cannot approve until all completion images load and review is acknowledged",async()=>{
+ const t=randomUUID(),m=randomUUID(),z=randomUUID(),p=randomUUID(),digest="a".repeat(64),manifest="b".repeat(64);
+ const view={mode:"sandbox",moneyMoved:false,milestoneId:m,amountCents:"5000",status:"submitted",fundingStatus:"funded",requestStatus:null};
+ const completion={mode:"sandbox",moneyMoved:false,completionId:z,manifestDigest:manifest,comments:"Completion notes",version:"1",amountCents:"5000",status:"submitted",photos:[{photoId:p,digest}]};
+ const h=ui(customerPortalPage(),[{code:200,data:view},{code:200,data:completion},{code:200,data:{mode:"sandbox",moneyMoved:false,photoId:p,digest,content:"aGVsbG8="}},{code:200,data:{mode:"sandbox",moneyMoved:false,status:"work_approved"}}]);
+ h.get("tenant").value=t;h.get("milestone").value=m;h.get("token").value="fixture";await h.fire("load");
+ assert.equal(h.get("reserve").disabled,true);assert.equal(h.get("approve-work").disabled,true);
+ await h.fire("load-evidence");assert.equal(h.get("evidence").children.length,1);assert.equal(h.get("approve-work").disabled,true);
+ h.get("inspect").checked=true;await h.fire("inspect","change");assert.equal(h.get("approve-work").disabled,false);
+ await h.fire("approve-work");
+ assert.deepEqual(JSON.parse(h.calls[3].opts.body),{completionId:z,manifestDigest:manifest,expectedAmountCents:5000,version:"1"});
+ assert.equal(h.get("details").hidden,true);assert.equal(h.get("reserve").disabled,true);
 });
