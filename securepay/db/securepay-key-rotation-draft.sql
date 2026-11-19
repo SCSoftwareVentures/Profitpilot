@@ -69,7 +69,7 @@ CREATE OR REPLACE FUNCTION securepay_private.issue_pin_grant(t uuid,c uuid,op te
 DECLARE key_bytes bytea; existing boolean; n bigint;
 BEGIN
  IF t IS NULL OR c IS NULL OR g IS NULL OR op IS NULL OR op NOT IN ('enroll','recover')
- OR digest IS NULL OR digest !~ '^[0-9a-f]{64}$' OR sig IS NULL OR sig !~ '^[0-9a-f]{64}$'
+ OR digest IS NULL OR digest !~ '^[0-9a-f]{64}$' OR sig IS NULL
  OR securepay_private.current_payer(t) IS DISTINCT FROM c THEN RETURN NULL; END IF;
  PERFORM 1 FROM public.securepay_payer_identities WHERE tenant_id=t AND customer_id=c AND active FOR UPDATE;
  IF NOT FOUND THEN RETURN NULL; END IF;
