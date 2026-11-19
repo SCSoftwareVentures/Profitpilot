@@ -7,7 +7,7 @@ import {createServer} from "node:http";
 import {fileURLToPath} from "node:url";
 import {createPayerTokenVerifier} from "./securepay-router.js";
 import {authoritySecrets} from "./securepay-gateway.js";
-import {ownerCompletionPage,sendPortalPage} from "./securepay-portal-page.js";
+import {ownerCompletionPage,ownerQuotePage,sendPortalPage} from "./securepay-portal-page.js";
 import {makeWorkCompletionOwner} from "../securepay/db/work-completion.mjs";
 import {makeEvidenceScanner,clamavScanner,jpegNormalizer} from "../securepay/db/evidence-scanner.mjs";
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
@@ -19,10 +19,11 @@ export function createCompletionRouter({enabled=false,tenantId,subject,verifyTok
  if(!enabled)return router;
  if(!uuid.test(tenantId)||typeof subject!=="string"||!subject||typeof verifyToken!=="function"||!owner)throw Error("Completion authority unavailable");
  router.use(rateLimit({windowMs:60000,limit:30,standardHeaders:true,legacyHeaders:false}));
+ router.get("/quotes",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,ownerQuotePage()));
  router.get("/upload",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,ownerCompletionPage()));
  let uploading=false;
  router.post("/:milestoneId/:action",async(req,res,next)=>{
-  if(req.originalUrl.includes("?")||!uuid.test(req.params.milestoneId)||!["status","start","upload","submit"].includes(req.params.action))return res.status(404).json({error:"Not found"});
+  if(req.originalUrl.includes("?")||!uuid.test(req.params.milestoneId)||!["status","start","upload","submit","quote-status","publish-quote","offer-plan","withdraw-plan"].includes(req.params.action))return res.status(404).json({error:"Not found"});
   try{
    const token=req.headers.authorization?.match(/^Bearer ([^\s]{1,8192})$/i)?.[1];
    if(!token)return res.status(401).json({error:"Authentication required"});
@@ -32,7 +33,7 @@ export function createCompletionRouter({enabled=false,tenantId,subject,verifyTok
    next();
   }catch{return res.status(401).json({error:"Authentication required"});}
  },(req,res,next)=>{
-  if(req.params.action!=="upload")return express.json({limit:"8kb",strict:true})(req,res,next);
+  if(req.params.action!=="upload")return express.json({limit:req.params.action==="offer-plan"?"40kb":"8kb",strict:true})(req,res,next);
   if(uploading)return res.status(429).json({error:"Upload busy"});
   uploading=true;
   let released=false,processing=false,closed=false;
@@ -46,6 +47,32 @@ export function createCompletionRouter({enabled=false,tenantId,subject,verifyTok
   const {milestoneId,action}=req.params,body=req.body,scope={tenantId,milestoneId};
   try{
    let result;
+   if(action==="quote-status"||action==="publish-quote"||action==="offer-plan"||action==="withdraw-plan"){
+    const jobId=milestoneId;
+    if(action==="quote-status"){
+     if(!exact(body,[]))return res.status(400).json({error:"Invalid request"});
+     result=await owner.quoteStatus({tenantId,jobId});
+    }else if(action==="publish-quote"){
+     if(!exact(body,["previousDigest","description","totalCents"])||(body.previousDigest!==null&&!/^[a-f0-9]{64}$/.test(body.previousDigest))||typeof body.description!=="string"||!body.description.trim()||body.description.length>4000||body.description.includes("\0")||!Number.isSafeInteger(body.totalCents)||body.totalCents<=0)return res.status(400).json({error:"Invalid request"});
+     result=await owner.publishQuote({tenantId,jobId,...body});
+    }else if(action==="offer-plan"){
+     if(!exact(body,["items"])||!Array.isArray(body.items)||body.items.length<1||body.items.length>20||body.items.some(x=>!exact(x,["milestoneId","amountCents","description","final"])||!uuid.test(x.milestoneId)||!Number.isSafeInteger(x.amountCents)||x.amountCents<=0||typeof x.description!=="string"||!x.description.trim()||x.description.length>500||x.description.includes("\0")||typeof x.final!=="boolean"))return res.status(400).json({error:"Invalid request"});
+     // Only published customer-facing quotes can be offered through this interface.
+     const current=await owner.quoteStatus({tenantId,jobId});
+     if(!current.ok||!current.view.quote)return res.status(403).json({error:"Authorization denied"});
+     result=await owner.offerPlan({tenantId,jobId,items:body.items});
+    }else{
+     if(!exact(body,["planId"])||!uuid.test(body.planId))return res.status(400).json({error:"Invalid request"});
+     const current=await owner.quoteStatus({tenantId,jobId});
+     if(!current.ok||current.view.plan?.planId!==body.planId)return res.status(403).json({error:"Authorization denied"});
+     result=await owner.withdrawPlan({tenantId,planId:body.planId});
+    }
+    if(!result?.ok)return res.status(403).json({error:"Authorization denied"});
+    if(action==="quote-status")return res.json({mode:"sandbox",moneyMoved:false,view:result.view});
+    if(action==="publish-quote")return res.status(201).json({mode:"sandbox",moneyMoved:false,quote:result.quote});
+    if(action==="offer-plan")return res.status(201).json({mode:"sandbox",moneyMoved:false,planId:result.planId,planDigest:result.planDigest});
+    return res.json({mode:"sandbox",moneyMoved:false,status:"withdrawn"});
+   }
    if(action==="status"||action==="start"){
     if(!exact(body,[]))return res.status(400).json({error:"Invalid request"});
     result=await owner[action](scope);
