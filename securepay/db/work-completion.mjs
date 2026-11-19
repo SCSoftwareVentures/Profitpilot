@@ -57,6 +57,13 @@ export function makeWorkCompletionOwner({pool,actorId,key,scanner,disputeScanner
    const {rows:[r]}=await pool.query("SELECT securepay_private.withdraw_contract_change($1,$2,$3,$4,$5,$6) AS ok",[...args,mac(["sp-change-withdraw-v1",...args])]);
    return {ok:r?.ok===true,moneyMoved:false};
   },
+  async bindCoreJob({tenantId,jobId,contractId,siteId,baselineId,reviewDigest,referenceDigest,referenceExpiresAt}){
+   ids(tenantId,jobId,contractId,siteId,baselineId);
+   if(![reviewDigest,referenceDigest].every(x=>typeof x==="string"&&/^[a-f0-9]{64}$/.test(x)&&!/^0+$/.test(x))||!Number.isSafeInteger(referenceExpiresAt))throw Error("Invalid job binding");
+   const exp=expiry(),args=[tenantId,jobId,actorId,contractId,siteId,baselineId,reviewDigest,referenceDigest,referenceExpiresAt,exp];
+   const {rows:[r]}=await pool.query("SELECT securepay_private.bind_core_job($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) AS binding",[...args,mac(["sp-core-job-bind-v1",...args])]);
+   return r?.binding?{ok:true,binding:r.binding}:{ok:false};
+  },
   async publishQuote({quoteId=randomUUID(),tenantId,jobId,previousDigest=null,description,totalCents}){
    ids(quoteId,tenantId,jobId);
    if((previousDigest!==null&&(typeof previousDigest!=="string"||!/^[a-f0-9]{64}$/.test(previousDigest)))||typeof description!=="string"||!description.trim()||description.length>4000||description.includes("\0")||!Number.isSafeInteger(totalCents)||totalCents<=0)throw Error("Invalid quote");

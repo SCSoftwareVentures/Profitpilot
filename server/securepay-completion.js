@@ -31,7 +31,7 @@ export function createCompletionRouter({enabled=false,tenantId,subject,verifyTok
  router.get("/upload",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,ownerCompletionPage()));
  let uploading=false;
  router.post("/:milestoneId/:action",async(req,res,next)=>{
-  if(req.originalUrl.includes("?")||!uuid.test(req.params.milestoneId)||!["status","start","upload","submit","quote-status","core-link-preview","publish-quote","offer-plan","withdraw-plan","contract-status","offer-change","withdraw-change","funded-cancellation-status","offer-funded-cancellation","withdraw-funded-cancellation","ack-negotiated",...participantOps.map(x=>"case-"+x)].includes(req.params.action))return res.status(404).json({error:"Not found"});
+  if(req.originalUrl.includes("?")||!uuid.test(req.params.milestoneId)||!["status","start","upload","submit","quote-status","core-link-preview","core-link-bind","publish-quote","offer-plan","withdraw-plan","contract-status","offer-change","withdraw-change","funded-cancellation-status","offer-funded-cancellation","withdraw-funded-cancellation","ack-negotiated",...participantOps.map(x=>"case-"+x)].includes(req.params.action))return res.status(404).json({error:"Not found"});
   try{
    const token=req.headers.authorization?.match(/^Bearer ([^\s]{1,8192})$/i)?.[1];
    if(!token)return res.status(401).json({error:"Authentication required"});
@@ -94,6 +94,18 @@ export function createCompletionRouter({enabled=false,tenantId,subject,verifyTok
     if(action==="offer-change")return res.status(201).json({mode:"sandbox",moneyMoved:false,change:result.change});
     return res.json({mode:"sandbox",moneyMoved:false,status:"withdrawn"});
    }
+   if(action==="core-link-bind"){
+    if(!coreReferenceKey)return res.status(404).json({error:"Not found"});
+    if(!exact(body,["reference","reviewDigest","confirm"])||body.confirm!==true||typeof body.reviewDigest!=="string"||!/^[a-f0-9]{64}$/.test(body.reviewDigest)||/^0+$/.test(body.reviewDigest))return res.status(400).json({error:"Explicit binding confirmation and reviewed evidence required"});
+    let snapshot;try{snapshot=verifyJobReference({reference:body.reference,tenantId,jobId:milestoneId,publicKey:coreReferenceKey});}catch{return res.status(403).json({error:"Reference denied"});}
+    if(snapshot.status==="cancelled")return res.status(403).json({error:"Cancelled job"});
+    const current=await owner.quoteStatus({tenantId,jobId:milestoneId});
+    if(!current?.ok)return res.status(403).json({error:"Authorization denied"});
+    const preview=projectJobReference(snapshot,current.view);
+    const result=await owner.bindCoreJob({tenantId,jobId:milestoneId,contractId:snapshot.contractId,siteId:snapshot.siteId,baselineId:snapshot.baselineId,reviewDigest:body.reviewDigest,referenceDigest:preview.referenceDigest,referenceExpiresAt:snapshot.expiresAt});
+    if(!result?.ok)return res.status(403).json({error:"Approved party mapping unavailable"});
+    return res.json({mode:"sandbox",moneyMoved:false,paymentAuthorized:false,binding:result.binding});
+   }
    if(action==="core-link-preview"){
     if(!coreReferenceKey)return res.status(404).json({error:"Not found"});
     if(!exact(body,["reference"]))return res.status(400).json({error:"Invalid request"});
@@ -146,7 +158,7 @@ export function createCompletionRouter({enabled=false,tenantId,subject,verifyTok
    if(action==="start")return res.status(201).json({mode:"sandbox",moneyMoved:false,completionId:result.completionId});
    if(action==="upload")return res.status(201).json({mode:"sandbox",moneyMoved:false,photoId:result.photoId,digest:result.digest});
    return res.json({mode:"sandbox",moneyMoved:false,status:"submitted"});
-  }catch{return res.status(503).json({error:"Completion unavailable"});}
+  }catch(e){if(e?.code==="42501")return res.status(403).json({error:"Authorization denied"});return res.status(503).json({error:"Completion unavailable"});}
   finally{res.locals.finishUpload?.();}
  });
  router.use((req,res)=>res.status(404).json({error:"Not found"}));

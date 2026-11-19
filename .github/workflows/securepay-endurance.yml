@@ -39,7 +39,7 @@ jobs:
       SHARD: ${{ matrix.shard }}
       QUALIFIED_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       EXPECTED_DOMAIN: 57
-      EXPECTED_DATABASE: 106
+      EXPECTED_DATABASE: 107
     steps:
       - uses: actions/checkout@v4
         with:
@@ -134,7 +134,7 @@ jobs:
           ids = sorted(int(r["iteration"]) for r in rows)
           passed = [r for r in rows if r["status"]=="PASS" and r["commit"]==os.environ["QUALIFIED_SHA"]
                     and int(r["domain_tests"])==57 and int(r["domain_pass"])==57
-                    and int(r["database_tests"])==106 and int(r["database_pass"])==106
+                    and int(r["database_tests"])==107 and int(r["database_pass"])==107
                     and int(r["duration_ms"])>0]
           timing = sorted(int(r["duration_ms"]) for r in passed)
           qualified = len(paths)==10 and ids==list(range(1,501)) and len(passed)==500 and os.environ["MATRIX_RESULT"]=="success"
@@ -153,7 +153,7 @@ jobs:
                         f"P95: {timing[(95*len(timing)+99)//100-1]/1000:.3f}s",
                         f"Maximum: {max(timing)/1000:.3f}s"]
           lines += ["QUALIFICATION: " + ("PASS" if qualified else "FAIL"),
-                    "57 domain/unit and 106 PostgreSQL integration tests per repetition; real-engine scanner checks are separate.",
+                    "57 domain/unit and 107 PostgreSQL integration tests per repetition; real-engine scanner checks are separate.",
                     "Synthetic sandbox only; no real provider transfers, production load or legal certification."]
           report = "\n".join(lines) + "\n"
           print(report)

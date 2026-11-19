@@ -40,7 +40,7 @@ let payerPool, notificationPool, providerPool, provider, disputePool, settlement
 const scanKey=randomBytes(32);
 const scanner=makeEvidenceScanner({key:scanKey,scan:async()=>"clean"});
 before(async()=>{
-  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql","securepay-reporting-draft.sql","securepay-portal-draft.sql","securepay-work-completion-draft.sql","securepay-work-revision-draft.sql","securepay-payment-plan-draft.sql","securepay-quote-bridge-draft.sql","securepay-contract-changes-draft.sql","securepay-funded-cancellation-draft.sql","securepay-reviewer-draft.sql","securepay-governance-draft.sql"])
+  for(const name of ["securepay-milestones-draft.sql","securepay-release-proofs-draft.sql","securepay-customer-pins-draft.sql","securepay-payer-identity-draft.sql","securepay-payer-rls-draft.sql","securepay-command-boundary-draft.sql","securepay-recovery-grants-draft.sql","securepay-audit-draft.sql","securepay-session-revocation-draft.sql","securepay-notification-delivery-draft.sql","securepay-key-rotation-draft.sql","securepay-provider-sandbox-draft.sql","securepay-dispute-settlement-draft.sql","securepay-rectification-draft.sql","securepay-evidence-encryption-draft.sql","securepay-audit-chain-draft.sql","securepay-evidence-screening-retention-draft.sql","securepay-normalized-evidence-draft.sql","securepay-shared-rate-limit-draft.sql","securepay-settlement-legs-draft.sql","securepay-financial-journal-draft.sql","securepay-settlement-recovery-draft.sql","securepay-reporting-draft.sql","securepay-portal-draft.sql","securepay-work-completion-draft.sql","securepay-work-revision-draft.sql","securepay-payment-plan-draft.sql","securepay-quote-bridge-draft.sql","securepay-contract-changes-draft.sql","securepay-funded-cancellation-draft.sql","securepay-reviewer-draft.sql","securepay-governance-draft.sql","securepay-core-job-binding-draft.sql"])
     await pool.query(await readFile(new URL(name,import.meta.url),"utf8"));
   await pool.query("INSERT INTO securepay_private.context_key(key_id,secret) VALUES('primary',$1)",[payerSigningKey]);
   await pool.query("INSERT INTO securepay_private.command_key(key_id,secret) VALUES('primary',$1)",[deriveCommandKey(pepper)]);
@@ -1622,6 +1622,31 @@ async function quoteFixture(){
  const offer=(quoteDigest,more={})=>d.owner.offerPlan({...scope,quoteDigest,items,...more});
  return {d,scope,publish,offer,items};
 }
+test("independently provisioned core job binds exactly once before quotation and payment plan",async()=>{
+ const {d,scope,publish,offer}=await quoteFixture(),contractId=randomUUID(),siteId=randomUUID(),baselineId=randomUUID(),reviewDigest=randomBytes(32).toString("hex");
+ const args=[scope.tenantId,scope.jobId,contractId,siteId,baselineId,d.s.customerId,d.actorId,reviewDigest];
+ const provision="INSERT INTO securepay_private.core_job_link_orders(tenant_id,job_id,contract_id,site_id,baseline_id,customer_id,owner_id,review_digest) VALUES($1,$2,$3,$4,$5,$6,$7,$8)";
+ const bind={...scope,contractId,siteId,baselineId,reviewDigest,referenceDigest:randomBytes(32).toString("hex"),referenceExpiresAt:Math.floor(Date.now()/1000)+120};
+ assert.equal((await d.owner.bindCoreJob(bind)).ok,false);
+ await assert.rejects(completionPool.query(provision,args),e=>e.code==="42501");
+ await pool.query(provision,args);
+ await assert.rejects(publish(),e=>e.code==="42501");
+ await assert.rejects(pool.query("UPDATE securepay_private.quote_job_parties SET owner_id=owner_id WHERE tenant_id=$1 AND job_id=$2",[scope.tenantId,scope.jobId]),e=>e.code==="55000");
+ for(const patch of [{contractId:randomUUID()},{reviewDigest:randomBytes(32).toString("hex")},{referenceExpiresAt:Math.floor(Date.now()/1000)-1},{tenantId:randomUUID()},{jobId:randomUUID()}])
+  assert.equal((await d.owner.bindCoreJob({...bind,...patch})).ok,false);
+ const results=await Promise.all([d.owner.bindCoreJob(bind),d.owner.bindCoreJob({...bind,referenceDigest:randomBytes(32).toString("hex")})]);
+ assert.equal(results.every(x=>x.ok),true);assert.deepEqual(results[0].binding,results[1].binding);
+ assert.equal((await pool.query("SELECT count(*)::int n FROM securepay_private.core_job_bindings WHERE tenant_id=$1 AND job_id=$2",[scope.tenantId,scope.jobId])).rows[0].n,1);
+ await assert.rejects(completionPool.query("SELECT * FROM securepay_private.core_job_bindings"),e=>e.code==="42501");
+ await assert.rejects(pool.query("DELETE FROM securepay_private.core_job_bindings WHERE tenant_id=$1 AND job_id=$2",[scope.tenantId,scope.jobId]),e=>e.code==="55000");
+ const quote=await publish();assert.equal(quote.ok,true);
+ const plan=await offer(quote.quote.quoteDigest);assert.equal(plan.ok,true);
+ assert.equal((await d.svc.acceptPlan({...d.payer,planId:plan.planId,body:{planDigest:plan.planDigest,expectedTotalCents:5000},requireQuote:true})).ok,true);
+ assert.equal((await pool.query("SELECT count(*)::int n FROM public.securepay_milestones WHERE tenant_id=$1 AND job_id=$2",[scope.tenantId,scope.jobId])).rows[0].n,2);
+ assert.equal((await verifyAuditChain(auditPool,scope.tenantId)).ok,true);
+ const late=await quoteFixture();assert.equal((await late.publish()).ok,true);
+ await assert.rejects(pool.query(provision,[late.scope.tenantId,late.scope.jobId,contractId,siteId,baselineId,late.d.s.customerId,late.d.actorId,reviewDigest]),e=>e.code==="42501");
+});
 test("published quote revisions bind the displayed customer scope and reject stale same-price offers and legacy bypass",async()=>{
  const {d,scope,publish,offer,items}=await quoteFixture();
  const first=await publish();assert.equal(first.ok,true);
