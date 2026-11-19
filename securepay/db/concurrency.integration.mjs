@@ -2140,3 +2140,80 @@ test("separate administrator and authorizer MFA services enforce mutual role iso
   assert.equal((await balanceFor(d.s)).remaining_cents,"5000");
  }finally{if(a)await a.close();if(b)await b.close();await new Promise(r=>jwks.close(r));}
 });
+
+// The preceding regression suite intentionally exercises the historical pre-mandatory
+// migration. Install the stricter boundary in place, then exercise upgraded and new
+// cases. No exemption or test-only configuration exists in the installed SQL.
+test("mandatory governance migration blocks unenrolled and legacy adjudication and authorization",async()=>{
+ const old=await disputeFixture();assert.equal((await openCase(old)).ok,true);assert.equal((await evidence(old)).ok,true);
+ await pool.query(await readFile(new URL("securepay-mandatory-governance-draft.sql",import.meta.url),"utf8"));
+ assert.equal((await decide(old)).ok,false);
+ const {makeReviewer}=await import("./reviewer.mjs");
+ const ungoverned=makeReviewer({pool:reviewerPool,tenantId:old.s.tenantId,actorId:old.reviewer.actorId,key:old.reviewer.key});
+ assert.equal(await ungoverned.read(old.scope.caseId),null);
+ const fresh=await governedFixture();await assignFixtureReviewers(fresh.d);
+ assert.equal(await fresh.firstReview.read(fresh.caseId),null);
+ assert.equal((await decide(fresh.d)).ok,false);assert.equal((await fresh.d.approval.authorize(fresh.d.settlement)).ok,false);
+ await governedFinal(fresh);
+ assert.equal((await fresh.d.approval.authorize(fresh.d.settlement)).ok,false);
+ const v=await fresh.authorizer.read(fresh.caseId);assert.equal(v.case.independent,true);
+});
+async function anotherGovernanceActor(f,role){
+ const {makeGovernanceActor}=await import("./governance.mjs"),{makeReviewer}=await import("./reviewer.mjs"),actorId=randomUUID(),key=randomBytes(32);
+ await pool.query("INSERT INTO securepay_private.dispute_actors(tenant_id,actor_id,role,secret) VALUES($1,$2,$3,$4)",[f.t,actorId,role,key]);
+ await pool.query("INSERT INTO securepay_private.actor_person_registry VALUES($1,$2,$3)",[f.t,actorId,randomBytes(32).toString("hex")]);
+ const service=makeGovernanceActor({pool:role==="administrator"?adminPool:role==="reviewer"?reviewerPool:settlementDashboardPool,tenantId:f.t,actorId,key,role});
+ return {actorId,key,service,review:role==="reviewer"?makeReviewer({pool:reviewerPool,tenantId:f.t,actorId,key}):null};
+}
+test("dual-administrator reassessment preserves compromised decisions and requires a new independent panel and fresh party consent",async()=>{
+ const f=await governedFixture(),{d,t,caseId,admin,action,declare,first,authorizer}=f;await governedFinal(f);
+ const old=(await authorizer.read(caseId)).case.decision,oldProvisional=(await pool.query("SELECT evidence_digest FROM securepay_private.dispute_events WHERE case_id=$1 AND action='decide'",[caseId])).rows[0].evidence_digest;
+ const secondAdmin=await anotherGovernanceActor(f,"administrator");
+ const req={caseId,action:"request",reason:"Independent reassessment of compromised review"};
+ assert.equal((await admin.reassess(req)).ok,false);
+ assert.equal((await first.reportConflict({caseId,reason:"Discovered a former professional relationship"})).ok,true);
+ assert.equal((await first.reportConflict({caseId,reason:"Duplicate conflict submission"})).ok,false);
+ assert.equal((await authorizer.read(caseId)).case.independent,false);
+ const proposed=await admin.reassess(req);assert.equal(proposed.ok,true);
+ const {requestId,stateDigest}=proposed.reassessment,confirm={caseId,requestId,action:"approve",reason:"Second administrator independently verified reassessment requirements",stateDigest};
+ assert.equal((await admin.reassess(confirm)).ok,false);
+ const queue=await secondAdmin.service.reassessments();assert.equal(queue[0].current,true);assert.equal(queue[0].priorPayoutCents,"3000");
+ assert.equal((await secondAdmin.service.reassess({...confirm,stateDigest:"0".repeat(64)})).ok,false);
+ const results=await Promise.all([secondAdmin.service.reassess(confirm),secondAdmin.service.reassess(confirm)]);assert.equal(results.filter(x=>x.ok).length,1);
+ assert.equal((await state(d.s)).status,"disputed");
+ assert.equal((await balanceFor(d.s)).remaining_cents,"5000");
+ assert.equal(await authorizer.read(caseId),null);
+ assert.equal(await f.firstReview.read(caseId),null);assert.equal(await f.secondReview.read(caseId),null);
+ assert.equal((await action("assign",d.second.actorId)).ok,false);
+ const archived=(await pool.query("SELECT status,prior_case,approved_by FROM securepay_private.case_reassessments WHERE request_id=$1",[requestId])).rows[0];assert.equal(archived.status,"approved");assert.equal(archived.prior_case.case.status,"final");assert.equal(archived.prior_case.case.payout_cents,3000);assert.equal(archived.approved_by,secondAdmin.actorId);
+ const r1=await anotherGovernanceActor(f,"reviewer"),r2=await anotherGovernanceActor(f,"reviewer"),a=await anotherGovernanceActor(f,"settlement");
+ for(const x of [r1,r2,a]){assert.equal((await action("assign",x.actorId)).ok,true);assert.equal((await declare(x.service)).ok,true);}
+ const decideNew=async(x,action)=>{const v=await x.review.read(caseId);for(const p of [...v.case.photos,...v.case.linkedPhotos])if(!p.purged)assert.ok(await x.review.photo({caseId,photoId:p.photoId,source:p.source}));return x.review.decide({caseId,action,reason:"Fresh independent analysis after prior conflict",payoutCents:2500,refundCents:2500,stateDigest:v.stateDigest});};
+ assert.equal((await decideNew(r1,"decide")).ok,true);
+ assert.equal((await d.call(d.customer,"ack","Stale previous consent",{evidenceDigest:oldProvisional})).ok,false);
+ assert.equal((await d.call(d.owner,"ack","Missing decision digest")).ok,false);
+ const current=(await r1.review.read(caseId)).case.events.filter(x=>x.action==="decide").at(-1);assert.notEqual(current.digest,oldProvisional);
+ assert.equal((await d.call(d.customer,"ack","Customer accepts fresh review",{evidenceDigest:current.digest})).ok,true);
+ assert.equal((await d.call(d.owner,"ack","Owner accepts fresh review",{evidenceDigest:current.digest})).ok,true);
+ assert.equal((await decideNew(r2,"finalize")).ok,true);
+ const settled=await a.service.read(caseId);assert.equal(settled.case.independent,true);assert.equal(settled.case.payoutCents,"2500");assert.notEqual(settled.case.decision.eventId,old.eventId);
+ const result=await a.service.authorize({caseId,payoutCents:2500,refundCents:2500,stateDigest:settled.stateDigest});assert.equal(result.ok,true);
+ assert.equal((await balanceFor(d.s)).remaining_cents,"5000");assert.equal((await verifyAuditChain(auditPool,t)).ok,true);
+});
+test("reassessment approval fails if evidence or case state changes; previously authorized money cannot be reopened",async()=>{
+ const f=await governedFixture();await governedFinal(f);const {d,caseId,admin,first,authorizer}=f,second=await anotherGovernanceActor(f,"administrator");
+ assert.equal((await first.reportConflict({caseId,reason:"Disclosed a previously unknown conflict"})).ok,true);
+ const q=await admin.reassess({caseId,action:"request",reason:"Request fresh independent review"});assert.equal(q.ok,true);
+ // A subsequent governance event invalidates the consent snapshot.
+ assert.equal((await f.action("conflict",d.second.actorId)).ok,true);
+ const cmd={caseId,requestId:q.reassessment.requestId,stateDigest:q.reassessment.stateDigest,action:"approve",reason:"Second administrative review of request"};
+ assert.equal((await second.service.reassess(cmd)).ok,false);
+ assert.equal((await second.service.reassessments())[0].current,false);
+ assert.equal((await admin.reassess({...cmd,action:"withdraw"})).ok,true);
+ const newer=await admin.reassess({caseId,action:"request",reason:"Request renewed with updated evidence"});assert.equal(newer.ok,true);
+ assert.equal((await second.service.reassess({...cmd,requestId:newer.reassessment.requestId,stateDigest:newer.reassessment.stateDigest})).ok,true);
+ const g=await governedFixture();await governedFinal(g);const v=await g.authorizer.read(g.caseId),a=await g.authorizer.authorize({caseId:g.caseId,payoutCents:3000,refundCents:2000,stateDigest:v.stateDigest});assert.equal(a.ok,true);
+ assert.equal((await g.authorizer.reportConflict({caseId:g.caseId,reason:"Authorizer disclosed financial conflict"})).ok,true);
+ assert.equal((await g.admin.reassess({caseId:g.caseId,action:"request",reason:"Attempt reopening after authorization"})).ok,false);
+ assert.equal((await g.d.confirm.dispatch({...g.d.settlement,settlementId:a.settlementId,kind:"refund"})).ok,false);
+});
