@@ -179,7 +179,7 @@ test("full credit reversals preserve original evidence, restore exact totals, an
    assert.equal(fresh.outputs.revenue,"0.28");assert.equal(fresh.outputs.supplierCredit,"0.00");assert.equal(fresh.outputs.deliveryCost,"0.15");assert.equal(fresh.outputs.indicativeContribution,"0.13");assert.equal(fresh.outputs.creditCount,3);assert.equal(fresh.outputs.creditReversalCount,1);
    assert.equal((await expect("owner","/calculations/"+fresh.id,200)).sourceTrace.creditReversalCount,1);
    const stored=(await admin.query("SELECT snapshot_digest FROM private.calculation_source_receipts WHERE calculation_id=$1",[result.id])).rows[0];assert.equal(stored.snapshot_digest,before.sourceTrace.digest);
-   const rows=(await admin.query("SELECT order_id,reverses_order_id FROM private.invoice_credit_receipts WHERE tenant_id=$1",[t])).rows;assert.equal(rows.length,3);assert.equal(rows.find(x=>x.order_id===reversal.orderId).reverses_order_id,sc.result.orderId);
+   const creditRows=(await admin.query("SELECT order_id,reverses_order_id FROM private.invoice_credit_receipts WHERE tenant_id=$1",[t])).rows;assert.equal(creditRows.length,3);assert.equal(creditRows.find(x=>x.order_id===reversal.orderId).reverses_order_id,sc.result.orderId);
    await assert.rejects(()=>admin.query("UPDATE private.invoice_credit_receipts SET reverses_order_id=NULL WHERE tenant_id=$1 AND order_id=$2",[t,reversal.orderId]),e=>e.code==="55000");
    assert.equal((await admin.query("SELECT private.verify_audit_chain($1) AS ok",[t])).rows[0].ok,true);
    console.log("Full credit reversal restores net costs, retains immutable history, exposes pending review, and fences stale reports");
