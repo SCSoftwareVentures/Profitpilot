@@ -7,7 +7,7 @@ import {createServer} from "node:http";
 import {fileURLToPath} from "node:url";
 import {createPayerTokenVerifier} from "./securepay-router.js";
 import {authoritySecrets} from "./securepay-gateway.js";
-import {reviewerPage,sendPortalPage} from "./securepay-portal-page.js";
+import {reviewerPage,postAuthorizationPage,sendPortalPage} from "./securepay-portal-page.js";
 import {makeGovernanceActor,independenceAttestation} from "../securepay/db/governance.mjs";
 import {makeReviewer} from "../securepay/db/reviewer.mjs";
 const uuid=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/;
@@ -19,6 +19,7 @@ export function createReviewerRouter({enabled=false,subject,verifyToken,reviewer
  if(!enabled)return router;
  if(typeof subject!=="string"||!subject||typeof verifyToken!=="function"||!reviewer)throw Error("Reviewer unavailable");
  router.use(rateLimit({windowMs:60000,limit:100,standardHeaders:true,legacyHeaders:false}));
+ router.get("/post-auth",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,postAuthorizationPage("reviewer")));
  router.get("/dashboard",(req,res)=>req.originalUrl.includes("?")?res.status(404).json({error:"Not found"}):sendPortalPage(res,reviewerPage()));
  router.post("/:action",async(req,res,next)=>{
   if(req.originalUrl.includes("?")||!["queue","case","photo","decision","assignments","declare","report-conflict","post-auth-read","post-auth-vote"].includes(req.params.action))return res.status(404).json({error:"Not found"});
