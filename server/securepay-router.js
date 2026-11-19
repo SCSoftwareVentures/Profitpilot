@@ -52,6 +52,8 @@ export function createSecurePayRouter({enabled=false,verifyToken,service,takeBud
    const result=await fn(req);
    if(!result?.ok)return res.status(403).json({error:"Authorization denied"});
    // Response whitelist: never return credentials, proof references or raw SQL errors.
+   if(result.plan){if(!result.plan.quote)return res.status(403).json({error:"Authorization denied"});return res.json({mode:"sandbox",moneyMoved:false,...result.plan});}
+   if(result.planAccepted)return res.json({mode:"sandbox",moneyMoved:false,status:"plan_accepted",planId:result.planAccepted});
    if(result.completion)return res.json({mode:"sandbox",moneyMoved:false,...result.completion});
    if(result.photo)return res.json({mode:"sandbox",moneyMoved:false,...result.photo});
    if(result.workRejected)return res.json({mode:"sandbox",moneyMoved:false,status:"work_rejected"});
@@ -69,6 +71,8 @@ export function createSecurePayRouter({enabled=false,verifyToken,service,takeBud
    return res.status(status).json({error:status===400?"Invalid request":status===409?"Conflicting request":status===403?"Authorization denied":"SecurePay unavailable"});
   }
  };
+ router.post("/tenants/:tenantId/plans/:planId/view",handle(req=>service.plan({identity:req.payerIdentity,tenantId:req.params.tenantId,planId:req.params.planId,body:req.body})));
+ router.post("/tenants/:tenantId/plans/:planId/accept",handle(req=>service.acceptPlan({identity:req.payerIdentity,tenantId:req.params.tenantId,planId:req.params.planId,body:req.body})));
  router.post("/tenants/:tenantId/pin/grant",handle(req=>service.issueGrant({identity:req.payerIdentity,tenantId:req.params.tenantId,body:req.body})));
  router.post("/tenants/:tenantId/pin",handle(req=>service.setPin({identity:req.payerIdentity,tenantId:req.params.tenantId,body:req.body})));
  for(const action of ["completion","photo","approve","reject","dispute"])router.post("/tenants/:tenantId/milestones/:milestoneId/"+action,handle(req=>service[action]({identity:req.payerIdentity,tenantId:req.params.tenantId,milestoneId:req.params.milestoneId,body:req.body})));
