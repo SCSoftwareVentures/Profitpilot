@@ -10,10 +10,7 @@ GRANT CONNECT ON DATABASE profitpilot TO profitpilot_app;
 GRANT USAGE ON SCHEMA public TO profitpilot_app;
 GRANT SELECT,INSERT,UPDATE,DELETE ON ALL TABLES IN SCHEMA public TO profitpilot_app;
 GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO profitpilot_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT SELECT,INSERT,UPDATE,DELETE ON TABLES TO profitpilot_app;
-ALTER DEFAULT PRIVILEGES IN SCHEMA public
-  GRANT USAGE,SELECT ON SEQUENCES TO profitpilot_app;
+-- New tables and sequences require explicit grants in their migrations.
 \else
 \echo 'POSTGRES_APP_PASSWORD must be at least 32 bytes of hexadecimal data'
 \quit 3
