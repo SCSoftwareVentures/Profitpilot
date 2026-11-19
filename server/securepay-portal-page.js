@@ -64,3 +64,31 @@ export function customerPortalPage(){
 export function sendPortalPage(res,document){
  return res.set({"Cache-Control":"no-store","Content-Security-Policy":document.csp,"X-Content-Type-Options":"nosniff","Referrer-Policy":"no-referrer","X-Frame-Options":"DENY"}).type("html").send(document.html);
 }
+
+const ownerScript=String.raw`
+(()=>{
+ const $=id=>document.getElementById(id);let busy=false;
+ const message=s=>$("message").textContent=s;
+ const currency=value=>{const n=BigInt(value),a=n<0n?-n:n;return (n<0n?"-":"")+"AUD $"+String(a/100n)+"."+String(a%100n).padStart(2,"0");};
+ function clear(){ $("summary").replaceChildren();$("rows").replaceChildren();$("report").hidden=true;}
+ function metric(label,value){const d=document.createElement("dt"),v=document.createElement("dd");d.textContent=label;v.textContent=String(value);$("summary").append(d,v);}
+ $("load").addEventListener("click",async()=>{
+  if(busy)return;const token=$("token").value.trim();$("token").value="";clear();if(!token){message("Enter a sandbox owner MFA token.");return;}
+  busy=true;$("load").disabled=true;
+  try{
+   const r=await fetch("/v1/securepay-owner/report",{method:"POST",headers:{"Content-Type":"application/json","Authorization":"Bearer "+token},body:"{}",cache:"no-store",credentials:"omit",redirect:"error"});
+   if(!r.ok)throw Error("Report unavailable");
+   const x=await r.json();
+   if(x.report?.mode!=="sandbox"||x.report.moneyMoved!==false||!x.summary||!Array.isArray(x.report.milestones))throw Error("Invalid report");
+   for(const [label,key] of [["Confirmed funding","fundedCents"],["Confirmed payouts","payoutCents"],["Confirmed refunds","refundCents"],["Remaining","remainingCents"]])metric(label,currency(x.summary[key]));
+   for(const [label,key] of [["Journal mismatches","mismatches"],["Unresolved issues","unresolvedIssues"],["Uncertain legs","uncertainLegs"],["Disputed milestones","disputedMilestones"]])metric(label,x.summary[key]);
+   for(const m of x.report.milestones){const tr=document.createElement("tr");for(const v of [m.milestoneId,m.status,m.fundingStatus,currency(m.remainingCents),m.journalVerified?"Matched":"Mismatch",m.unresolvedIssues]){const td=document.createElement("td");td.textContent=String(v);tr.append(td);}$("rows").append(tr);}
+   $("report").hidden=false;message("Snapshot generated "+x.report.generatedAt+". No money moved.");
+  }catch{clear();message("Report unavailable or access denied.");}finally{busy=false;$("load").disabled=false;}
+ });
+ $("clear").addEventListener("click",()=>{if(!busy){$("token").value="";clear();message("Report cleared.");}});
+})();
+`;
+export function ownerDashboardPage(){
+ return page("SecurePay owner dashboard",'<h1>SecurePay business-owner dashboard</h1><p class="notice">SANDBOX ONLY — read-only financial reconciliation. No real money moved.</p><section><label for="token">Sandbox owner MFA access token</label><input type="password" id="token" autocomplete="off"><button id="load">Load report</button><button id="clear">Clear report</button></section><section id="report" hidden><h2>Financial snapshot</h2><dl id="summary"></dl><h2>Milestones</h2><div style="overflow:auto"><table><thead><tr><th>Milestone</th><th>Status</th><th>Funding</th><th>Remaining</th><th>Journal</th><th>Issues</th></tr></thead><tbody id="rows"></tbody></table></div></section><p id="message" role="status" aria-live="polite"></p>',ownerScript);
+}
