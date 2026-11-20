@@ -95,3 +95,5 @@ S4 migration 016 adds a narrow privileged disposal procedure with default hold, 
 S4 adds pinned CodeQL static JavaScript analysis and Trivy container vulnerability reports with critical and fixable-high release gate. All severity reports retained, including unfixed findings; CodeQL analysis results require explicit review. Provenance depends on these jobs. CI pending.
 
 CI #2978 passed application/privacy integration, encrypted recovery, native scanner and CodeQL, but failed before container scanning due to Trivy installer download failure. A checksum-pinned Grype release replaces the installer, in a dedicated no-database-secrets job; the same severity gate and full reports remain. Generated ephemeral CI secrets are now masked. New CI pending.
+
+S5 addresses CI #2979 blocking container findings through patched Alpine packages and removal of npm/yarn/corepack from runtime images; exact app dependency lock remains. Added container tool absence, non-root and module-loading regression verification. New full CI pending; no release approval until verified.

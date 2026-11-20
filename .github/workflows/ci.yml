@@ -215,6 +215,12 @@ jobs:
         run: |
           docker build --pull -t profitpilot-api:security .
           docker build --target protected -t profitpilot-protected:security .
+      - name: Verify both images omit build tooling and run non-root
+        run: |
+          set -euo pipefail
+          for image in profitpilot-api:security profitpilot-protected:security; do
+            docker run --rm --network none --entrypoint sh "$image" -ec 'test "$(id -u)" != 0; ! command -v npm; ! command -v npx; ! command -v yarn; ! command -v corepack; test ! -d /usr/local/lib/node_modules; node --version; node --input-type=module -e "await import(\"express\"); await import(\"pg\"); await import(\"jose\")"; apk info -v | grep -E "^(libcrypto3|libssl3|zlib)-"'
+          done
       - name: Scan both images with current vulnerability database
         run: |
           set -euo pipefail
