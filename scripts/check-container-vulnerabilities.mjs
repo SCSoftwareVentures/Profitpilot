@@ -12,7 +12,7 @@ for(const path of paths){
   const severity=v.severity.toUpperCase();
   counts[severity]=(counts[severity]||0)+1;
   const versions=v.fix?.versions||[];
-  if(severity==="CRITICAL"||(severity==="HIGH"&&versions.length>0)){
+  if(!["LOW","NEGLIGIBLE"].includes(severity)){
    blocked++;console.error(path,v.id,match.artifact.name,match.artifact.version,versions.join(",")||"no fix");
   }
  }

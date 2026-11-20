@@ -1,12 +1,12 @@
 # Build dependencies in a disposable stage; package managers are not runtime requirements.
-FROM node:22-alpine AS dependencies
+FROM node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS dependencies
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
 # Assemble a genuine minimal package-managed root filesystem for the prototype.
 # The signed APK inventory is retained; no package record is removed or fabricated.
-FROM node:22-alpine AS prototype-root
+FROM node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS prototype-root
 RUN mkdir -p /rootfs/etc/apk/keys /rootfs/usr/local/bin /rootfs/app /rootfs/home/node /rootfs/tmp /rootfs/var/tmp && \
     cp /etc/apk/keys/* /rootfs/etc/apk/keys/ && \
     cp /etc/apk/repositories /rootfs/etc/apk/repositories && \
@@ -34,10 +34,11 @@ EXPOSE 8080
 CMD ["/usr/local/bin/node","server/index.js"]
 
 # Compile only a bounded stdin adapter against the vendor's libclamav headers.
-FROM node:22-alpine AS scanner-build
+FROM node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS scanner-build
 RUN apk add --no-cache build-base clamav-dev
 COPY native/scan-source.c /build/scan-source.c
-RUN cc -std=c11 -O2 -Wall -Wextra -Werror -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro,-z,now -o /build/profitpilot-scan /build/scan-source.c -lclamav
+RUN cc -std=c11 -O2 -Wall -Wextra -Werror -fanalyzer -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro,-z,now -o /build/profitpilot-scan /build/scan-source.c -lclamav
+RUN cc -DPROFITPILOT_FIXTURE_ONLY -std=c11 -O2 -Wall -Wextra -Werror -fanalyzer -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro,-z,now -o /build/profitpilot-scan-fixture /build/scan-source.c -lclamav
 
 # Install the signed runtime libraries, not freshclam, daemon or shell packages.
 FROM prototype-root AS protected-root
@@ -50,6 +51,12 @@ RUN apk --root /rootfs --no-scripts --no-cache add clamav-libs clamav-libunrar &
 FROM api-runtime AS protected
 COPY --from=protected-root /rootfs/ /
 COPY --from=scanner-build /build/profitpilot-scan /usr/local/bin/profitpilot-scan
+USER 1000:1000
+
+# CI-only scanner variant; never used for releases or protected deployment.
+FROM api-runtime AS scanner-fixture
+COPY --from=protected-root /rootfs/ /
+COPY --from=scanner-build /build/profitpilot-scan-fixture /usr/local/bin/profitpilot-scan
 USER 1000:1000
 
 # Keep ordinary builds synthetic by default.

@@ -16,6 +16,7 @@ export async function withTenant(tenantId,subject,fn,{repeatableRead=false}={}){
  const client=await pool.connect();
  try{
   await client.query(repeatableRead?"BEGIN ISOLATION LEVEL REPEATABLE READ":"BEGIN");
+  await client.query("SET LOCAL statement_timeout = '15000ms'; SET LOCAL lock_timeout = '3000ms'; SET LOCAL idle_in_transaction_session_timeout = '20000ms'");
   await client.query("SELECT set_config('app.tenant_id',$1,true),set_config('app.tenant_subject',$2,true),set_config('app.tenant_expires',$3,true),set_config('app.tenant_nonce',$4,true),set_config('app.tenant_key_id',$5,true),set_config('app.tenant_signature',$6,true)",[tenantId,subject,expires,nonce,keyId,signature]);
   const result=await fn(client);
   await client.query("COMMIT");

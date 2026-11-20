@@ -27,10 +27,11 @@ app.disable("x-powered-by");
 app.use(helmet());
 app.use(cors({origin:(process.env.CORS_ORIGIN||"").split(",").map(x=>x.trim()).filter(Boolean),credentials:false,methods:["GET","POST"]}));
 app.use("/v1",(_req,res,next)=>{res.set("Cache-Control","no-store");res.set("Pragma","no-cache");next();});
-app.use(express.json({limit:"100kb",inflate:false}));
 app.use(rateLimit({windowMs:60_000,limit:100,standardHeaders:true,legacyHeaders:false}));
 app.get("/health",async(req,res)=>{try{await health();res.json({status:"ok",database:"connected"});}catch{res.status(503).json({status:"unavailable"});}});
 app.use("/v1",authRequired());
+app.use("/v1",express.json({limit:"100kb",inflate:false}));
+app.use("/v1/tenants/:tenantId/prototype",(_req,res,next)=>{if(profile.protectedMode)return res.status(403).json({error:"Synthetic rehearsal unavailable in protected profile"});next();});
 
 async function membership(req,res,next){
  const tenantId=req.params.tenantId;
@@ -77,11 +78,15 @@ app.post("/v1/tenants/:tenantId/privacy-requests/:requestId/review",membership,r
 
 
 app.get("/v1/tenants/:tenantId/privacy/self-access",membership,async(req,res,next)=>{try{
+ const cursor=req.query.cursor??null;
+ if(cursor!==null&&!isUuid(cursor))return res.status(400).json({error:"Invalid privacy cursor"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
+  if(cursor!==null){const anchor=await c.query("SELECT id FROM privacy_requests WHERE tenant_id=$1 AND requester_id=private.actor_id() AND id=$2",[req.membership.tenantId,cursor]);if(!anchor.rowCount)return {invalidCursor:true};}
   const identity=await c.query("SELECT u.id,u.email,u.status,u.created_at,m.role,m.status AS membership_status,m.granted_at FROM users u JOIN tenant_memberships m ON m.user_id=u.id WHERE m.tenant_id=$1 AND u.id=private.actor_id()",[req.membership.tenantId]);
-  const cases=await c.query("SELECT "+privacyColumns+" FROM privacy_requests WHERE tenant_id=$1 AND requester_id=private.actor_id() ORDER BY created_at DESC,id DESC LIMIT 201",[req.membership.tenantId]);
-  return {identity:identity.rows[0],privacyRequests:cases.rows.slice(0,200),additionalRequests:cases.rowCount>200};
+  const cases=await c.query("SELECT "+privacyColumns+" FROM privacy_requests WHERE tenant_id=$1 AND requester_id=private.actor_id() AND ($2::uuid IS NULL OR (created_at,id)<(SELECT created_at,id FROM privacy_requests WHERE tenant_id=$1 AND requester_id=private.actor_id() AND id=$2)) ORDER BY created_at DESC,id DESC LIMIT 201",[req.membership.tenantId,cursor]);
+  const page=cases.rows.slice(0,200);return {identity:identity.rows[0],privacyRequests:page,additionalRequests:cases.rowCount>200,nextCursor:cases.rowCount>200?page.at(-1).id:null};
  },{repeatableRead:true});
+ if(result.invalidCursor)return res.status(404).json({error:"Privacy cursor unavailable"});
  if(!result.identity)return res.status(403).json({error:"Active identity required"});
  res.set("Content-Disposition",'attachment; filename="profitpilot-self-access.json"');
  res.json({scope:"Own stored identity, current tenant membership and own privacy case metadata only",completeDataSubjectExport:false,...result});
@@ -223,7 +228,7 @@ app.get("/v1/tenants/:tenantId/imports/:batchId/invoice-identities",membership,r
    (SELECT count(DISTINCT other.batch_id)::int FROM raw_import_rows other JOIN import_batches ob ON ob.tenant_id=other.tenant_id AND ob.id=other.batch_id
     WHERE other.tenant_id=r.tenant_id AND other.batch_id<>r.batch_id AND ob.source_type=$3
     AND jsonb_typeof(other.payload->'invoice_id')='string' AND jsonb_typeof(r.payload->'invoice_id')='string'
-    AND private.invoice_review_alias(other.payload->>'invoice_id')=private.invoice_review_alias(r.payload->>'invoice_id')) AS other_batch_count
+    AND md5(private.invoice_review_alias(other.payload->>'invoice_id'))=md5(private.invoice_review_alias(r.payload->>'invoice_id')) AND private.invoice_review_alias(other.payload->>'invoice_id')=private.invoice_review_alias(r.payload->>'invoice_id')) AS other_batch_count
    FROM raw_import_rows r LEFT JOIN mapping_decisions m ON m.tenant_id=r.tenant_id AND m.raw_row_id=r.id AND m.method_version='invoice-validator-0.1.0'
    LEFT JOIN invoice_identity_claims ic ON ic.tenant_id=r.tenant_id AND ic.raw_row_id=r.id
    WHERE r.tenant_id=$1 AND r.batch_id=$2 ORDER BY r.row_number LIMIT 2001`,[...args,b.rows[0].source_type]);

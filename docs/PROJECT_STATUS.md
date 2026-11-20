@@ -114,3 +114,5 @@ CI #2987 passed all five jobs for formula 0.2.0. Migration 017 adds a default-of
 
 ## F3 unified contribution rehearsal
 CI #2988 passed all five jobs for F2. Migration 018 adds explicit whole-line contract payroll attribution with unique source allocation, source-derived financial amounts, reviewer audit and approved contract/site/version checks. Read-only exact unified contribution combines reviewed revenue, supplier/subcontractor and attributed labour, rejecting unresolved v2 payroll and inconsistent periods/versions. Legacy payroll is excluded visibly. No production ledger changes or activation. New CI pending.
+
+S8: strict scan gates, pinned Node base, native analyzer, vendor CVD verification/freshness, secret-free scanner environment, earlier request throttling and authentication, protected synthetic-route denial, DB overrides/timeouts, and scoped privacy audit/pagination. CI pending; independent and operational/legal approval and real signature positive-path tests outstanding.

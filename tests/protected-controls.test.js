@@ -15,8 +15,7 @@ test("protected profile rejects missing prerequisites and TLS overrides",()=>{
   assert.deepEqual(databaseConfig(env).ssl,{rejectUnauthorized:true});
   assert.equal(readSecret("TENANT_CONTEXT_HMAC_SECRET",env),"a".repeat(64));
   assert.throws(()=>readSecret("DATABASE_URL",{...env,DATABASE_URL:"ambiguous"}));
-  writeFileSync(url,"postgres://app@db.invalid/profitpilot?sslmode=disable");
-  assert.throws(()=>databaseConfig(env));
+  for(const invalid of ["postgres://app@db.invalid/profitpilot?sslmode=disable","postgres://app@db.invalid/profitpilot?options=-c%20statement_timeout=0","postgres://app@db.invalid/profitpilot?host=other.invalid","postgres://app@db.invalid/profitpilot#x","postgres://app@db.invalid/"]){writeFileSync(url,invalid);assert.throws(()=>databaseConfig(env));}
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
 test("MFA checks trusted assurance and fresh signed authentication time",()=>{

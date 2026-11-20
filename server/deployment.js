@@ -38,12 +38,12 @@ export function databaseConfig(env=process.env){
  const profile=deploymentProfile(env),connectionString=readSecret("DATABASE_URL",env);
  if(profile.protectedMode){
   const url=new URL(connectionString);
-  if(!["postgres:","postgresql:"].includes(url.protocol)||[...url.searchParams.keys()].some(k=>/^(ssl|sslmode|sslrootcert|sslcert|sslkey|uselibpqcompat)$/i.test(k)))
-   throw new Error("Protected database URL may not override verified TLS settings");
+  if(!["postgres:","postgresql:"].includes(url.protocol)||!url.hostname||!url.pathname||url.pathname==="/"||url.hash||url.search)
+   throw new Error("Protected database URL requires a host/database and no query or fragment overrides");
  }
  return {connectionString,ssl:env.DATABASE_SSL==="true"?{rejectUnauthorized:true}:false};
 }
 export function validMfa(payload,requiredAcr,nowSeconds,maxAgeSeconds){
  if(!requiredAcr)return true;
- return payload.acr===requiredAcr&&Number.isSafeInteger(payload.auth_time)&&payload.auth_time<=nowSeconds+5&&nowSeconds-payload.auth_time<=maxAgeSeconds;
+ return payload.acr===requiredAcr&&Number.isSafeInteger(payload.auth_time)&&payload.auth_time>0&&payload.auth_time<=nowSeconds+5&&nowSeconds-payload.auth_time<=maxAgeSeconds;
 }

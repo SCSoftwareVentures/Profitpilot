@@ -102,6 +102,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/016_narrow_privacy_disposal.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/017_invoice_confirmation_rehearsal.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/018_payroll_contract_rehearsal.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/019_privacy_audit_and_index.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:
@@ -181,6 +182,9 @@ jobs:
       - name: Build protected scanner image
         run: docker build --target protected --pull -t profitpilot-protected:ci .
 
+      - name: Build isolated CI-only scanner fixture image
+        run: docker build --target scanner-fixture -t profitpilot-scanner-fixture:ci .
+
       - name: Verify native scanner with isolated harmless test signature
         run: |
           set -euo pipefail
@@ -192,7 +196,12 @@ jobs:
           SIZE="$(wc -c < "$SIGDIR/marker" | tr -d ' ')"
           printf '%s:%s:%s\n' "$HASH" "$SIZE" 'ProfitPilot.CI.Harmless.Marker' > "$SIGDIR/local.hdb"
           rm "$SIGDIR/marker"
-          docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --cap-drop ALL --security-opt no-new-privileges -v "$SIGDIR:/var/lib/clamav:ro" --entrypoint node profitpilot-protected:ci --input-type=module -e 'import {scanSource} from "./server/malware.js"; import assert from "node:assert/strict"; assert.equal(await scanSource(Buffer.from("Ordinary harmless fixture"),{enabled:true}),"scanner_reported_clean"); assert.equal(await scanSource(Buffer.from("ProfitPilot harmless scanner test marker 2026"),{enabled:true}),"infected"); const {spawnSync}=await import("node:child_process"); for(const input of [Buffer.alloc(0),Buffer.alloc(524289,65)]){const r=spawnSync("/usr/local/bin/profitpilot-scan",[],{input,timeout:30000}); assert.equal(r.status,2);} console.log("Native scanner accepted clean fixture and rejected custom harmless signature");'
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --cap-drop ALL --security-opt no-new-privileges -v "$SIGDIR:/var/lib/clamav:ro" --entrypoint node profitpilot-scanner-fixture:ci --input-type=module -e 'import {scanSource} from "./server/malware.js"; import assert from "node:assert/strict"; assert.equal(await scanSource(Buffer.from("Ordinary harmless fixture"),{enabled:true}),"scanner_reported_clean"); assert.equal(await scanSource(Buffer.from("ProfitPilot harmless scanner test marker 2026"),{enabled:true}),"infected"); const {spawnSync}=await import("node:child_process"); for(const input of [Buffer.alloc(0),Buffer.alloc(524289,65)]){const r=spawnSync("/usr/local/bin/profitpilot-scan",[],{input,timeout:30000}); assert.equal(r.status,2);} console.log("Native scanner accepted clean fixture and rejected custom harmless signature");'
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --cap-drop ALL --security-opt no-new-privileges -v "$SIGDIR:/var/lib/clamav:ro" --entrypoint node profitpilot-protected:ci --input-type=module -e 'import assert from "node:assert/strict"; import {scanSource} from "./server/malware.js"; assert.equal(await scanSource(Buffer.from("Ordinary harmless fixture"),{enabled:true}),"unavailable"); console.log("Protected scanner rejects custom-only signatures");'
+          printf 'Not a signed CVD' > "$SIGDIR/main.cvd"
+          cp "$SIGDIR/main.cvd" "$SIGDIR/daily.cvd"
+          cp "$SIGDIR/main.cvd" "$SIGDIR/bytecode.cvd"
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --cap-drop ALL --security-opt no-new-privileges -v "$SIGDIR:/var/lib/clamav:ro" --entrypoint node profitpilot-protected:ci --input-type=module -e 'import assert from "node:assert/strict"; import {scanSource} from "./server/malware.js"; assert.equal(await scanSource(Buffer.from("Ordinary harmless fixture"),{enabled:true}),"unavailable"); console.log("Protected scanner rejects counterfeit CVD files");'
 
   container_security:
     name: Container vulnerability analysis
@@ -267,6 +276,8 @@ jobs:
         with:
           category: /language:javascript-typescript
           output: codeql-results
+      - name: Enforce zero CodeQL findings and successful extraction
+        run: node scripts/check-static-analysis.mjs codeql-results/javascript.sarif
       - name: Retain analysis results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

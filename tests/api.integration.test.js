@@ -607,6 +607,18 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(ownExport.privacyRequests[0].id,privacyItem.item.id);
     assert.equal((await request(accessPath,{subject:"ci-api-tenant-b-only"})).status,403);
     assert.equal((await (await request(accessPath,{subject:"ci-api-analyst"})).json()).privacyRequests.length,0);
+    const privateAudit=await withTenant(tenantA,"ci-api-analyst",c=>c.query("SELECT id FROM audit_events WHERE object_type='privacy_request' AND object_id=$1",[privacyItem.item.id]));
+    assert.equal(privateAudit.rowCount,0);
+    const ownAudit=await withTenant(tenantA,"ci-api-reader",c=>c.query("SELECT id FROM audit_events WHERE object_type='privacy_request' AND object_id=$1",[privacyItem.item.id]));
+    assert.equal(ownAudit.rowCount,2);
+    await admin.query("INSERT INTO privacy_requests(tenant_id,requester_id,client_request_id,request_type) SELECT $1,$2,gen_random_uuid(),'access' FROM generate_series(1,201)",[tenantA,userB]);
+    const page1=await (await request(accessPath,{subject:"ci-api-reader"})).json();
+    assert.equal(page1.privacyRequests.length,200);assert.equal(page1.additionalRequests,true);
+    const page2=await (await request(accessPath+"?cursor="+page1.nextCursor,{subject:"ci-api-reader"})).json();
+    assert.equal(page2.privacyRequests.length,2);assert.equal(page2.nextCursor,null);
+    assert.equal(new Set([...page1.privacyRequests,...page2.privacyRequests].map(r=>r.id)).size,202);
+    assert.equal((await request(accessPath+"?cursor="+page1.nextCursor,{subject:"ci-api-analyst"})).status,404);
+    assert.equal((await request(accessPath+"?cursor=bad",{subject:"ci-api-reader"})).status,400);
     // Scoped, independently reviewed erasure of an unused client-declared import; synthetic database only.
     const disposalCase=(await admin.query("INSERT INTO privacy_requests(tenant_id,requester_id,client_request_id,request_type) VALUES($1,$2,gen_random_uuid(),'erasure') RETURNING id",[tenantA,userA])).rows[0].id;
     const disposable=(await admin.query("INSERT INTO import_batches(tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by) VALUES($1,'customer_invoice','CI','uploaded',$2,'unused-privacy.csv',$3) RETURNING id",[tenantA,"7".repeat(64),userA])).rows[0].id;
