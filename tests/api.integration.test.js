@@ -90,6 +90,11 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,$3)",[tenantB,verifiedB,JSON.stringify({invoice_id:"CI-B",site:"Site B",date:"2026-02-01",amount:"10.00"})]);
     await admin.query("INSERT INTO import_source_receipts(tenant_id,batch_id,sha256,byte_count,row_count,parser_version,original_bytes,received_by) VALUES($1,$2,$3,$4,1,'strict-csv-0.1.0',$5,$6)",[tenantB,verifiedB,fixtureHash,fixtureBytes.length,fixtureBytes,userC]);
 
+    const verifiedRawB=(await admin.query("SELECT id FROM raw_import_rows WHERE tenant_id=$1 AND batch_id=$2 AND row_number=1",[tenantB,verifiedB])).rows[0].id;
+    await admin.query("INSERT INTO mapping_decisions(tenant_id,raw_row_id,target_type,decision,method_version) VALUES($1,$2,'invoice_row','candidate','invoice-validator-0.1.0')",[tenantB,verifiedRawB]);
+    await admin.query("UPDATE import_batches SET status='review' WHERE id=$1",[verifiedB]);
+    const claimB=await insertB("INSERT INTO invoice_identity_claims(tenant_id,raw_row_id,direction,issuer_key,invoice_reference,source_integrity,reviewer_id,evidence_reference,reason) VALUES($1,$2,'customer','ci.issuer-a','CI-B','byte_verified',$3,'CI fixture','CI reviewed fixture')",[tenantB,verifiedRawB,userC]);
+
     // Automatically include every current public tenant-owned table (plus tenants)
     // and require its fixture, forced RLS, and both positive and negative visibility.
     const catalog=await admin.query("SELECT c.relname AS name,c.relrowsecurity AS rls,c.relforcerowsecurity AS forced FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND (c.relname='tenants' OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attname='tenant_id' AND NOT a.attisdropped)) ORDER BY c.relname");
@@ -347,7 +352,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
       assert.equal((await reserve(dupPath,{...claimBody,rowNumber:1,issuerKey:"ci.issuer-b"})).status,201);
       await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("UPDATE invoice_identity_claims SET reason='changed' WHERE id=$1",[claimed.claim.id])),e=>e.code==="42501");
       const cross=await withTenant(tenantB,"ci-api-tenant-b-only",c=>c.query("SELECT id FROM invoice_identity_claims"));
-      assert.equal(cross.rowCount,0);
+      assert.deepEqual(cross.rows.map(r=>r.id),[claimB]);
       assert.equal((await admin.query("SELECT count(*)::int AS n FROM invoice_identity_claims WHERE tenant_id=$1",[tenantA])).rows[0].n,2);
       assert.equal((await admin.query("SELECT count(*)::int AS n FROM audit_events WHERE tenant_id=$1 AND action='invoice_identity_reserved'",[tenantA])).rows[0].n,2);
     }finally{await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);}
