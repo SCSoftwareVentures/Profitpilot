@@ -23,3 +23,6 @@ The original-file endpoint checks SHA-256 and seals rows; the CSV parser rejects
 
 ## Blockers
 Migration 011 CI and latest invoice fixture correction have no confirmed results in the available connector. Verify push-triggered CI separately. Obtain authorised representative exports under G0 and verify issuer/reference semantics before schema enforcement. Production build remains gated by G0–G5.
+
+## Follow-up database audit
+Migration 005 already enforces one confirmed match per tenant/invoice line and one confirmed allocation run per payroll pool using partial unique indexes. The latest calculation guard is defense in depth, not a replacement for these indexes. The base invoices table also has UNIQUE(tenant_id,direction,invoice_number), which blocks duplicate numbers but conflates distinct supplier issuers. Do not drop that constraint until an issuer-aware replacement and migration conflict inventory are validated. Raw import rows still permit repeated references across separate files; candidate evidence must not be confused with canonical invoices. CI configuration runs on pushes, whereas the available commit workflow lookup filters to pull requests; empty results are not evidence that CI did not run.
