@@ -97,6 +97,36 @@ export async function loadAuditRows(client,tenantId,cutoff=null){
  if(r.rows.length>AUDIT_MAX_ROWS)fail("tenant audit exceeds 10,000 rows; requires a reviewed paginated protocol");
  return r.rows;
 }
+// A successor must preserve every signed historic event, not merely link to an
+// arbitrary file. Only a separately entrusted public key makes this meaningful.
+export function assertCheckpointPrefix(bundle,publicKey,rows){
+ const m=verifyAuditCheckpoint(bundle,publicKey);
+ const actual=canonicalRows(rows,m.tenantId);
+ if(actual.length<m.entries.length)fail("historic checkpoint entries omitted");
+ for(let i=0;i<m.entries.length;i++){
+  const expected=m.entries[i],found=actual[i];
+  if(found.id!==expected.id||found.createdAt!==expected.createdAt||found.digest!==expected.digest)
+   fail("historic audit prefix changed or backdated");
+ }
+ return true;
+}
+export function checkpointDigest(bundle,publicKey){
+ verifyAuditCheckpoint(bundle,publicKey);
+ return createHash("sha256").update(JSON.stringify(bundle),"utf8").digest("hex");
+}
+export function assertCheckpointSuccessor(previous,next,publicKey){
+ const old=verifyAuditCheckpoint(previous,publicKey);
+ const current=verifyAuditCheckpoint(next,publicKey);
+ if(current.tenantId!==old.tenantId||current.previousCheckpointDigest!==checkpointDigest(previous,publicKey)||
+  Date.parse(current.capturedAt)<Date.parse(old.capturedAt)||current.count<old.count)
+  fail("checkpoint linkage, tenant or time invalid");
+ for(let i=0;i<old.count;i++){
+  const expected=old.entries[i],found=current.entries[i];
+  if(found.id!==expected.id||found.createdAt!==expected.createdAt||found.digest!==expected.digest)
+   fail("signed historical prefix altered");
+ }
+ return true;
+}
 export function assertCheckpointMatchesRows(bundle,publicKey,rows){
  const m=verifyAuditCheckpoint(bundle,publicKey);
  const actual=buildAuditManifest(m.tenantId,rows,{capturedAt:m.capturedAt,previousCheckpointDigest:m.previousCheckpointDigest});

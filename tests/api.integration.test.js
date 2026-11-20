@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createServer} from "node:http";
-import {createHash,createHmac,randomBytes} from "node:crypto";
+import {createHash,createHmac,randomBytes,generateKeyPairSync} from "node:crypto";
 import {generateKeyPair,exportJWK,SignJWT} from "jose";
 import pg from "pg";
 
@@ -644,6 +644,22 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(actorAudit.rowCount,1,"analyst may see their own upload audit event");
     const privateAudit=await withTenant(tenantA,"ci-api-analyst",c=>c.query("SELECT id FROM audit_events WHERE object_type='privacy_request' AND object_id=$1",[privacyItem.item.id]));
     assert.equal(privateAudit.rowCount,0);
+    // Real PostgreSQL rows are the source for checkpoint/continuity verification.
+    const {loadAuditRows,buildAuditManifest,signAuditManifest,assertCheckpointPrefix,assertCheckpointMatchesRows,assertCheckpointSuccessor,checkpointDigest}=await import("../src/audit-evidence.js");
+    const archive=await loadAuditRows(admin,tenantA);
+    assert.ok(archive.length>5,"integration dataset includes independently reviewable audit evidence");
+    const keys=generateKeyPairSync("ed25519");
+    const sealed=signAuditManifest(buildAuditManifest(tenantA,archive,{capturedAt:"2026-11-20T22:17:00.000Z"}),keys.privateKey);
+    assert.equal(assertCheckpointMatchesRows(sealed,keys.publicKey,archive),true);
+    assert.throws(()=>assertCheckpointMatchesRows(sealed,keys.publicKey,archive.map((r,i)=>i===0?{...r,metadata:'{"modified":true}'}:r)),/differs/);
+    assert.throws(()=>assertCheckpointPrefix(sealed,keys.publicKey,archive.slice(1)),/omitted|changed/);
+    const newEvent=(await admin.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,metadata) VALUES ($1,$2,'ci-internal-checkpoint','fixture',gen_random_uuid(),'{}') RETURNING id",[tenantA,userA])).rows[0].id;
+    const extended=await loadAuditRows(admin,tenantA);
+    assert.equal(extended.length,archive.length+1);
+    assert.equal(assertCheckpointPrefix(sealed,keys.publicKey,extended),true);
+    const successor=signAuditManifest(buildAuditManifest(tenantA,extended,{capturedAt:"2026-11-20T22:18:00.000Z",previousCheckpointDigest:checkpointDigest(sealed,keys.publicKey)}),keys.privateKey);
+    assert.equal(assertCheckpointSuccessor(sealed,successor,keys.publicKey),true);
+    assert.ok(extended.some(r=>r.id===newEvent));
     const ownAudit=await withTenant(tenantA,"ci-api-reader",c=>c.query("SELECT id FROM audit_events WHERE object_type='privacy_request' AND object_id=$1",[privacyItem.item.id]));
     assert.equal(ownAudit.rowCount,7,"two privacy decisions plus five operator evidence records");
     await admin.query("INSERT INTO privacy_requests(tenant_id,requester_id,client_request_id,request_type) SELECT $1,$2,gen_random_uuid(),'access' FROM generate_series(1,201)",[tenantA,userB]);

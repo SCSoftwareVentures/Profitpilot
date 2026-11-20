@@ -38,3 +38,7 @@ Independent security assessment, real IdP/TLS/storage/signature operation, compl
 ## S11 signed audit checkpoint acceptance
 - Internal: Ed25519 signature verification, hash-chain consistency, missing/changed record detection, duplicate and cross-tenant input rejection, offline CLI tests, privileged-source row loader checks.
 - Unverified external: independent witness/time anchoring, production audit-export role, signing-key custody, tamper-resistant remote storage, automatic monitoring and legal acceptance. The application must not label these as certified.
+
+## S12 checkpoint lineage verification
+- Reject missing, foreign, invalidly signed, stale, omitted or altered predecessor checkpoints before sealing. Hash-link each successor to its independently verified predecessor and verify the immutable ordered event prefix in the same database snapshot.
+- Synthetic CI tests use actual PostgreSQL audit-event exports as well as unit-level signed mutation, omission, backdating, wrong-key and cross-tenant negative probes. This validates software controls only, not signer trust, external custody, or independent event truth.

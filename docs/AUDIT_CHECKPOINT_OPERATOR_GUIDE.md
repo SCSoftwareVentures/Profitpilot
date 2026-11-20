@@ -18,7 +18,7 @@ node scripts/audit-checkpoint.mjs verify /secure/checkpoint.json /secure/audit-s
 node scripts/audit-checkpoint.mjs compare /secure/checkpoint.json /secure/audit-signing.pub /secure/audit-db.url
 ```
 
-4. Preserve the signed checkpoint and authenticated public-key fingerprint in externally controlled, independent write-once or witnessed custody. For subsequent seals, pass the earlier checkpoint as the optional fifth argument; independently verify the predecessor before trusting its digest linkage.
+4. Preserve the signed checkpoint and authenticated public-key fingerprint in externally controlled, independent write-once or witnessed custody. For subsequent seals, pass the earlier checkpoint as the optional fifth argument; the tool **must verify that predecessor's Ed25519 signature under the current signer and compare all historical event hashes against the current tenant snapshot** before creating a successor. It rejects changed, missing or backdated earlier events, tenant mismatches, old keys and reversed capture times. Older signed artifacts still require independent custody.
 5. Repeat according to an approved operational schedule. Check prior checkpoint prefixes against current data, record exceptions, handle signer key rotation and preserve chain-of-custody evidence.
 
 ## Important unresolved controls
@@ -30,3 +30,6 @@ node scripts/audit-checkpoint.mjs compare /secure/checkpoint.json /secure/audit-
 - Remote database connections use verified TLS; local plaintext is enabled only for NODE_ENV=test loopback. No real credentials or private keys are committed.
 - Keep checkpoint artifacts and subject identifiers out of public source-control and support tickets.
 - The project does not claim full independent audit logging, qualified penetration testing, legal privacy compliance or production readiness.
+
+## S12 strengthened continuity rules
+Successor `seal` verifies the predecessor signature under the currently configured key, its tenant, the entire old audit prefix and capture-time ordering before it writes a new file. The `previousCheckpointDigest` now hashes the validated JSON bundle (not arbitrary unverified file bytes). Public-key rotation is deliberately NOT supported automatically: a new key or key compromise needs a documented dual-signature migration and independent witness. An initial checkpoint remains a self-signed statement until externally witnessed. `verify` only checks the single file: to validate continuity, inspect the predecessor and compare to the database as described above. Empty historical checkpoints cannot independently demonstrate the database's state at a past time after additional records appear. This is a trust limitation, not a guarantee.

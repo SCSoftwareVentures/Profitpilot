@@ -4,8 +4,8 @@ import pg from "pg";
 import {readFileSync,openSync,fstatSync,readSync,closeSync,writeFileSync,constants} from "node:fs";
 import {resolve} from "node:path";
 import {pathToFileURL} from "node:url";
-import {createHash,createPublicKey} from "node:crypto";
-import {buildAuditManifest,loadAuditRows,signAuditManifest,verifyAuditCheckpoint,assertCheckpointMatchesRows} from "../src/audit-evidence.js";
+import {createPublicKey} from "node:crypto";
+import {buildAuditManifest,loadAuditRows,signAuditManifest,verifyAuditCheckpoint,assertCheckpointMatchesRows,assertCheckpointPrefix,checkpointDigest,assertCheckpointSuccessor} from "../src/audit-evidence.js";
 function privateFile(path){
  const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
  try{
@@ -37,17 +37,27 @@ async function main(argv){
  const [command,...args]=argv;
  if(command==="verify"&&args.length===2){
   verifyAuditCheckpoint(JSON.parse(readFileSync(args[0],"utf8")),readFileSync(args[1],"utf8"));
-  process.stdout.write("Signature and checkpoint structure verified; database comparison NOT performed\n");return;
+  process.stdout.write("Signature and checkpoint structure verified; database and predecessor NOT checked\n");return;
  }
  if(command==="seal"&&(args.length===4||args.length===5)){
   const [tenantId,dbFile,keyFile,output,previous]=args;
   const pem=privateFile(keyFile);
-  // Previous artifact is a chain link, not proof of independent witness custody.
-  const previousCheckpointDigest=previous?createHash("sha256").update(readFileSync(previous)).digest("hex"):null;
-  const manifest=await withReadOnlySnapshot(dbFile,async c=>
-   buildAuditManifest(tenantId,await loadAuditRows(c,tenantId),{previousCheckpointDigest}));
+  const publicKey=createPublicKey(pem);
+  // Never trust arbitrary previous files or link to a foreign tenant/old key.
+  const predecessor=previous?JSON.parse(readFileSync(previous,"utf8")):null;
+  if(predecessor){
+   const verified=verifyAuditCheckpoint(predecessor,publicKey);
+   if(verified.tenantId!==tenantId)throw Error("Previous checkpoint belongs to a different tenant");
+  }
+  const previousCheckpointDigest=predecessor?checkpointDigest(predecessor,publicKey):null;
+  const manifest=await withReadOnlySnapshot(dbFile,async c=>{
+   const rows=await loadAuditRows(c,tenantId);
+   if(predecessor)assertCheckpointPrefix(predecessor,publicKey,rows);
+   return buildAuditManifest(tenantId,rows,{previousCheckpointDigest});
+  });
   const bundle=signAuditManifest(manifest,pem);
-  verifyAuditCheckpoint(bundle,createPublicKey(pem));
+  verifyAuditCheckpoint(bundle,publicKey);
+  if(predecessor)assertCheckpointSuccessor(predecessor,bundle,publicKey);
   writeFileSync(output,JSON.stringify(bundle,null,2)+"\n",{mode:0o600,flag:"wx"});
   process.stdout.write("Audit checkpoint sealed: "+manifest.count+" hashed events (external custody still required)\n");return;
  }
@@ -59,7 +69,7 @@ async function main(argv){
   const last=manifest.entries.at(-1);
   const rows=await withReadOnlySnapshot(dbFile,c=>loadAuditRows(c,manifest.tenantId,last??null));
   assertCheckpointMatchesRows(bundle,pem,rows);
-  process.stdout.write("Current database historical prefix matches signed checkpoint\n");return;
+  process.stdout.write("Current database historical prefix matches signed checkpoint; subsequent events not checked\n");return;
  }
  throw Error("Usage: seal TENANT_UUID DB_URL_FILE PRIVATE_KEY_FILE NEW_OUTPUT [PREVIOUS_CHECKPOINT] | verify CHECKPOINT PUBLIC_KEY_FILE | compare CHECKPOINT PUBLIC_KEY_FILE DB_URL_FILE");
 }
