@@ -122,3 +122,5 @@ CI #2990 exposed the integration harness hitting the unchanged 100-request/minut
 S9 audit privacy and secret hardening: need-to-know audit visibility, runtime action/source semantics gate, database Unicode bidi rejection, no-follow owner-only protected secrets. Adds runtime database negative tests and documentation. CI pending; privileged DB tampering/operational key custody and real privacy fulfilment remain external gates.
 
 S10: dual authorised privacy review (different opener and closer; no self-review); complete paged case listing for administrators and subject; no operational verification claims. CI pending.
+
+S11 signed audit checkpoint CLI and tests: Ed25519 attest/verify, tenant-scoped ordered event hashing, historical database comparison, strict row/size bounds; unverified external anchor and signing key custody. Privacy closure evidence migration staged in same tree. CI pending.

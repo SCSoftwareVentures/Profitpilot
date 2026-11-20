@@ -332,6 +332,13 @@ paths:
         "200": { description: Exact contribution, evidence and limitations }
         "403": { description: Synthetic rehearsal not provisioned }
         "422": { description: Insufficient or incompatible evidence }
+  /tenants/{tenantId}/privacy-requests/{requestId}/evidence:
+    get:
+      summary: Read case-specific scoped operator evidence references
+      description: Requester or authorised tenant administrator only. Not independently verified evidence of deletion, export, processor action or legal completion.
+      responses:
+        "200": { description: Scoped reference list and explicit non-verification flag }
+        "404": { description: Not a visible privacy case }
   /tenants/{tenantId}/calculations:
     parameters:
       - $ref: '#/components/parameters/TenantId'

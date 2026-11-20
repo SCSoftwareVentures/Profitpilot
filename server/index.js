@@ -92,6 +92,17 @@ app.post("/v1/tenants/:tenantId/privacy-requests/:requestId/review",membership,r
 }});
 
 
+app.get("/v1/tenants/:tenantId/privacy-requests/:requestId/evidence",membership,async(req,res,next)=>{try{
+ if(!isUuid(req.params.requestId))return res.status(400).json({error:"Invalid privacy request identifier"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
+  const caseRow=await c.query("SELECT id FROM privacy_requests WHERE tenant_id=$1 AND id=$2",[req.membership.tenantId,req.params.requestId]);
+  if(!caseRow.rowCount)return null;
+  return (await c.query("SELECT scope,outcome,evidence_reference,recorded_at FROM private.privacy_case_evidence WHERE tenant_id=$1 AND case_id=$2 ORDER BY scope",[req.membership.tenantId,req.params.requestId])).rows;
+ });
+ if(result===null)return res.status(404).json({error:"Privacy request unavailable"});
+ res.json({items:result,externalFulfilmentVerified:false,automatedErasure:false,scope:"Opaque operator attestations only, not verified downstream execution"});
+}catch(e){next(e);}});
+
 app.get("/v1/tenants/:tenantId/privacy/self-access",membership,async(req,res,next)=>{try{
  const cursor=req.query.cursor??null;
  if(cursor!==null&&!isUuid(cursor))return res.status(400).json({error:"Invalid privacy cursor"});

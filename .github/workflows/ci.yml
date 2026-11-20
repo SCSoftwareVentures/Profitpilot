@@ -105,6 +105,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/019_privacy_audit_and_index.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/020_audit_privacy_least_privilege.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/021_privacy_case_dual_review.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/022_privacy_case_evidence_gate.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:

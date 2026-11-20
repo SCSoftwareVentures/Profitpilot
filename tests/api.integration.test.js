@@ -607,6 +607,16 @@ test("authenticated API enforces tenant membership, role permissions and import 
       assert.equal((await privacyReview("reviewing")).status,200);
       const premature=await privacyReview("closed_attested");assert.equal(premature.status,409,"initiating reviewer cannot close own case");
       await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("UPDATE privacy_requests SET review_started_by=$1 WHERE tenant_id=$2 AND id=$3",[independentReviewer,tenantA,privacyItem.item.id])),e=>e.code==="42501","review initiator is immutable to the runtime role");
+      const evidencePath=privacyPath+"/"+privacyItem.item.id+"/evidence";
+      const withoutProof=await request(reviewPath,{subject:"ci-api-privacy-closer",method:"POST",body:{status:"closed_attested",reviewReference:"CI.closure.2"}});
+      assert.equal(withoutProof.status,409,"closure must fail without five scoped operator attestations");
+      for(const scope of ["identity","primary","backups","processors","logs"]){
+       await admin.query("INSERT INTO private.privacy_case_evidence(tenant_id,case_id,scope,outcome,evidence_reference,recorded_by) VALUES($1,$2,$3,'fulfilled',$4,$5)",[tenantA,privacyItem.item.id,scope,"CI."+scope,independentReviewer]);
+      }
+      await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("INSERT INTO private.privacy_case_evidence(tenant_id,case_id,scope,outcome,evidence_reference,recorded_by) VALUES($1,$2,'decision','lawful_exception','CI.unauthorised',$3)",[tenantA,privacyItem.item.id,userA])),e=>e.code==="42501","runtime role may not declare external fulfilment");
+      const evidence=await request(evidencePath,{subject:"ci-api-reader"});assert.equal(evidence.status,200);
+      const evidenceData=await evidence.json();assert.equal(evidenceData.items.length,5);assert.equal(evidenceData.externalFulfilmentVerified,false);
+      assert.equal((await request(evidencePath,{subject:"ci-api-tenant-b-only"})).status,403);
       const closed=await request(reviewPath,{subject:"ci-api-privacy-closer",method:"POST",body:{status:"closed_attested",reviewReference:"CI.closure.2"}});assert.equal(closed.status,200);
       assert.equal((await closed.json()).externalFulfilmentVerified,false);
       assert.equal((await privacyReview("reviewing")).status,409);
@@ -614,6 +624,10 @@ test("authenticated API enforces tenant membership, role permissions and import 
       const foreign=await request(privacyPath+"/"+fixturePrivacy+"/review",{subject:"ci-api-analyst",method:"POST",body:{status:"reviewing",reviewReference:"CI.case.2"}});assert.equal(foreign.status,409);
     }finally{await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);}
     await assert.rejects(()=>withTenant(tenantA,"ci-api-reader",c=>c.query("DELETE FROM privacy_requests")),e=>e.code==="42501");
+    const analystEvidence=await withTenant(tenantA,"ci-api-analyst",c=>c.query("SELECT id FROM private.privacy_case_evidence WHERE case_id=$1",[privacyItem.item.id]));
+    assert.equal(analystEvidence.rowCount,0);
+    const ownEvidence=await withTenant(tenantA,"ci-api-reader",c=>c.query("SELECT id FROM private.privacy_case_evidence WHERE case_id=$1",[privacyItem.item.id]));
+    assert.equal(ownEvidence.rowCount,5);
     const accessPath=`/v1/tenants/${tenantA}/privacy/self-access`;
     const selfAccess=await request(accessPath,{subject:"ci-api-reader"});
     assert.equal(selfAccess.status,200);assert.equal(selfAccess.headers.get("cache-control"),"no-store");

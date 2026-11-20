@@ -34,3 +34,7 @@ Independent security assessment, real IdP/TLS/storage/signature operation, compl
 ## S10 additional review checks
 - Privacy closure: requester may not authorise own review; opener and closer are distinct currently authorised owner/admin/reviewer roles (HTTP requires owner/admin). Immutable opener reference and dual-review regression test. No automatic erasure/export or externally verified legal outcome.
 - Privacy queue: tenant-scoped 200-row cursor pagination for admin and requester, with requester ID in administrative response. A case listing is not an exhaustive enterprise data-subject response.
+
+## S11 signed audit checkpoint acceptance
+- Internal: Ed25519 signature verification, hash-chain consistency, missing/changed record detection, duplicate and cross-tenant input rejection, offline CLI tests, privileged-source row loader checks.
+- Unverified external: independent witness/time anchoring, production audit-export role, signing-key custody, tamper-resistant remote storage, automatic monitoring and legal acceptance. The application must not label these as certified.
