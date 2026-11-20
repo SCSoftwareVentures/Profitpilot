@@ -21,8 +21,10 @@ CREATE FUNCTION private.guard_runtime_audit() RETURNS trigger
  LANGUAGE plpgsql SECURITY INVOKER SET search_path=pg_catalog,public,private AS $$
 BEGIN
  IF current_user <> 'profitpilot_app' THEN RETURN NEW; END IF;
- IF NEW.object_id IS NULL OR NEW.actor_user_id IS DISTINCT FROM private.actor_id()
- OR jsonb_typeof(NEW.metadata) <> 'object'
+ IF NEW.actor_user_id IS DISTINCT FROM private.actor_id() THEN
+  RAISE EXCEPTION 'Audit actor does not match verified tenant identity' USING ERRCODE='42501';
+ END IF;
+ IF NEW.object_id IS NULL OR jsonb_typeof(NEW.metadata) <> 'object'
  OR octet_length(NEW.metadata::text) > 262144
  OR (NEW.reason IS NOT NULL AND (length(NEW.reason)>2000 OR NEW.reason ~ '[[:cntrl:]]'))
  OR NOT (
