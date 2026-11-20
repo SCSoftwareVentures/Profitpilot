@@ -110,6 +110,7 @@ jobs:
       - name: Rehearse synthetic database backup and restore
         env:
           PGPASSWORD: ci-admin-password
+          PG_CONTAINER: ${{ job.services.postgres.id }}
         run: |
           set -eu
           umask 077
@@ -117,9 +118,9 @@ jobs:
           RESTORE_URL="postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot_restore"
           DUMP="$(mktemp)"
           trap 'rm -f "$DUMP"' EXIT
-          pg_dump "$ADMIN_URL" --format=custom --file="$DUMP"
+          docker exec -e PGPASSWORD="$PGPASSWORD" "$PG_CONTAINER" pg_dump -h 127.0.0.1 -U profitpilot_admin -d profitpilot --format=custom > "$DUMP"
           createdb -h localhost -U profitpilot_admin profitpilot_restore
-          pg_restore --exit-on-error --dbname="$RESTORE_URL" "$DUMP"
+          docker exec -i -e PGPASSWORD="$PGPASSWORD" "$PG_CONTAINER" pg_restore -h 127.0.0.1 -U profitpilot_admin -d profitpilot_restore --exit-on-error < "$DUMP"
           QUERY="SELECT (SELECT count(*) FROM tenants),(SELECT count(*) FROM raw_import_rows),(SELECT count(*) FROM audit_events),(SELECT count(*) FROM invoice_identity_claims),(SELECT count(*) FROM calculation_runs),(SELECT count(*) FROM import_source_receipts WHERE sha256=encode(public.digest(original_bytes,'sha256'),'hex'));"
           test "$(psql "$ADMIN_URL" -At -c "$QUERY")" = "$(psql "$RESTORE_URL" -At -c "$QUERY")"
           RESTORED_APP="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot_restore"
