@@ -42,7 +42,7 @@ BEGIN
  OR btrim(src.payload->>'invoice_id') IS DISTINCT FROM NEW.invoice_reference
  OR NOT EXISTS(SELECT 1 FROM mapping_decisions m WHERE m.tenant_id=NEW.tenant_id AND m.raw_row_id=NEW.raw_row_id AND m.method_version='invoice-validator-0.1.0' AND m.decision='candidate')
  THEN RAISE EXCEPTION 'Invoice claim requires matching reviewed source evidence' USING ERRCODE='23514'; END IF;
- IF NEW.source_integrity IS DISTINCT FROM CASE WHEN EXISTS(SELECT 1 FROM import_source_receipts s WHERE s.tenant_id=NEW.tenant_id AND s.batch_id=src.batch_id) THEN 'byte_verified' ELSE 'client_declared' END
+ IF NEW.source_integrity IS DISTINCT FROM (CASE WHEN EXISTS(SELECT 1 FROM import_source_receipts s WHERE s.tenant_id=NEW.tenant_id AND s.batch_id=src.batch_id) THEN 'byte_verified' ELSE 'client_declared' END)
  THEN RAISE EXCEPTION 'Invoice claim source integrity mismatch' USING ERRCODE='23514'; END IF;
  RETURN NEW;
 END $$;
