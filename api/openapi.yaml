@@ -339,6 +339,22 @@ paths:
       responses:
         "200": { description: Scoped reference list and explicit non-verification flag }
         "404": { description: Not a visible privacy case }
+  /tenants/{tenantId}/prototype/calculation-restatements:
+    post:
+      summary: Record independent, immutable reconciliation of two distinct calculation evidence runs
+      description: Synthetic-only and separately provisioned. Requires an independent reviewer, matching contract/site/period, supported calculation version, and distinct original evidence digests. Does not authorise financial inclusion.
+      responses:
+        "201": { description: Independent restatement accepted with audit event }
+        "200": { description: Exact idempotent replay }
+        "403": { description: Profile, membership or tenant provisioning denied }
+        "409": { description: Restatement conflict }
+        "422": { description: Invalid provenance, time order, reviewer or unchanged evidence }
+  /tenants/{tenantId}/prototype/calculation-restatements/{restatementId}:
+    get:
+      summary: Read immutable calculation restatement linkage
+      responses:
+        "200": { description: Old/new run IDs, source digests and reviewer references }
+        "404": { description: Restatement not visible }
   /tenants/{tenantId}/calculations:
     parameters:
       - $ref: '#/components/parameters/TenantId'

@@ -446,6 +446,39 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(stored.inputs.snapshot.allocationLines[0].allocation_line_id,allocationLineA);
     assert.equal(snapshotDigest(stored.inputs.snapshot),stored.outputs.evidenceSha256);
     assert.equal(stored.inputs.evidenceSha256,stored.outputs.evidenceSha256);
+    // F4: new source evidence creates a new immutable calculation; a different
+    // authorised reviewer is required to link it to the previous run.
+    await requestLimiter.resetKey("127.0.0.1");
+    const extraInvoice=await insertFixture("INSERT INTO invoices(tenant_id,direction,invoice_number,invoice_date,total_amount,tax_basis,source_ref) VALUES ($1,'customer','CI-A-RESTATED','2026-02-15',15,'gst_exclusive','ci-new-source')",[tenantA]);
+    const extraLine=await insertFixture("INSERT INTO invoice_lines(tenant_id,invoice_id,line_number,description,amount) VALUES ($1,$2,1,'CI new source',15)",[tenantA,extraInvoice]);
+    await insertFixture("INSERT INTO match_reviews(tenant_id,invoice_line_id,contract_id,site_id,service_period_start,service_period_end,confidence,decision,reviewer_id,reviewed_at) VALUES ($1,$2,$3,$4,'2026-02-01','2026-02-28','HIGH','confirmed',$5,now())",[tenantA,extraLine,contractA,siteA,userA]);
+    const revised=await calculate();assert.equal(revised.status,201);
+    const revisedBody=await revised.json();assert.equal(revisedBody.outputs.exact.revenue,"115.00");
+    assert.equal(revisedBody.outputs.exact.contribution,"65.00");
+    const restUrl=/v1/tenants/${tenantA}/prototype/calculation-restatements;
+    const restBody={synthetic:true,priorRunId:validRunBody.id,nextRunId:revisedBody.id,reasonCode:"new_verified_invoice_source",evidenceReference:"CI.restate.001"};
+    const restate=(subject,body=restBody)=>request(restUrl,{subject,method:"POST",body});
+    assert.equal((await restate("ci-api-analyst")).status,403,"creator may not self-approve a restatement");
+    const independentCloser="cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    await admin.query("INSERT INTO users(id,auth_subject,email,status) VALUES ($1,'ci-api-privacy-closer','privacy-closer@example.invalid','active') ON CONFLICT(id) DO UPDATE SET status='active'",[independentCloser]);
+    await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'admin','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role='admin',status='active'",[tenantA,independentCloser]);
+    assert.equal((await restate("ci-api-privacy-closer")).status,403,"synthetic tenant provisioning is required");
+    await admin.query("UPDATE tenants SET invoice_rehearsal_enabled=true WHERE id=$1",[tenantA]);
+    try{
+     assert.equal((await restate("ci-api-privacy-closer",{...restBody,nextRunId:validRunBody.id,priorRunId:revisedBody.id})).status,422,"reversed source revisions must fail");
+     const linked=await restate("ci-api-privacy-closer");assert.equal(linked.status,201);
+     const report=(await linked.json()).item;
+     assert.equal(report.prior_run_id,validRunBody.id);assert.equal(report.next_run_id,revisedBody.id);
+     assert.notEqual(report.prior_evidence_sha256,report.next_evidence_sha256);
+     assert.equal((await restate("ci-api-privacy-closer")).status,200,"exact replay must be idempotent");
+     assert.equal((await restate("ci-api-privacy-closer",{...restBody,evidenceReference:"CI.changed"})).status,409);
+     assert.equal((await request(restUrl+"/"+report.id,{subject:"ci-api-analyst"})).status,200);
+     assert.equal((await request(restUrl+"/"+report.id,{subject:"ci-api-tenant-b-only"})).status,403);
+     assert.equal((await admin.query("SELECT count(*)::int n FROM audit_events WHERE object_id=$1 AND action='calculation_restated'",[report.id])).rows[0].n,1);
+     await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("DELETE FROM calculation_restatements WHERE id=$1",[report.id])),e=>e.code==="42501");
+     const unchanged=await calculate();assert.equal(unchanged.status,201);
+     assert.equal((await restate("ci-api-privacy-closer",{...restBody,priorRunId:revisedBody.id,nextRunId:(await unchanged.json()).id})).status,422,"identical evidence is not a valid restatement");
+    }finally{await admin.query("UPDATE tenants SET invoice_rehearsal_enabled=false WHERE id=$1",[tenantA]);}
     await admin.query("UPDATE match_reviews SET service_period_start='2026-01-31' WHERE id=$1",[matchA]);
     try{const misaligned=await calculate();assert.equal(misaligned.status,422);assert.match((await misaligned.json()).error,/service period/);}
     finally{await admin.query("UPDATE match_reviews SET service_period_start='2026-02-01' WHERE id=$1",[matchA]);}

@@ -435,6 +435,41 @@ app.post("/v1/tenants/:tenantId/prototype/unified-contribution",membership,requi
  const {status,...out}=result;res.status(status).json({...out,synthetic:true,financialInclusionAuthorized:false,issuerAuthenticated:false,persisted:false});
 }catch(e){next(e);}});
 
+// F4: durable, review-controlled link between existing immutable calculations.
+// No financial source values are accepted from the HTTP caller.
+const restatementColumns="id,prior_run_id,next_run_id,reviewed_by,reason_code,evidence_reference,prior_evidence_sha256,next_evidence_sha256,created_at";
+app.post("/v1/tenants/:tenantId/prototype/calculation-restatements",membership,requireRole("owner","admin","reviewer"),async(req,res,next)=>{try{
+ const body=req.body||{},{synthetic,priorRunId,nextRunId,reasonCode,evidenceReference}=body;
+ if(profile.mode!=="prototype")return res.status(403).json({error:"Protected profile cannot activate synthetic restatements"});
+ if(synthetic!==true||Object.keys(body).some(k=>!["synthetic","priorRunId","nextRunId","reasonCode","evidenceReference"].includes(k))
+ ||!isUuid(priorRunId)||!isUuid(nextRunId)||priorRunId===nextRunId
+ ||typeof reasonCode!=="string"||!/^[A-Za-z0-9][A-Za-z0-9._:-]{2,119}$/.test(reasonCode)
+ ||typeof evidenceReference!=="string"||!/^[A-Za-z0-9][A-Za-z0-9._:-]{2,119}$/.test(evidenceReference))
+ return res.status(400).json({error:"Reviewed synthetic restatement identifiers and evidence references required"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
+  const tenant=req.membership.tenantId;
+  const active=await c.query("SELECT id FROM tenants WHERE id=$1 AND invoice_rehearsal_enabled",[tenant]);
+  if(!active.rowCount)return {status:403,error:"Synthetic reporting tenant not provisioned"};
+  const insert=await c.query("INSERT INTO calculation_restatements(tenant_id,prior_run_id,next_run_id,reviewed_by,reason_code,evidence_reference) VALUES($1,$2,$3,private.actor_id(),$4,$5) ON CONFLICT DO NOTHING RETURNING "+restatementColumns,[tenant,priorRunId,nextRunId,reasonCode,evidenceReference]);
+  if(insert.rowCount)return {status:201,item:insert.rows[0]};
+  const old=await c.query("SELECT "+restatementColumns+" FROM calculation_restatements WHERE tenant_id=$1 AND next_run_id=$2 AND prior_run_id=$3 AND reviewed_by=private.actor_id() AND reason_code=$4 AND evidence_reference=$5",[tenant,nextRunId,priorRunId,reasonCode,evidenceReference]);
+  return old.rowCount?{status:200,item:old.rows[0]}:{status:409,error:"A calculation is already linked by an incompatible restatement"};
+ });
+ const {status,...payload}=result;
+ res.status(status).json({...payload,synthetic:true,financialInclusionAuthorized:false,externalVerification:false});
+}catch(e){
+ if(["23514","23503"].includes(e.code))return res.status(422).json({error:"Calculation restatement scope, evidence or independent review invalid"});
+ if(e.code==="23505"||e.code==="40001")return res.status(409).json({error:"Restatement conflict; refresh immutable calculation history"});
+ next(e);
+}});
+app.get("/v1/tenants/:tenantId/prototype/calculation-restatements/:restatementId",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
+ if(!isUuid(req.params.restatementId))return res.status(400).json({error:"Invalid restatement identifier"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,c=>c.query(
+ "SELECT "+restatementColumns+" FROM calculation_restatements WHERE tenant_id=$1 AND id=$2",[req.membership.tenantId,req.params.restatementId]));
+ if(!result.rowCount)return res.status(404).json({error:"Restatement unavailable"});
+ res.json({item:result.rows[0],synthetic:true,financialInclusionAuthorized:false,externalVerification:false});
+}catch(e){next(e);}});
+
 app.post("/v1/tenants/:tenantId/calculations",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
  const {contractId,siteId,periodStart,periodEnd}=req.body||{};
  if(!isUuid(contractId)||!isUuid(siteId)||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodEnd<periodStart)return res.status(400).json({error:"Valid contract, site and period are required"});

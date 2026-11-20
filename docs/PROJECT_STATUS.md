@@ -126,3 +126,5 @@ S10: dual authorised privacy review (different opener and closer; no self-review
 S11 signed audit checkpoint CLI and tests: Ed25519 attest/verify, tenant-scoped ordered event hashing, historical database comparison, strict row/size bounds; unverified external anchor and signing key custody. Privacy closure evidence migration staged in same tree. CI pending.
 
 S12: prior checkpoint signature, tenant and full event-prefix verification required before successor signing, plus tested historical continuity using real PostgreSQL audit events. External witness, safe key rotation, large-tenant pagination and legal/operational assurance still remain. CI pending.
+
+F4 synthetic calculation restatement lineage: immutable old/new run links with independently authorised reviewer, same scope, changed verified evidence digests, idempotency, audit, tenant RLS and no live-financial activation. Existing calculation records remain unchanged; unified F3 preview still not persisted. CI pending.
