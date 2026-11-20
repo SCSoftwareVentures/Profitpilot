@@ -1,0 +1,10 @@
+case_id,direction,issuer_key,invoice_reference,source_batch,expected_review,reason
+I01,supplier,DEMO-A,001,B1,candidate,First observed reference
+I02,supplier,DEMO-A,001,B2,hold,Repeated issuer and reference across batches
+I03,supplier,DEMO-B,001,B2,candidate,Distinct issuer same reference
+I04,supplier,,001,B3,hold,Issuer missing
+I05,supplier,DEMO-A,1,B3,hold,Potential leading-zero alias requires source-owner rule
+I06,customer,DEMO-A,001,B4,candidate,Separate invoice direction
+I07,supplier,DEMO-A,001,B5,hold,Potential corrected invoice requires explicit lineage
+I08,supplier,DEMO-A,ABC,B6,candidate,First observed reference
+I09,supplier,DEMO-A,abc,B7,hold,Case alias requires source-owner rule
