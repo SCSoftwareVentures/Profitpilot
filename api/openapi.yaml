@@ -288,6 +288,28 @@ paths:
         "201": { description: Decision appended }
         "403": { description: Reviewer role required }
         "409": { description: Match state changed; refresh required }
+  /tenants/{tenantId}/prototype/invoice-confirmations:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      summary: Confirm an invoice in an isolated synthetic rehearsal registry
+      description: Requires explicitly provisioned synthetic tenant, prototype profile, reviewer, existing identity claim and approved contract/site/service period. Currency AUD and tax basis are reviewer assertions, not issuer-authenticated. Does not promote invoices or authorise financial inclusion.
+      responses:
+        "201": { description: Rehearsal created with audit event }
+        "200": { description: Identical replay }
+        "403": { description: Reviewer or rehearsal provisioning missing }
+        "409": { description: Conflict }
+        "422": { description: Invalid evidence }
+  /tenants/{tenantId}/prototype/invoice-cost-bridge:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      summary: Preview revenue less supplier and subcontractor invoice costs
+      description: Synthetic only; exact decimal amounts and input digest; excludes payroll and unconfirmed costs, does not modify the management calculation ledger.
+      responses:
+        "200": { description: Incomplete synthetic invoice-only bridge }
+        "403": { description: Synthetic rehearsal not provisioned }
+        "422": { description: Inconsistent or insufficient evidence }
   /tenants/{tenantId}/calculations:
     parameters:
       - $ref: '#/components/parameters/TenantId'

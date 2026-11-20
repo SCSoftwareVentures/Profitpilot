@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {decimalCents,formatCents,contributionTotals,canonicalSnapshot,snapshotDigest,MAX_EVIDENCE_LINES} from "../src/financial-calculation.js";
+import {decimalCents,formatCents,contributionTotals,canonicalSnapshot,snapshotDigest,MAX_EVIDENCE_LINES,invoiceCostBridge} from "../src/financial-calculation.js";
 test("decimal parsing preserves cents and rejects ambiguous representations",()=>{
  assert.equal(decimalCents("999999999999.99"),99999999999999n);
  assert.equal(decimalCents("-0.01"),-1n);assert.equal(formatCents(-1n),"-0.01");
@@ -31,4 +31,11 @@ test("snapshot digest is deterministic over JSON object key order and detects in
  assert.equal(snapshotDigest(a),snapshotDigest(b));
  assert.notEqual(snapshotDigest(a),snapshotDigest({...a,rows:[{id:"a",amount:"1.01"}]}));
  assert.throws(()=>canonicalSnapshot({amount:0.1}));
+});
+
+test("synthetic invoice bridge separates supplier and subcontractor amounts",()=>{
+ const row=(id,cost_kind,amount)=>({id,cost_kind,amount,currency:"AUD",tax_basis:"gst_exclusive"});
+ const r=[row("a","revenue","100.01"),row("b","supplier","10.02"),row("c","subcontractor","20.03")];
+ assert.deepEqual(invoiceCostBridge(r),{currency:"AUD",taxBasis:"gst_exclusive",revenue:"100.01",supplierCost:"10.02",subcontractorCost:"20.03",externalCost:"30.05",revenueLessExternalCost:"69.96",payrollIncluded:false,completeness:"incomplete"});
+ for(const invalid of [[...r,r[1]],r.slice(1),[...r,{...row("d","supplier","1"),currency:"USD"}],[...r,{...row("d","supplier","1"),tax_basis:"gst_inclusive"}],[...r,row("d","supplier","-1")]])assert.throws(()=>invoiceCostBridge(invalid));
 });

@@ -95,6 +95,10 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("UPDATE import_batches SET status='review' WHERE id=$1",[verifiedB]);
     const claimB=await insertB("INSERT INTO invoice_identity_claims(tenant_id,raw_row_id,direction,issuer_key,invoice_reference,source_integrity,reviewer_id,evidence_reference,reason) VALUES($1,$2,'customer','ci.issuer-a','CI-B','byte_verified',$3,'CI fixture','CI reviewed fixture')",[tenantB,verifiedRawB,userC]);
 
+    await admin.query("UPDATE tenants SET invoice_rehearsal_enabled=true WHERE id=$1",[tenantB]);
+    await admin.query("UPDATE tenant_memberships SET role='reviewer' WHERE tenant_id=$1 AND user_id=$2",[tenantB,userC]);
+    const rehearsalB=await insertB("INSERT INTO invoice_confirmation_rehearsals(tenant_id,claim_id,contract_id,site_id,reviewer_id,service_start,service_end,currency,tax_basis,cost_kind,evidence_reference) VALUES($1,$2,$3,$4,$5,'2026-02-01','2026-02-28','AUD','gst_exclusive','revenue','CI.fixture')",[tenantB,claimB,contractB,siteB,userC]);
+    await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantB,userC]);
     const fixturePrivacy=await insertB("INSERT INTO privacy_requests(tenant_id,requester_id,client_request_id,request_type) VALUES($1,$2,gen_random_uuid(),'access')",[tenantB,userC]);
     // Automatically include every current public tenant-owned table (plus tenants)
     // and require its fixture, forced RLS, and both positive and negative visibility.
@@ -426,6 +430,27 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal((await admin.query("SELECT inputs FROM calculation_runs WHERE id=$1",[validRunBody.id])).rows[0].inputs.snapshot.invoiceLines[0].service_period_start,"2026-02-01");
 
 
+    // Canonical invoice rehearsal remains segregated from the financial ledger.
+    const existingCount=(await admin.query("SELECT count(*)::int n FROM invoices WHERE tenant_id=$1",[tenantA])).rows[0].n;
+    const claimA=await admin.query("SELECT id FROM invoice_identity_claims WHERE tenant_id=$1 AND raw_row_id=$2",[tenantA,realRaw]);
+    const confirmSql="INSERT INTO invoice_confirmation_rehearsals(tenant_id,claim_id,contract_id,site_id,reviewer_id,service_start,service_end,currency,tax_basis,cost_kind,evidence_reference) VALUES($1,$2,$3,$4,private.payroll_reviewer_id(),'2026-02-01','2026-02-28','AUD','gst_exclusive',$5,'CI.fixture') RETURNING id,amount::text";
+    const confirm=(claim,kind,site=siteA)=>withTenant(tenantA,"ci-api-analyst",c=>c.query(confirmSql,[tenantA,claim,contractA,site,kind]));
+    await admin.query("UPDATE tenant_memberships SET role='reviewer' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);
+    try{
+     await assert.rejects(()=>confirm(claimA.rows[0].id,"revenue"),e=>e.code==="23514");
+     await admin.query("UPDATE tenants SET invoice_rehearsal_enabled=true WHERE id=$1",[tenantA]);
+     await assert.rejects(()=>confirm(claimB,"revenue"),e=>e.code==="23514");
+     await assert.rejects(()=>confirm(claimA.rows[0].id,"revenue",siteB),e=>e.code==="23514");
+     await assert.rejects(()=>confirm(claimA.rows[0].id,"supplier"),e=>e.code==="23514");
+     const r=await confirm(claimA.rows[0].id,"revenue");
+     assert.equal(r.rowCount,1);
+     await assert.rejects(()=>confirm(claimA.rows[0].id,"revenue"),e=>e.code==="23505");
+     await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("UPDATE invoice_confirmation_rehearsals SET amount=0")),e=>e.code==="42501");
+     assert.equal((await admin.query("SELECT count(*)::int n FROM audit_events WHERE tenant_id=$1 AND object_id=$2 AND action='invoice_confirmation_rehearsed'",[tenantA,r.rows[0].id])).rows[0].n,1);
+     assert.equal((await admin.query("SELECT count(*)::int n FROM invoices WHERE tenant_id=$1",[tenantA])).rows[0].n,existingCount);
+     const bridge=await request(`/v1/tenants/${tenantA}/prototype/invoice-cost-bridge`,{subject:"ci-api-analyst",method:"POST",body:{synthetic:true,contractId:contractA,siteId:siteA,periodStart:"2026-02-01",periodEnd:"2026-02-28"}});
+     assert.equal(bridge.status,200);const out=await bridge.json();assert.equal(out.financialInclusionAuthorized,false);assert.equal(out.bridge.revenue,r.rows[0].amount);assert.equal(out.bridge.payrollIncluded,false);
+    }finally{await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);await admin.query("UPDATE tenants SET invoice_rehearsal_enabled=false WHERE id=$1",[tenantA]);}
     const pr1={source_ref:"ci-ledger:pay-001",amount:"40.01",currency:"AUD",period_start:"2026-02-01",period_end:"2026-02-28"};
     const pr2={...pr1,source_ref:"ci-ledger:pay-002",amount:"9.99"};
     const newPayroll=async hash=>{

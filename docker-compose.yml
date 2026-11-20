@@ -29,6 +29,7 @@ services:
       - ./database/migrations/014_privacy_requests.sql:/docker-entrypoint-initdb.d/016-privacy-requests.sql:ro
       - ./database/migrations/015_scan_receipts.sql:/docker-entrypoint-initdb.d/017-scan-receipts.sql:ro
       - ./database/migrations/016_narrow_privacy_disposal.sql:/docker-entrypoint-initdb.d/018-narrow-disposal.sql:ro
+      - ./database/migrations/017_invoice_confirmation_rehearsal.sql:/docker-entrypoint-initdb.d/019-invoice-rehearsal.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s

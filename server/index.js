@@ -14,7 +14,7 @@ import {authRequired,requireRole} from "./auth.js";
 import {validateInvoiceRows,validatePayrollRows,reconcilePayroll,isIsoDate} from "../src/engine.js";
 
 import {classifyInvoiceIdentity} from "../src/invoice-identity.js";
-import {FORMULA_VERSION,MAX_EVIDENCE_LINES,contributionTotals,snapshotDigest} from "../src/financial-calculation.js";
+import {FORMULA_VERSION,MAX_EVIDENCE_LINES,contributionTotals,snapshotDigest,invoiceCostBridge} from "../src/financial-calculation.js";
 
 const MAX_IMPORT_ROWS=2000;
 const isUuid=value=>typeof value==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -325,6 +325,41 @@ app.post("/v1/tenants/:tenantId/matches/:matchId/decision",membership,requireRol
  if(!result)return res.status(404).json({error:"Review candidate not found or already finalised"});
  res.status(201).json({decision:result});
  }catch(e){next(e);}});
+
+
+const rehearsalColumns="id,claim_id,contract_id,site_id,contract_version_no,reviewer_id,service_start::text,service_end::text,currency,tax_basis,cost_kind,direction,issuer_key,invoice_reference,source_integrity,raw_row_id,source_sha256,invoice_date::text,amount::text";
+app.post("/v1/tenants/:tenantId/prototype/invoice-confirmations",membership,requireRole("owner","admin","reviewer"),async(req,res,next)=>{try{
+ const body=req.body||{}, {synthetic,claimId,contractId,siteId,serviceStart,serviceEnd,currency,taxBasis,costKind,evidenceReference}=body;
+ if(profile.mode!=="prototype")return res.status(403).json({error:"Synthetic rehearsal unavailable in protected profile"});
+ if(synthetic!==true||Object.keys(body).some(k=>!["synthetic","claimId","contractId","siteId","serviceStart","serviceEnd","currency","taxBasis","costKind","evidenceReference"].includes(k))||![claimId,contractId,siteId].every(isUuid)||!isIsoDate(serviceStart)||!isIsoDate(serviceEnd)||serviceStart>serviceEnd||currency!=="AUD"||!["gst_inclusive","gst_exclusive","no_gst"].includes(taxBasis)||!["revenue","supplier","subcontractor"].includes(costKind)||typeof evidenceReference!=="string"||!/^[A-Za-z0-9][A-Za-z0-9._:-]{2,119}$/.test(evidenceReference))return res.status(400).json({error:"Explicit synthetic confirmation and reviewed scope, AUD, tax basis and evidence reference required"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
+  const tenant=req.membership.tenantId;
+  const allowed=await c.query("SELECT id FROM tenants WHERE id=$1 AND invoice_rehearsal_enabled",[tenant]);
+  if(!allowed.rowCount)return {status:403,error:"Synthetic rehearsal tenant not provisioned"};
+  const args=[tenant,claimId,contractId,siteId,serviceStart,serviceEnd,currency,taxBasis,costKind,evidenceReference];
+  const inserted=await c.query("INSERT INTO invoice_confirmation_rehearsals(tenant_id,claim_id,contract_id,site_id,reviewer_id,service_start,service_end,currency,tax_basis,cost_kind,evidence_reference) VALUES($1,$2,$3,$4,private.payroll_reviewer_id(),$5,$6,$7,$8,$9,$10) ON CONFLICT DO NOTHING RETURNING "+rehearsalColumns,args);
+  if(inserted.rowCount)return {status:201,item:inserted.rows[0]};
+  const replay=await c.query("SELECT "+rehearsalColumns+" FROM invoice_confirmation_rehearsals WHERE tenant_id=$1 AND claim_id=$2 AND contract_id=$3 AND site_id=$4 AND reviewer_id=private.payroll_reviewer_id() AND service_start=$5 AND service_end=$6 AND currency=$7 AND tax_basis=$8 AND cost_kind=$9 AND evidence_reference=$10",args);
+  return replay.rowCount?{status:200,item:replay.rows[0]}:{status:409,error:"Confirmation conflicts with an existing rehearsal"};
+ });
+ const {status,...out}=result;res.status(status).json({...out,synthetic:true,issuerAuthenticated:false,financialInclusionAuthorized:false});
+}catch(e){if(["23514","22007","22008","22003","23503"].includes(e.code))return res.status(422).json({error:"Rehearsal source, identity or contract evidence invalid"});next(e);}});
+app.post("/v1/tenants/:tenantId/prototype/invoice-cost-bridge",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
+ const body=req.body||{}, {synthetic,contractId,siteId,periodStart,periodEnd}=body;
+ if(profile.mode!=="prototype")return res.status(403).json({error:"Synthetic rehearsal unavailable in protected profile"});
+ if(synthetic!==true||Object.keys(body).some(k=>!["synthetic","contractId","siteId","periodStart","periodEnd"].includes(k))||!isUuid(contractId)||!isUuid(siteId)||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodStart>periodEnd)return res.status(400).json({error:"Explicit synthetic scope and valid dates required"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
+  const tenant=req.membership.tenantId;
+  const allowed=await c.query("SELECT id FROM tenants WHERE id=$1 AND invoice_rehearsal_enabled",[tenant]);
+  if(!allowed.rowCount)return {status:403,error:"Synthetic rehearsal tenant not provisioned"};
+  const rows=await c.query("SELECT "+rehearsalColumns+" FROM invoice_confirmation_rehearsals WHERE tenant_id=$1 AND contract_id=$2 AND site_id=$3 AND service_start<=$5::date AND service_end>=$4::date ORDER BY id LIMIT $6",[tenant,contractId,siteId,periodStart,periodEnd,MAX_EVIDENCE_LINES+1]);
+  if(rows.rows.some(r=>r.service_start<periodStart||r.service_end>periodEnd)||new Set(rows.rows.map(r=>r.contract_version_no)).size!==1)return {status:422,error:"Rehearsal period or contract version ambiguous"};
+  let bridge;try{bridge=invoiceCostBridge(rows.rows);}catch(e){if(e instanceof RangeError)return {status:422,error:e.message};throw e;}
+  const snapshot={contractId,siteId,periodStart,periodEnd,rows:rows.rows,method:"synthetic-invoice-bridge-0.1.0"};
+  return {status:200,bridge,evidenceSha256:snapshotDigest(snapshot),evidence:snapshot};
+ },{repeatableRead:true});
+ const {status,...out}=result;res.status(status).json({...out,synthetic:true,issuerAuthenticated:false,financialInclusionAuthorized:false});
+}catch(e){next(e);}});
 
 app.post("/v1/tenants/:tenantId/calculations",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
  const {contractId,siteId,periodStart,periodEnd}=req.body||{};

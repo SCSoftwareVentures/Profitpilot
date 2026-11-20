@@ -108,3 +108,6 @@ CI #2983 rejected clamav-scanner because the signed dependency chain pulled Busy
 
 ## Security verification baseline and core engine F1
 CI #2984 at edba06a completed 5/5 jobs, both Grype images reported zero findings, native malware fixture, encrypted recovery, JavaScript CodeQL and signed source provenance passed. No independent assessment, native C static analysis or production/legal approval claimed. Formula 0.2.0 adds exact integer-cent contribution, bounded evidence, deterministic input snapshot digest and explicit invoice/service-period agreement. Existing legacy numeric fields are only projections. No canonical invoice activation or real-data gate change. New CI pending.
+
+## F2 synthetic canonical invoice rehearsal
+CI #2987 passed all five jobs for formula 0.2.0. Migration 017 adds a default-off, administrator-provisioned synthetic confirmation registry with source-derived exact amounts, reviewed identity/contract/site/basis, immutable rows and transactional audit. A separate exact supplier/subcontractor invoice-cost bridge demonstrates attribution without touching the active calculation ledger or weakening invoice uniqueness. Real invoice promotion, source-owner semantics, credits/multi-line handling and payroll integration remain blocked. CI pending.

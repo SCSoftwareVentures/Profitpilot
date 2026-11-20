@@ -44,3 +44,21 @@ export function canonicalSnapshot(value){
  throw new TypeError("Unsupported snapshot value");
 }
 export function snapshotDigest(snapshot){return createHash("sha256").update(canonicalSnapshot(snapshot),"utf8").digest("hex");}
+
+export function invoiceCostBridge(rows){
+ if(!Array.isArray(rows)||!rows.length||rows.length>MAX_EVIDENCE_LINES)throw new RangeError("Bounded rehearsal evidence required");
+ const seen=new Set(),buckets={revenue:0n,supplier:0n,subcontractor:0n};
+ const basis=rows[0].tax_basis;
+ if(!["gst_inclusive","gst_exclusive","no_gst"].includes(basis))throw new RangeError("Known tax basis required");
+ for(const r of rows){
+  if(!r||typeof r.id!=="string"||seen.has(r.id)||!Object.hasOwn(buckets,r.cost_kind)||
+    r.tax_basis!==basis||r.currency!=="AUD")throw new RangeError("Duplicate, mismatched or invalid rehearsal evidence");
+  seen.add(r.id);
+  const cents=decimalCents(r.amount);
+  if(cents<=0n)throw new RangeError("Positive invoice amounts required");
+  buckets[r.cost_kind]=bounded(buckets[r.cost_kind]+cents);
+ }
+ if(buckets.revenue===0n)throw new RangeError("Confirmed rehearsal revenue required");
+ const externalCost=bounded(buckets.supplier+buckets.subcontractor);
+ return {currency:"AUD",taxBasis:basis,revenue:formatCents(buckets.revenue),supplierCost:formatCents(buckets.supplier),subcontractorCost:formatCents(buckets.subcontractor),externalCost:formatCents(externalCost),revenueLessExternalCost:formatCents(bounded(buckets.revenue-externalCost)),payrollIncluded:false,completeness:"incomplete"};
+}
