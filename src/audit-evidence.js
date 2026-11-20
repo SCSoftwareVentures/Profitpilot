@@ -62,10 +62,10 @@ function validateManifest(m){
  return m;
 }
 function encodedManifest(m){return JSON.stringify(m);}
-function spkiDigest(key){return createHash("sha256").update(createPublicKey(key).export({type:"spki",format:"der"})).digest("hex");}
+function spkiDigest(key){const pub=key?.type==="public"?key:createPublicKey(key);return createHash("sha256").update(pub.export({type:"spki",format:"der"})).digest("hex");}
 export function signAuditManifest(manifest,pem){
  validateManifest(manifest);
- const key=createPrivateKey(pem);
+ const key=pem?.type==="private"?pem:createPrivateKey(pem);
  if(key.asymmetricKeyType!=="ed25519")fail("Ed25519 signing key required");
  const body=Buffer.from(encodedManifest(manifest),"utf8");
  return {manifest,manifestDigest:hash("profitpilot.audit.manifest.v1\n",body),publicKeySha256:spkiDigest(key),
@@ -74,7 +74,7 @@ export function signAuditManifest(manifest,pem){
 export function verifyAuditCheckpoint(bundle,publicKey){
  if(!bundle||typeof bundle!=="object"||
  Object.keys(bundle).sort().join()!=="manifest,manifestDigest,publicKeySha256,signature")fail("bundle shape");
- const pub=createPublicKey(publicKey);
+ const pub=publicKey?.type==="public"?publicKey:createPublicKey(publicKey);
  if(pub.asymmetricKeyType!=="ed25519")fail("Ed25519 public key required");
  const manifest=validateManifest(bundle.manifest);
  if(bundle.publicKeySha256!==spkiDigest(pub))fail("signer key mismatch");

@@ -645,7 +645,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const privateAudit=await withTenant(tenantA,"ci-api-analyst",c=>c.query("SELECT id FROM audit_events WHERE object_type='privacy_request' AND object_id=$1",[privacyItem.item.id]));
     assert.equal(privateAudit.rowCount,0);
     const ownAudit=await withTenant(tenantA,"ci-api-reader",c=>c.query("SELECT id FROM audit_events WHERE object_type='privacy_request' AND object_id=$1",[privacyItem.item.id]));
-    assert.equal(ownAudit.rowCount,2);
+    assert.equal(ownAudit.rowCount,7,"two privacy decisions plus five operator evidence records");
     await admin.query("INSERT INTO privacy_requests(tenant_id,requester_id,client_request_id,request_type) SELECT $1,$2,gen_random_uuid(),'access' FROM generate_series(1,201)",[tenantA,userB]);
     const page1=await (await request(accessPath,{subject:"ci-api-reader"})).json();
     assert.equal(page1.privacyRequests.length,200);assert.equal(page1.additionalRequests,true);
