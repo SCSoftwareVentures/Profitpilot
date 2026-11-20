@@ -6,6 +6,7 @@ SP-S2 stores synthetic disputes and opaque evidence references in append-only, t
 
 Only active tenant owners, admins and reviewers with valid JWTs and database tenant context may use:
 - POST /v1/tenants/:tenantId/prototype/securepay-cases
+- GET /v1/tenants/:tenantId/prototype/securepay-cases (optional tenant-scoped cursor, 100 cases/page)
 - GET /v1/tenants/:tenantId/prototype/securepay-cases/:caseId
 - POST /v1/tenants/:tenantId/prototype/securepay-cases/:caseId/evidence
 - GET /v1/tenants/:tenantId/prototype/securepay-cases/:caseId/evidence (optional cursor, 100 items/page)
@@ -14,6 +15,8 @@ Case input must contain exactly: synthetic=true, clientRequestId (UUID), jobRefe
 Evidence input must contain exactly: clientRequestId (UUID), evidenceType and evidenceReference (opaque token).
 
 This is a restricted operator register, not an assertion that the named customer or tradesperson personally submitted anything. Evidence categories are reported claims or notes, not verified origin or trusted document custody. Direct money movement is impossible through these endpoints. The protected deployment profile denies the entire prototype namespace.
+
+The case-list cursor must exist in the same tenant, returns no cross-tenant rows, and does not assert verified party identity. Pagination uses descending creation timestamp and UUID ordering; it does not provide a tamper-proof evidence export.
 
 ## Safeguards
 
