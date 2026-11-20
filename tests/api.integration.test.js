@@ -37,7 +37,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
   process.env.AUTH_JWKS_URL=`http://127.0.0.1:${jwksAddress.port}/.well-known/jwks.json`;
   if(!process.env.TENANT_CONTEXT_HMAC_SECRET)throw new Error("CI tenant context signing key is required");
   const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL});
-  const [{default:app},{pool:appPool,withTenant}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);
+  const [{default:app,requestLimiter},{pool:appPool,withTenant}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);
   const api=createServer(app);
   await new Promise(resolve=>api.listen(0,"127.0.0.1",resolve));
   const apiAddress=api.address();
@@ -574,6 +574,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,'{}')",[tenantA,wrongId]);
     await assert.rejects(()=>admin.query("INSERT INTO import_source_receipts(tenant_id,batch_id,sha256,byte_count,row_count,parser_version,original_bytes,received_by) VALUES($1,$2,$3,$4,1,'strict-csv-0.1.0',$5,$6)",[tenantA,wrongId,"9".repeat(64),sourceBytes.length,sourceBytes,userA]),e=>e.code==="23514");
 
+    // Reset only the isolated integration process's limiter between test phases.
+    await requestLimiter.resetKey("127.0.0.1");
     const privacyPath=`/v1/tenants/${tenantA}/privacy-requests`;
     const privacyBody={clientRequestId:"99999999-9999-4999-8999-999999999999",requestType:"erasure"};
     const createPrivacy=()=>request(privacyPath,{subject:"ci-api-reader",method:"POST",body:privacyBody});
@@ -650,6 +652,13 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("UPDATE tenant_memberships SET status='revoked' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);
     const revoked=await request(`/v1/tenants/${tenantA}/contracts`,{subject:"ci-api-analyst"});
     assert.equal(revoked.status,403,"revoked memberships must lose access immediately");
+    // Exercise the real production-configured throttle with unauthenticated requests:
+    // no database or JWT work is necessary, and malformed JSON must not reach parsing.
+    await requestLimiter.resetKey("127.0.0.1");
+    const malformed=()=>fetch(base+"/v1/me",{method:"POST",headers:{"content-type":"application/json"},body:"{"});
+    for(let n=0;n<100;n++){const response=await malformed();assert.equal(response.status,401);await response.arrayBuffer();}
+    const throttled=await malformed();assert.equal(throttled.status,429);await throttled.arrayBuffer();
+    await requestLimiter.resetKey("127.0.0.1");
   }finally{
     await new Promise(resolve=>api.close(resolve));
     await admin.end();
