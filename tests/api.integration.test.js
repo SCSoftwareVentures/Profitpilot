@@ -312,6 +312,14 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(created.status,201);
     const createdBody=await created.json();
     await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type) VALUES($1,$2,'forged','fixture')",[tenantA,userB])),e=>e.code==="42501");
+    // An authenticated analyst must not forge action names, fabricate a source
+    // verification, or create audit entries for another tenant's objects.
+    const forgeAudit=(action,kind,id=createdBody.batch.id)=>withTenant(tenantA,"ci-api-analyst",
+      c=>c.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,metadata) VALUES($1,$2,$3,$4,$5,'{}')",[tenantA,userA,action,kind,id]));
+    await assert.rejects(()=>forgeAudit("fake_verified","import_batch"),e=>e.code==="23514");
+    await assert.rejects(()=>forgeAudit("source_file_verified","import_batch"),e=>e.code==="23514");
+    await assert.rejects(()=>forgeAudit("source_file_verified","fixture"),e=>e.code==="23514");
+    await assert.rejects(()=>forgeAudit("source_file_verified","import_batch",batchB),e=>e.code==="23514");
     await assert.rejects(()=>withTenant(tenantA,"ci-api-reader",c=>c.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,'{}')",[tenantA,createdBody.batch.id])),e=>e.code==="42501");
     const storedBatch=await admin.query("SELECT tenant_id FROM import_batches WHERE id=$1",[createdBody.batch.id]);
     assert.equal(storedBatch.rows[0].tenant_id,tenantA,"client-supplied tenant identifiers must not override the authenticated path tenant");
@@ -335,6 +343,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal((await post("/rows",{rows:[{...row1,site:{name:"CI unwanted nested data"}}]})).status,422);
     assert.equal((await admin.query("SELECT count(*)::int AS n FROM raw_import_rows WHERE batch_id=$1",[batchId])).rows[0].n,0);
     await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,$3)",[tenantA,batchId,JSON.stringify({...row1,employee_name:"CI forbidden field"})])),e=>e.code==="23514");
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,$3)",[tenantA,batchId,JSON.stringify({...row1,site:"CI\u202eprivate"})])),e=>e.code==="23514","direct SQL cannot bypass Unicode bidi privacy controls");
     const first=await post("/rows",{rows:[row1]});
     assert.equal(first.status,201);
     assert.equal((await first.json()).inserted,1);
@@ -609,6 +618,11 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(ownExport.privacyRequests[0].id,privacyItem.item.id);
     assert.equal((await request(accessPath,{subject:"ci-api-tenant-b-only"})).status,403);
     assert.equal((await (await request(accessPath,{subject:"ci-api-analyst"})).json()).privacyRequests.length,0);
+    // Metadata-rich operational audit events are not a tenant-wide read-only feed.
+    const readerAudit=await withTenant(tenantA,"ci-api-reader",c=>c.query("SELECT id FROM audit_events WHERE action='source_file_verified' AND object_id=$1",[sourceBatchId]));
+    assert.equal(readerAudit.rowCount,0,"read_only must not see others' ingestion metadata");
+    const actorAudit=await withTenant(tenantA,"ci-api-analyst",c=>c.query("SELECT id FROM audit_events WHERE action='source_file_verified' AND object_id=$1",[sourceBatchId]));
+    assert.equal(actorAudit.rowCount,1,"analyst may see their own upload audit event");
     const privateAudit=await withTenant(tenantA,"ci-api-analyst",c=>c.query("SELECT id FROM audit_events WHERE object_type='privacy_request' AND object_id=$1",[privacyItem.item.id]));
     assert.equal(privateAudit.rowCount,0);
     const ownAudit=await withTenant(tenantA,"ci-api-reader",c=>c.query("SELECT id FROM audit_events WHERE object_type='privacy_request' AND object_id=$1",[privacyItem.item.id]));

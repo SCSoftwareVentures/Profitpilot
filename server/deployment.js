@@ -16,10 +16,14 @@ export function readSecret(name,env=process.env){
  if(path){
   if(env[name])throw new Error("Ambiguous secret configuration: "+name);
   // Open once and check/read the same descriptor; path replacement cannot switch the file mid-check.
-  const fd=openSync(path,constants.O_RDONLY|constants.O_NONBLOCK);
+  // Never follow a final-component symlink, including in synthetic tests.
+  // In the protected profile require owner-only mounted-secret access.
+  const fd=openSync(path,constants.O_RDONLY|constants.O_NONBLOCK|constants.O_NOFOLLOW);
   try{
    const stat=fstatSync(fd);
    if(!stat.isFile()||stat.size<1||stat.size>8192)throw new Error("Invalid mounted secret: "+name);
+   if(deploymentProfile(env).protectedMode&&(stat.mode&0o077)!==0)
+    throw new Error("Protected mounted secret must have owner-only permissions: "+name);
    const bytes=Buffer.alloc(8193);let offset=0;
    while(offset<bytes.byteLength){
     const n=readSync(fd,bytes,offset,bytes.byteLength-offset,null);

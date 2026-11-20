@@ -24,3 +24,9 @@ Identity/membership: account administration, subject/role; no credentials in app
 5. Remediate, independently retest, restore verified recovery material and obtain explicit reopening approval.
 
 Independent security assessment, real IdP/TLS/storage/signature operation, complete cross-store privacy fulfilment, retention/processor register and qualified legal approval remain external blockers. G0–G6 unchanged.
+
+## S9 verification scope
+- Audit-event confidentiality: role- and actor-limited tenant audit SELECT, with requester access to own privacy-case reviews and tenant-independent negative tests.
+- Runtime audit integrity: event vocabulary/object-type/source-existence gate, cannot forge nonexistent source receipt; no independent tamper-resistant log certification.
+- Source privacy: runtime raw-row SQL rejects bidi controls and unsupported keys; HTTP minimisation remains.
+- Mounted secrets: protected owner-only file permissions; O_NOFOLLOW rejects symlink final components, requiring regular-file mounts. Operational secret manager compatibility must be tested by buyer.

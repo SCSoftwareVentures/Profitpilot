@@ -103,6 +103,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/017_invoice_confirmation_rehearsal.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/018_payroll_contract_rehearsal.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/019_privacy_audit_and_index.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/020_audit_privacy_least_privilege.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:
