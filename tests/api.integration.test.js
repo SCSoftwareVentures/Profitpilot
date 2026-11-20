@@ -159,6 +159,35 @@ test("authenticated API enforces tenant membership, role permissions and import 
       await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);
     }
 
+    // Synthetic identity preview must never approve or persist financial data.
+    const previewPath=`/v1/tenants/${tenantA}/prototype/invoice-identity-preview`;
+    const previewBody={synthetic:true,rows:[
+      {direction:"supplier",issuerKey:"A",invoiceReference:"001"},
+      {direction:"supplier",issuerKey:"A",invoiceReference:"001"},
+      {direction:"supplier",issuerKey:"B",invoiceReference:"001"},
+      {direction:"supplier",issuerKey:"",invoiceReference:"001"}
+    ]};
+    const snapshot=async()=> (await admin.query("SELECT (SELECT count(*) FROM invoices WHERE tenant_id=$1) AS invoices,(SELECT count(*) FROM mapping_decisions WHERE tenant_id=$1) AS mappings,(SELECT count(*) FROM match_reviews WHERE tenant_id=$1) AS matches",[tenantA])).rows[0];
+    const beforePreview=await snapshot();
+    const preview=await request(previewPath,{subject:"ci-api-analyst",method:"POST",body:previewBody});
+    assert.equal(preview.status,200);
+    assert.equal(preview.headers.get("cache-control"),"no-store");
+    const previewResult=await preview.json();
+    assert.equal(previewResult.automaticallyAccepted,0);
+    assert.equal(previewResult.issuerAuthenticated,false);
+    assert.deepEqual(previewResult.items.map(x=>x.status),["candidate","held","candidate","held"]);
+    for(const [subject,body,status] of [
+      [undefined,previewBody,401],
+      ["ci-api-reader",previewBody,403],
+      ["ci-api-tenant-b-only",previewBody,403],
+      ["ci-api-analyst",{...previewBody,synthetic:false},400],
+      ["ci-api-analyst",{synthetic:true,rows:[{...previewBody.rows[0],amount:100}]},400],
+      ["ci-api-analyst",{synthetic:true,rows:Array(201).fill(previewBody.rows[0])},400]
+    ]){
+      assert.equal((await request(previewPath,{subject,method:"POST",body})).status,status);
+    }
+    assert.deepEqual(await snapshot(),beforePreview,"preview must not persist financial or mapping records");
+
     const noToken=await request("/v1/me");
     assert.equal(noToken.status,401,"requests without a bearer token must be rejected");
 
