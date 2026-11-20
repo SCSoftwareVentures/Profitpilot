@@ -112,6 +112,14 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("UPDATE import_batches SET status='accepted' WHERE id=$1",[payrollBatchB]);
     await insertB("INSERT INTO payroll_contract_rehearsals(tenant_id,allocation_line_id,contract_id,reviewer_id,evidence_reference) VALUES($1,$2,$3,$4,'CI.B.attribution')",[tenantB,rehearsalLineB,contractB,userC]);
     await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantB,userC]);
+    // Every new tenant-owned table needs a populated tenant-B negative-control
+    // fixture. This restatement uses synthetic admin-only digests, never real finance.
+    const independentB="dddddddd-dddd-4ddd-8ddd-dddddddddddd";
+    await admin.query("INSERT INTO users(id,auth_subject,email,status) VALUES($1,'ci-api-restatement-reviewer','restatement@example.invalid','active') ON CONFLICT(id) DO UPDATE SET status='active'",[independentB]);
+    await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'admin','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role='admin',status='active'",[tenantB,independentB]);
+    const createRunB=async digest=>insertB("INSERT INTO calculation_runs(tenant_id,contract_id,site_id,period_start,period_end,formula_version,inputs,outputs,completeness,created_by) VALUES ($1,$2,$3,'2026-02-01','2026-02-28','0.2.0',$4,$4,'incomplete',$5)",[tenantB,contractB,siteB,JSON.stringify({evidenceSha256:digest}),userC]);
+    const oldB=await createRunB("a".repeat(64)),nextB=await createRunB("b".repeat(64));
+    await insertB("INSERT INTO calculation_restatements(tenant_id,prior_run_id,next_run_id,reviewed_by,reason_code,evidence_reference) VALUES($1,$2,$3,$4,'synthetic_changed_evidence','CI.fixture.restate')",[tenantB,oldB,nextB,independentB]);
     const fixturePrivacy=await insertB("INSERT INTO privacy_requests(tenant_id,requester_id,client_request_id,request_type) VALUES($1,$2,gen_random_uuid(),'access')",[tenantB,userC]);
     // Automatically include every current public tenant-owned table (plus tenants)
     // and require its fixture, forced RLS, and both positive and negative visibility.
