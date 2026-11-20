@@ -33,6 +33,11 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
    const r=await fetch("http://127.0.0.1:"+api.address().port+path,{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
    return {status:r.status,body:await r.json()};
   }
+  const fixture=await admin.query("SELECT t.status AS tenant_status,u.status AS user_status,m.status AS member_status,m.role FROM tenant_memberships m JOIN users u ON u.id=m.user_id JOIN tenants t ON t.id=m.tenant_id WHERE m.tenant_id=$1 AND u.auth_subject=$2",[a,"sp-s2-owner"]);
+  assert.equal(fixture.rows[0]?.role,"owner",JSON.stringify(fixture.rows));
+  const signed=await withTenant(a,"sp-s2-owner",c=>c.query("SELECT private.current_tenant_id()::text AS tenant,private.actor_role() AS role,private.actor_id()::text AS actor"));
+  assert.equal(signed.rows[0]?.tenant,a,JSON.stringify(signed.rows));
+  assert.equal(signed.rows[0]?.role,"owner",JSON.stringify(signed.rows));
   const rootA="/v1/tenants/"+a+"/prototype/securepay-cases",rootB="/v1/tenants/"+b+"/prototype/securepay-cases";
   const payload={synthetic:true,clientRequestId:randomUUID(),jobReference:"job.sp-001",claimReference:"claim.sp-001"};
   assert.equal((await request(rootA,{method:"POST",body:payload})).status,401);
