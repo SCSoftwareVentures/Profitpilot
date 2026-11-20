@@ -4,12 +4,14 @@
   "private": true,
   "type": "module",
   "description": "ProfitPilot contract economics API prototype",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "test": "node --test",
-    "check": "node --check server/index.js && node --check server/auth.js && node --check server/db.js && node --check src/engine.js && node --check server/source-file.js && node --check src/invoice-identity.js && node --check tests/invoice-identity-prototype.test.js && node --check tests/api.integration.test.js"
+    "check": "node --check server/index.js && node --check server/auth.js && node --check server/db.js && node --check src/engine.js && node --check server/source-file.js && node --check src/invoice-identity.js && node --check tests/invoice-identity-prototype.test.js && node --check tests/api.integration.test.js && node --check tests/specification.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

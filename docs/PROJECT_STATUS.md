@@ -68,3 +68,7 @@ This repository is public at the time this status file was written. Never commit
 ## Synthetic invoice identity rehearsal
 
 The tenant-authorized synthetic preview is non-persistent and unauthenticated as to issuer identity. The conflict-classifier update holds every member of exact and alias conflicts without first-row preference. New unit/API regression tests require CI confirmation. Cross-batch database canonical identity enforcement and representative authorized source-owner validation remain outstanding.
+
+## A1 architecture and specification baseline
+
+Detailed internal design package and requirement catalogue added at [specification/README.md](specification/README.md). Design coverage is distinct from verified feature implementation and external approval. CI #2964 passed at 93acd20; new specification catalogue tests require current CI confirmation.

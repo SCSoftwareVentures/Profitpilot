@@ -71,3 +71,7 @@ The API and database are implementation scaffolds, not a deployed service. Revie
 - [Landing-page concept](index.html) — static presentation concept.
 
 These prototypes are for design review only. They are not a deployed product or evidence of implemented business workflows.
+
+## Architecture specification baseline A1
+
+[Complete internal design package and requirement catalogue](docs/specification/README.md) — target design, not a completed application or production approval.

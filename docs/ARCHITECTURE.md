@@ -175,3 +175,7 @@ Set measurable service objectives before launch:
 - data export and deletion completion time.
 
 These are requirements to engineer and test, not current capabilities.
+
+## A1 detailed specification
+
+See [Architecture and specification baseline A1](specification/README.md) for detailed target topology, decision records, interfaces, SecurePay design, acceptance and handover. Earlier gates and safety boundaries remain binding.

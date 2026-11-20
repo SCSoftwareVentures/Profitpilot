@@ -1,0 +1,462 @@
+{
+  "baseline": "A1",
+  "date": "2026-11-20",
+  "scope": "Transferable synthetic prototype design; no production or G5 approval",
+  "requirements": [
+    {
+      "id": "SD-01",
+      "title": "Runtime topology",
+      "phase": "A",
+      "document": "docs/specification/SYSTEM_DESIGN.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "Synthetic data only"
+      ],
+      "verification": "Design review",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "SD-02",
+      "title": "Bounded contexts",
+      "phase": "A",
+      "document": "docs/specification/SYSTEM_DESIGN.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "Synthetic data only"
+      ],
+      "verification": "Design review",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "SD-03",
+      "title": "Architecture decisions",
+      "phase": "A",
+      "document": "docs/specification/SYSTEM_DESIGN.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "Synthetic data only"
+      ],
+      "verification": "Design review",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "SD-04",
+      "title": "Deployment and change boundaries",
+      "phase": "A",
+      "document": "docs/specification/SYSTEM_DESIGN.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "Synthetic data only"
+      ],
+      "verification": "Design review",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "FR-01",
+      "title": "Identity and membership",
+      "phase": "B",
+      "document": "docs/specification/FUNCTIONAL_REQUIREMENTS.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "G0–G5 for live customer use"
+      ],
+      "verification": "Workflow and negative-path tests",
+      "currentEvidence": "partial-prototype"
+    },
+    {
+      "id": "FR-02",
+      "title": "Master data",
+      "phase": "B",
+      "document": "docs/specification/FUNCTIONAL_REQUIREMENTS.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "G0–G5 for live customer use"
+      ],
+      "verification": "Workflow and negative-path tests",
+      "currentEvidence": "partial-prototype"
+    },
+    {
+      "id": "FR-03",
+      "title": "Import and evidence",
+      "phase": "B",
+      "document": "docs/specification/FUNCTIONAL_REQUIREMENTS.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "G0–G5 for live customer use"
+      ],
+      "verification": "Workflow and negative-path tests",
+      "currentEvidence": "partial-prototype"
+    },
+    {
+      "id": "FR-04",
+      "title": "Payroll and costs",
+      "phase": "B",
+      "document": "docs/specification/FUNCTIONAL_REQUIREMENTS.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "G0–G5 for live customer use"
+      ],
+      "verification": "Workflow and negative-path tests",
+      "currentEvidence": "partial-prototype"
+    },
+    {
+      "id": "FR-05",
+      "title": "Invoice identity and matching",
+      "phase": "B",
+      "document": "docs/specification/FUNCTIONAL_REQUIREMENTS.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "G0–G5 for live customer use"
+      ],
+      "verification": "Workflow and negative-path tests",
+      "currentEvidence": "partial-prototype"
+    },
+    {
+      "id": "FR-06",
+      "title": "Variations",
+      "phase": "B",
+      "document": "docs/specification/FUNCTIONAL_REQUIREMENTS.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "G0–G5 for live customer use"
+      ],
+      "verification": "Workflow and negative-path tests",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "FR-07",
+      "title": "Reports and restatement",
+      "phase": "B",
+      "document": "docs/specification/FUNCTIONAL_REQUIREMENTS.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "G0–G5 for live customer use"
+      ],
+      "verification": "Workflow and negative-path tests",
+      "currentEvidence": "partial-prototype"
+    },
+    {
+      "id": "FR-08",
+      "title": "Exceptions",
+      "phase": "B",
+      "document": "docs/specification/FUNCTIONAL_REQUIREMENTS.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "G0–G5 for live customer use"
+      ],
+      "verification": "Workflow and negative-path tests",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "FR-09",
+      "title": "Quote and job",
+      "phase": "C",
+      "document": "docs/specification/FUNCTIONAL_REQUIREMENTS.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "G5",
+        "transaction-domain validation"
+      ],
+      "verification": "Workflow and negative-path tests",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "FR-10",
+      "title": "Evidence and completion",
+      "phase": "C",
+      "document": "docs/specification/FUNCTIONAL_REQUIREMENTS.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "G5",
+        "transaction-domain validation"
+      ],
+      "verification": "Workflow and negative-path tests",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "FR-11",
+      "title": "Dispute and rectification",
+      "phase": "C",
+      "document": "docs/specification/FUNCTIONAL_REQUIREMENTS.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "G5",
+        "transaction-domain validation"
+      ],
+      "verification": "Workflow and negative-path tests",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "FR-12",
+      "title": "SecurePay",
+      "phase": "D",
+      "document": "docs/specification/FUNCTIONAL_REQUIREMENTS.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "G5",
+        "legal/provider approval"
+      ],
+      "verification": "Workflow and negative-path tests",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "FR-13",
+      "title": "Reviews and aftercare",
+      "phase": "C",
+      "document": "docs/specification/FUNCTIONAL_REQUIREMENTS.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "G5",
+        "transaction-domain validation"
+      ],
+      "verification": "Workflow and negative-path tests",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "FR-14",
+      "title": "Notification and support",
+      "phase": "C",
+      "document": "docs/specification/FUNCTIONAL_REQUIREMENTS.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "G5",
+        "transaction-domain validation"
+      ],
+      "verification": "Workflow and negative-path tests",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "FR-15",
+      "title": "Integration adapters",
+      "phase": "B",
+      "document": "docs/specification/FUNCTIONAL_REQUIREMENTS.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "G0–G5 for live customer use"
+      ],
+      "verification": "Workflow and negative-path tests",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "DI-01",
+      "title": "Common data contract",
+      "phase": "A",
+      "document": "docs/specification/DATA_AND_INTERFACES.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "Synthetic data only"
+      ],
+      "verification": "Schema, API and invariant review",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "DI-02",
+      "title": "Entity keys and associations",
+      "phase": "A",
+      "document": "docs/specification/DATA_AND_INTERFACES.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "Synthetic data only"
+      ],
+      "verification": "Schema, API and invariant review",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "DI-03",
+      "title": "State machines",
+      "phase": "A",
+      "document": "docs/specification/DATA_AND_INTERFACES.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "Synthetic data only"
+      ],
+      "verification": "Schema, API and invariant review",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "DI-04",
+      "title": "Proposed API contracts",
+      "phase": "A",
+      "document": "docs/specification/DATA_AND_INTERFACES.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "Synthetic data only"
+      ],
+      "verification": "Schema, API and invariant review",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "DI-05",
+      "title": "Calculation and reporting",
+      "phase": "A",
+      "document": "docs/specification/DATA_AND_INTERFACES.md",
+      "ownerRole": "Technical and product owner",
+      "dependencies": [
+        "Synthetic data only"
+      ],
+      "verification": "Schema, API and invariant review",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "SP-01",
+      "title": "Agreement and transaction",
+      "phase": "D",
+      "document": "docs/specification/SECUREPAY.md",
+      "ownerRole": "Product and independent reviewer; legal/provider for money",
+      "dependencies": [
+        "G5",
+        "legal/provider approval"
+      ],
+      "verification": "Simulator scenarios and external approvals",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "SP-02",
+      "title": "Severity and response targets",
+      "phase": "D",
+      "document": "docs/specification/SECUREPAY.md",
+      "ownerRole": "Product and independent reviewer; legal/provider for money",
+      "dependencies": [
+        "G5",
+        "legal/provider approval"
+      ],
+      "verification": "Simulator scenarios and external approvals",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "SP-03",
+      "title": "Dispute procedure",
+      "phase": "D",
+      "document": "docs/specification/SECUREPAY.md",
+      "ownerRole": "Product and independent reviewer; legal/provider for money",
+      "dependencies": [
+        "G5",
+        "legal/provider approval"
+      ],
+      "verification": "Simulator scenarios and external approvals",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "SP-04",
+      "title": "Provider and ledger",
+      "phase": "D",
+      "document": "docs/specification/SECUREPAY.md",
+      "ownerRole": "Product and independent reviewer; legal/provider for money",
+      "dependencies": [
+        "G5",
+        "legal/provider approval"
+      ],
+      "verification": "Simulator scenarios and external approvals",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "SP-05",
+      "title": "Verification and gate",
+      "phase": "D",
+      "document": "docs/specification/SECUREPAY.md",
+      "ownerRole": "Product and independent reviewer; legal/provider for money",
+      "dependencies": [
+        "G5",
+        "legal/provider approval"
+      ],
+      "verification": "Simulator scenarios and external approvals",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "QO-01",
+      "title": "Security and privacy",
+      "phase": "B",
+      "document": "docs/specification/QUALITY_AND_OPERATIONS.md",
+      "ownerRole": "Security and operations owner",
+      "dependencies": [
+        "G0–G5 for live customer use"
+      ],
+      "verification": "Security, performance and operations evidence",
+      "currentEvidence": "partial-prototype"
+    },
+    {
+      "id": "QO-02",
+      "title": "Engineering targets",
+      "phase": "B",
+      "document": "docs/specification/QUALITY_AND_OPERATIONS.md",
+      "ownerRole": "Security and operations owner",
+      "dependencies": [
+        "G0–G5 for live customer use"
+      ],
+      "verification": "Security, performance and operations evidence",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "QO-03",
+      "title": "Operations and incident",
+      "phase": "B",
+      "document": "docs/specification/QUALITY_AND_OPERATIONS.md",
+      "ownerRole": "Security and operations owner",
+      "dependencies": [
+        "G0–G5 for live customer use"
+      ],
+      "verification": "Security, performance and operations evidence",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "QO-04",
+      "title": "External proof",
+      "phase": "B",
+      "document": "docs/specification/QUALITY_AND_OPERATIONS.md",
+      "ownerRole": "Security and operations owner",
+      "dependencies": [
+        "G0–G5 for live customer use"
+      ],
+      "verification": "Security, performance and operations evidence",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "AH-01",
+      "title": "Evidence and release controls",
+      "phase": "A",
+      "document": "docs/specification/ACCEPTANCE_AND_HANDOVER.md",
+      "ownerRole": "Acquisition and technical owner",
+      "dependencies": [
+        "Synthetic data only"
+      ],
+      "verification": "Handover acceptance review",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "AH-02",
+      "title": "Acceptance traceability",
+      "phase": "A",
+      "document": "docs/specification/ACCEPTANCE_AND_HANDOVER.md",
+      "ownerRole": "Acquisition and technical owner",
+      "dependencies": [
+        "Synthetic data only"
+      ],
+      "verification": "Handover acceptance review",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "AH-03",
+      "title": "Buyer deliverables",
+      "phase": "A",
+      "document": "docs/specification/ACCEPTANCE_AND_HANDOVER.md",
+      "ownerRole": "Acquisition and technical owner",
+      "dependencies": [
+        "Synthetic data only"
+      ],
+      "verification": "Handover acceptance review",
+      "currentEvidence": "design-only"
+    },
+    {
+      "id": "AH-04",
+      "title": "Release checklist",
+      "phase": "A",
+      "document": "docs/specification/ACCEPTANCE_AND_HANDOVER.md",
+      "ownerRole": "Acquisition and technical owner",
+      "dependencies": [
+        "Synthetic data only"
+      ],
+      "verification": "Handover acceptance review",
+      "currentEvidence": "design-only"
+    }
+  ]
+}
