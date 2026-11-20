@@ -455,7 +455,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const revised=await calculate();assert.equal(revised.status,201);
     const revisedBody=await revised.json();assert.equal(revisedBody.outputs.exact.revenue,"115.00");
     assert.equal(revisedBody.outputs.exact.contribution,"65.00");
-    const restUrl=/v1/tenants/${tenantA}/prototype/calculation-restatements;
+    const restUrl=`/v1/tenants/${tenantA}/prototype/calculation-restatements`;
     const restBody={synthetic:true,priorRunId:validRunBody.id,nextRunId:revisedBody.id,reasonCode:"new_verified_invoice_source",evidenceReference:"CI.restate.001"};
     const restate=(subject,body=restBody)=>request(restUrl,{subject,method:"POST",body});
     assert.equal((await restate("ci-api-analyst")).status,403,"creator may not self-approve a restatement");
