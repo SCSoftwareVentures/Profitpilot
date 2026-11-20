@@ -42,6 +42,32 @@ app.post("/v1/tenants/:tenantId/prototype/invoice-identity-preview",membership,r
  res.set("Cache-Control","no-store");
  res.json({synthetic:true,issuerAuthenticated:false,automaticallyAccepted:0,items});
 });
+
+const privacyColumns="id,request_type,status,created_at,reviewed_at,review_reference";
+app.get("/v1/tenants/:tenantId/privacy-requests",membership,async(req,res,next)=>{try{
+ const rows=await withTenant(req.membership.tenantId,req.identity.subject,c=>c.query("SELECT "+privacyColumns+" FROM privacy_requests WHERE tenant_id=$1 ORDER BY created_at DESC,id DESC LIMIT 200",[req.membership.tenantId]));
+ res.json({items:rows.rows,limit:200,scope:"Own requests or authorised tenant administration; case tracking only"});
+}catch(e){next(e);}});
+app.post("/v1/tenants/:tenantId/privacy-requests",membership,async(req,res,next)=>{try{
+ const body=req.body||{}, {clientRequestId,requestType}=body;
+ if(Object.keys(body).some(k=>!["clientRequestId","requestType"].includes(k))||!isUuid(clientRequestId)||!["access","correction","erasure","restriction"].includes(requestType))return res.status(400).json({error:"Request type and client request UUID required; do not submit personal details"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
+  const args=[req.membership.tenantId,clientRequestId,requestType];
+  const inserted=await c.query("INSERT INTO privacy_requests(tenant_id,requester_id,client_request_id,request_type) VALUES($1,private.actor_id(),$2,$3) ON CONFLICT DO NOTHING RETURNING "+privacyColumns,args);
+  if(inserted.rowCount)return {status:201,item:inserted.rows[0]};
+  const existing=await c.query("SELECT "+privacyColumns+" FROM privacy_requests WHERE tenant_id=$1 AND requester_id=private.actor_id() AND client_request_id=$2 AND request_type=$3",args);
+  return existing.rowCount?{status:200,item:existing.rows[0]}:{status:409,error:"Conflicting privacy request identifier"};
+ });
+ const {status,...bodyOut}=result;res.status(status).json({...bodyOut,automatedErasure:false});
+}catch(e){next(e);}});
+app.post("/v1/tenants/:tenantId/privacy-requests/:requestId/review",membership,requireRole("owner","admin"),async(req,res,next)=>{try{
+ const body=req.body||{}, {status:decision,reviewReference}=body;
+ if(!isUuid(req.params.requestId)||Object.keys(body).some(k=>!["status","reviewReference"].includes(k))||!["reviewing","closed_attested","declined"].includes(decision)||typeof reviewReference!=="string"||!/^[A-Za-z0-9][A-Za-z0-9._:-]{2,119}$/.test(reviewReference))return res.status(400).json({error:"Valid review status and opaque case reference required"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,c=>c.query("UPDATE privacy_requests SET status=$1,reviewed_by=private.actor_id(),reviewed_at=now(),review_reference=$2 WHERE tenant_id=$3 AND id=$4 AND requester_id<>private.actor_id() AND ((status='requested' AND $1='reviewing') OR (status='reviewing' AND $1 IN ('closed_attested','declined'))) RETURNING "+privacyColumns,[decision,reviewReference,req.membership.tenantId,req.params.requestId]));
+ if(!result.rowCount)return res.status(409).json({error:"Request unavailable, self-review prohibited or invalid transition"});
+ res.json({item:result.rows[0],automatedErasure:false,externalFulfilmentVerified:false});
+}catch(e){next(e);}});
+
 app.get("/v1/me",async(req,res)=>{res.json({subject:req.identity.subject,email:req.identity.email,membershipsEndpoint:"Membership discovery is not exposed until a separately reviewed security-definer function is installed."});});
 app.get("/v1/tenants/:tenantId/contracts",membership,async(req,res,next)=>{try{const rows=await withTenant(req.membership.tenantId,req.identity.subject,async c=>(await c.query("SELECT id,customer_name,status FROM contracts WHERE tenant_id=$1 ORDER BY customer_name",[req.membership.tenantId])).rows);res.json({items:rows});}catch(e){next(e);}});
 app.post("/v1/tenants/:tenantId/imports",membership,requireRole("owner","admin","analyst"),async(req,res,next)=>{

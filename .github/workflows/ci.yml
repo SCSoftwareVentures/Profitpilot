@@ -33,6 +33,8 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Capture generated dependency lock for repository adoption
+        run: node -e 'const s=require("fs").readFileSync("package-lock.json","utf8");for(let i=0;i<s.length;i+=600)console.log("PPLOCK:"+JSON.stringify(s.slice(i,i+600)))'
       - name: Dependency vulnerability audit (high and critical gate)
         run: npm audit --omit=dev --audit-level=high
 
@@ -89,6 +91,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/011_source_file_receipts.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/012_invoice_identity_claims.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/013_runtime_actor_policies.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/014_privacy_requests.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:
@@ -121,7 +124,7 @@ jobs:
           docker exec -e PGPASSWORD="$PGPASSWORD" "$PG_CONTAINER" pg_dump -h 127.0.0.1 -U profitpilot_admin -d profitpilot --format=custom > "$DUMP"
           createdb -h localhost -U profitpilot_admin profitpilot_restore
           docker exec -i -e PGPASSWORD="$PGPASSWORD" "$PG_CONTAINER" pg_restore -h 127.0.0.1 -U profitpilot_admin -d profitpilot_restore --exit-on-error < "$DUMP"
-          QUERY="SELECT (SELECT count(*) FROM tenants),(SELECT count(*) FROM raw_import_rows),(SELECT count(*) FROM audit_events),(SELECT count(*) FROM invoice_identity_claims),(SELECT count(*) FROM calculation_runs),(SELECT count(*) FROM import_source_receipts WHERE sha256=encode(public.digest(original_bytes,'sha256'),'hex'));"
+          QUERY="SELECT (SELECT count(*) FROM tenants),(SELECT count(*) FROM raw_import_rows),(SELECT count(*) FROM audit_events),(SELECT count(*) FROM invoice_identity_claims),(SELECT count(*) FROM calculation_runs),(SELECT count(*) FROM privacy_requests),(SELECT count(*) FROM import_source_receipts WHERE sha256=encode(public.digest(original_bytes,'sha256'),'hex'));"
           test "$(psql "$ADMIN_URL" -At -c "$QUERY")" = "$(psql "$RESTORE_URL" -At -c "$QUERY")"
           RESTORED_APP="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot_restore"
           test "$(psql "$RESTORED_APP" -At -c 'SELECT count(*) FROM tenants;')" = "0"

@@ -26,6 +26,7 @@ services:
       - ./database/migrations/011_source_file_receipts.sql:/docker-entrypoint-initdb.d/013-source-file-receipts.sql:ro
       - ./database/migrations/012_invoice_identity_claims.sql:/docker-entrypoint-initdb.d/014-invoice-identity-claims.sql:ro
       - ./database/migrations/013_runtime_actor_policies.sql:/docker-entrypoint-initdb.d/015-runtime-actor-policies.sql:ro
+      - ./database/migrations/014_privacy_requests.sql:/docker-entrypoint-initdb.d/016-privacy-requests.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s

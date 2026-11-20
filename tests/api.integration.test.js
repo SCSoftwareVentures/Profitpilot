@@ -95,6 +95,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("UPDATE import_batches SET status='review' WHERE id=$1",[verifiedB]);
     const claimB=await insertB("INSERT INTO invoice_identity_claims(tenant_id,raw_row_id,direction,issuer_key,invoice_reference,source_integrity,reviewer_id,evidence_reference,reason) VALUES($1,$2,'customer','ci.issuer-a','CI-B','byte_verified',$3,'CI fixture','CI reviewed fixture')",[tenantB,verifiedRawB,userC]);
 
+    const fixturePrivacy=await insertB("INSERT INTO privacy_requests(tenant_id,requester_id,client_request_id,request_type) VALUES($1,$2,gen_random_uuid(),'access')",[tenantB,userC]);
     // Automatically include every current public tenant-owned table (plus tenants)
     // and require its fixture, forced RLS, and both positive and negative visibility.
     const catalog=await admin.query("SELECT c.relname AS name,c.relrowsecurity AS rls,c.relforcerowsecurity AS forced FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND (c.relname='tenants' OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attname='tenant_id' AND NOT a.attisdropped)) ORDER BY c.relname");
@@ -501,6 +502,30 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,'{}')",[tenantA,wrongId]);
     await assert.rejects(()=>admin.query("INSERT INTO import_source_receipts(tenant_id,batch_id,sha256,byte_count,row_count,parser_version,original_bytes,received_by) VALUES($1,$2,$3,$4,1,'strict-csv-0.1.0',$5,$6)",[tenantA,wrongId,"9".repeat(64),sourceBytes.length,sourceBytes,userA]),e=>e.code==="23514");
 
+    const privacyPath=`/v1/tenants/${tenantA}/privacy-requests`;
+    const privacyBody={clientRequestId:"99999999-9999-4999-8999-999999999999",requestType:"erasure"};
+    const createPrivacy=()=>request(privacyPath,{subject:"ci-api-reader",method:"POST",body:privacyBody});
+    const privacyCreated=await createPrivacy();assert.equal(privacyCreated.status,201);
+    const privacyItem=await privacyCreated.json();assert.equal(privacyItem.automatedErasure,false);
+    assert.equal((await createPrivacy()).status,200);
+    assert.equal((await request(privacyPath,{subject:"ci-api-reader",method:"POST",body:{...privacyBody,requestType:"access"}})).status,409);
+    assert.equal((await request(privacyPath,{subject:"ci-api-reader",method:"POST",body:{...privacyBody,details:"unnecessary"}})).status,400);
+    assert.equal((await (await request(privacyPath,{subject:"ci-api-analyst"})).json()).items.length,0);
+    assert.equal((await (await request(privacyPath,{subject:"ci-api-reader"})).json()).items[0].id,privacyItem.item.id);
+    const reviewPath=privacyPath+"/"+privacyItem.item.id+"/review";
+    const privacyReview=(status,reviewReference="CI.case.1")=>request(reviewPath,{subject:"ci-api-analyst",method:"POST",body:{status,reviewReference}});
+    assert.equal((await privacyReview("reviewing")).status,403);
+    await admin.query("UPDATE tenant_memberships SET role='admin' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);
+    try{
+      assert.equal((await privacyReview("closed_attested")).status,409);
+      assert.equal((await privacyReview("reviewing")).status,200);
+      const closed=await privacyReview("closed_attested");assert.equal(closed.status,200);
+      assert.equal((await closed.json()).externalFulfilmentVerified,false);
+      assert.equal((await privacyReview("reviewing")).status,409);
+      assert.equal((await admin.query("SELECT count(*)::int AS n FROM audit_events WHERE tenant_id=$1 AND object_id=$2 AND action='privacy_request_review'",[tenantA,privacyItem.item.id])).rows[0].n,2);
+      const foreign=await request(privacyPath+"/"+fixturePrivacy+"/review",{subject:"ci-api-analyst",method:"POST",body:{status:"reviewing",reviewReference:"CI.case.2"}});assert.equal(foreign.status,409);
+    }finally{await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);}
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-reader",c=>c.query("DELETE FROM privacy_requests")),e=>e.code==="42501");
     const readerWrite=await request(`/v1/tenants/${tenantA}/imports`,{
       subject:"ci-api-reader",method:"POST",
       body:{...importBody,sha256:"c".repeat(64)}

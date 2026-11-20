@@ -15,6 +15,54 @@ paths:
       responses:
         "200": { description: Verified identity only; membership discovery requires a separately reviewed endpoint. }
         "401": { description: Unauthenticated }
+  /tenants/{tenantId}/privacy-requests:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      summary: List permitted privacy cases for the current member or tenant administrator
+      responses:
+        "200": { description: Bounded case metadata }
+    post:
+      summary: Record a self-service privacy request without personal details
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [clientRequestId, requestType]
+              properties:
+                clientRequestId: { type: string, format: uuid }
+                requestType: { type: string, enum: [access, correction, erasure, restriction] }
+      responses:
+        "201": { description: Request recorded }
+        "200": { description: Identical replay }
+        "409": { description: Conflicting identifier }
+  /tenants/{tenantId}/privacy-requests/{requestId}/review:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: requestId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Record independent administrator review, not automated fulfilment
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [status, reviewReference]
+              properties:
+                status: { type: string, enum: [reviewing, closed_attested, declined] }
+                reviewReference: { type: string, minLength: 3, maxLength: 120 }
+      responses:
+        "200": { description: Review recorded; external fulfilment unverified }
+        "403": { description: Admin role required }
+        "409": { description: Invalid transition, self-review or unavailable case }
   /tenants/{tenantId}/contracts:
     parameters:
       - $ref: '#/components/parameters/TenantId'
