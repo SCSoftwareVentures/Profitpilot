@@ -28,10 +28,17 @@ export function parseCsv(text) {
   });
 }
 export function validateInvoiceRows(rows){
+  const counts=new Map();
+  for(const r of rows){
+    const id=typeof r.invoice_id==="string"?r.invoice_id.trim():"";
+    if(id)counts.set(id,(counts.get(id)||0)+1);
+  }
   return rows.map((r,i)=>{
     const amount=Number(r.amount);
     const errors=[];
-    if(!r.invoice_id)errors.push("Missing invoice_id");
+    const id=typeof r.invoice_id==="string"?r.invoice_id.trim():"";
+    if(!id)errors.push("Missing invoice_id");
+    else if(counts.get(id)>1)errors.push("Repeated invoice reference in batch; issuer and duplicate review required");
     if(!r.site)errors.push("Missing site");
     if(!isIsoDate(r.date))errors.push("Invalid date (expected a real YYYY-MM-DD date)");
     if(!r.amount||!Number.isFinite(amount)||amount<=0)errors.push("Amount must be greater than zero");
