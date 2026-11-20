@@ -25,6 +25,21 @@ export function installSecurepayStorageRoutes(app,{membership,withTenant,require
   });
   const {status,...body}=output;res.status(status).json({...body,paymentAuthority:false,partyIdentityVerified:false});
  }catch(e){next(e);}});
+ app.get(root,...guarded,async(req,res,next)=>{try{
+  const cursor=req.query.cursor??null;
+  if(cursor!==null&&!uuid(cursor))return res.status(400).json({error:"Invalid case cursor ID"});
+  const tenant=req.membership.tenantId;
+  const output=await withTenant(tenant,req.identity.subject,async c=>{
+   if(cursor!==null){
+    const anchor=await c.query("SELECT id FROM securepay_case_rehearsals WHERE tenant_id=$1 AND id=$2",[tenant,cursor]);
+    if(!anchor.rowCount)return {status:404,error:"Case cursor unavailable"};
+   }
+   const page=await c.query("SELECT "+caseCols+" FROM securepay_case_rehearsals WHERE tenant_id=$1 AND ($2::uuid IS NULL OR (created_at,id)<(SELECT created_at,id FROM securepay_case_rehearsals WHERE tenant_id=$1 AND id=$2)) ORDER BY created_at DESC,id DESC LIMIT 101",[tenant,cursor]);
+   const items=page.rows.slice(0,100);
+   return {status:200,items,hasMore:page.rowCount>100,nextCursor:page.rowCount>100?items.at(-1).id:null};
+  },{repeatableRead:true});
+  const {status,...body}=output;res.status(status).json({...body,synthetic:true,paymentAuthority:false,partyIdentityVerified:false});
+ }catch(e){next(e);}});
  app.get(root+"/:caseId",...guarded,async(req,res,next)=>{try{
   if(!uuid(req.params.caseId))return res.status(400).json({error:"Invalid case ID"});
   const tenant=req.membership.tenantId;
