@@ -38,7 +38,8 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   assert.equal((await request(rootA,{method:"POST",body:payload})).status,401);
   assert.equal((await request(rootA,{subject:"sp-s2-reader",method:"POST",body:payload})).status,403);
   assert.equal((await request(rootA,{subject:"sp-s2-foreign",method:"POST",body:payload})).status,403);
-  assert.equal((await request(rootA,{subject:"sp-s2-owner",method:"POST",body:{...payload,fundsMoved:true}})).status,400);
+  const unexpectedField=await request(rootA,{subject:"sp-s2-owner",method:"POST",body:{...payload,fundsMoved:true}});
+  assert.equal(unexpectedField.status,400,JSON.stringify(unexpectedField));
   const opened=await request(rootA,{subject:"sp-s2-owner",method:"POST",body:payload});
   assert.equal(opened.status,201);assert.equal(opened.body.item.funds_moved,false);assert.equal(opened.body.item.synthetic,true);
   const caseId=opened.body.item.id;
