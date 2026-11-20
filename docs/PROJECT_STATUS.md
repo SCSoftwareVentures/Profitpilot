@@ -111,3 +111,6 @@ CI #2984 at edba06a completed 5/5 jobs, both Grype images reported zero findings
 
 ## F2 synthetic canonical invoice rehearsal
 CI #2987 passed all five jobs for formula 0.2.0. Migration 017 adds a default-off, administrator-provisioned synthetic confirmation registry with source-derived exact amounts, reviewed identity/contract/site/basis, immutable rows and transactional audit. A separate exact supplier/subcontractor invoice-cost bridge demonstrates attribution without touching the active calculation ledger or weakening invoice uniqueness. Real invoice promotion, source-owner semantics, credits/multi-line handling and payroll integration remain blocked. CI pending.
+
+## F3 unified contribution rehearsal
+CI #2988 passed all five jobs for F2. Migration 018 adds explicit whole-line contract payroll attribution with unique source allocation, source-derived financial amounts, reviewer audit and approved contract/site/version checks. Read-only exact unified contribution combines reviewed revenue, supplier/subcontractor and attributed labour, rejecting unresolved v2 payroll and inconsistent periods/versions. Legacy payroll is excluded visibly. No production ledger changes or activation. New CI pending.

@@ -14,7 +14,7 @@ import {authRequired,requireRole} from "./auth.js";
 import {validateInvoiceRows,validatePayrollRows,reconcilePayroll,isIsoDate} from "../src/engine.js";
 
 import {classifyInvoiceIdentity} from "../src/invoice-identity.js";
-import {FORMULA_VERSION,MAX_EVIDENCE_LINES,contributionTotals,snapshotDigest,invoiceCostBridge} from "../src/financial-calculation.js";
+import {FORMULA_VERSION,MAX_EVIDENCE_LINES,contributionTotals,snapshotDigest,invoiceCostBridge,unifiedRehearsalContribution} from "../src/financial-calculation.js";
 
 const MAX_IMPORT_ROWS=2000;
 const isUuid=value=>typeof value==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -359,6 +359,49 @@ app.post("/v1/tenants/:tenantId/prototype/invoice-cost-bridge",membership,requir
   return {status:200,bridge,evidenceSha256:snapshotDigest(snapshot),evidence:snapshot};
  },{repeatableRead:true});
  const {status,...out}=result;res.status(status).json({...out,synthetic:true,issuerAuthenticated:false,financialInclusionAuthorized:false});
+}catch(e){next(e);}});
+
+
+const payrollRehearsalColumns="id,allocation_line_id,contract_id,contract_version_no,site_id,reviewer_id,evidence_reference,allocation_run_id,payroll_pool_id,source_record_id,raw_row_id,batch_id,source_sha256,service_start::text,service_end::text,currency,bucket_type,amount::text";
+app.post("/v1/tenants/:tenantId/prototype/payroll-attributions",membership,requireRole("owner","admin","reviewer"),async(req,res,next)=>{try{
+ const body=req.body||{}, {synthetic,allocationLineId,contractId,evidenceReference}=body;
+ if(profile.mode!=="prototype")return res.status(403).json({error:"Synthetic rehearsal unavailable in protected profile"});
+ if(synthetic!==true||Object.keys(body).some(k=>!["synthetic","allocationLineId","contractId","evidenceReference"].includes(k))||!isUuid(allocationLineId)||!isUuid(contractId)||typeof evidenceReference!=="string"||!/^[A-Za-z0-9][A-Za-z0-9._:-]{2,119}$/.test(evidenceReference))return res.status(400).json({error:"Explicit synthetic whole-line attribution and evidence reference required"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
+  const tenant=req.membership.tenantId;
+  const enabled=await c.query("SELECT id FROM tenants WHERE id=$1 AND invoice_rehearsal_enabled",[tenant]);
+  if(!enabled.rowCount)return {status:403,error:"Synthetic rehearsal tenant not provisioned"};
+  const args=[tenant,allocationLineId,contractId,evidenceReference];
+  const inserted=await c.query("INSERT INTO payroll_contract_rehearsals(tenant_id,allocation_line_id,contract_id,reviewer_id,evidence_reference) VALUES($1,$2,$3,private.payroll_reviewer_id(),$4) ON CONFLICT DO NOTHING RETURNING "+payrollRehearsalColumns,args);
+  if(inserted.rowCount)return {status:201,item:inserted.rows[0]};
+  const prior=await c.query("SELECT "+payrollRehearsalColumns+" FROM payroll_contract_rehearsals WHERE tenant_id=$1 AND allocation_line_id=$2 AND contract_id=$3 AND evidence_reference=$4 AND reviewer_id=private.payroll_reviewer_id()",args);
+  return prior.rowCount?{status:200,item:prior.rows[0]}:{status:409,error:"Allocation line already attributed in another rehearsal"};
+ });
+ const {status,...out}=result;res.status(status).json({...out,synthetic:true,financialInclusionAuthorized:false});
+}catch(e){if(["23514","23503"].includes(e.code))return res.status(422).json({error:"Confirmed source-linked payroll and approved contract/site required"});next(e);}});
+app.post("/v1/tenants/:tenantId/prototype/unified-contribution",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
+ const body=req.body||{}, {synthetic,contractId,siteId,periodStart,periodEnd}=body;
+ if(profile.mode!=="prototype")return res.status(403).json({error:"Synthetic rehearsal unavailable in protected profile"});
+ if(synthetic!==true||Object.keys(body).some(k=>!["synthetic","contractId","siteId","periodStart","periodEnd"].includes(k))||!isUuid(contractId)||!isUuid(siteId)||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodStart>periodEnd)return res.status(400).json({error:"Explicit synthetic scope and valid dates required"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
+  const tenant=req.membership.tenantId,args=[tenant,contractId,siteId,periodStart,periodEnd];
+  const enabled=await c.query("SELECT id FROM tenants WHERE id=$1 AND invoice_rehearsal_enabled",[tenant]);
+  if(!enabled.rowCount)return {status:403,error:"Synthetic rehearsal tenant not provisioned"};
+  const versions=await c.query("SELECT cv.id,cv.version_no,cv.currency,cv.effective_from::text AS effective_from,cv.effective_to::text AS effective_to,cv.price::text AS price,cv.billing_basis,cv.approved_by FROM contract_versions cv JOIN contracts ct ON ct.tenant_id=cv.tenant_id AND ct.id=cv.contract_id JOIN sites s ON s.tenant_id=ct.tenant_id AND s.business_id=ct.business_id AND s.id=$3 WHERE cv.tenant_id=$1 AND cv.contract_id=$2 AND ct.status='active' AND s.status='active' AND cv.approved_at IS NOT NULL AND cv.approved_by IS NOT NULL AND cv.effective_from<=$5::date AND (cv.effective_to IS NULL OR cv.effective_to>=$4::date) LIMIT 2",args);
+  const v=versions.rows[0];if(versions.rowCount!==1||v.currency!=="AUD"||v.effective_from>periodStart||(v.effective_to!==null&&v.effective_to<periodEnd))return {status:422,error:"Unique approved covering AUD contract version required"};
+  const invoices=await c.query("SELECT "+rehearsalColumns+" FROM invoice_confirmation_rehearsals WHERE tenant_id=$1 AND contract_id=$2 AND site_id=$3 AND service_start<=$5::date AND service_end>=$4::date ORDER BY id LIMIT $6",[...args,MAX_EVIDENCE_LINES+1]);
+  const payroll=await c.query("SELECT "+payrollRehearsalColumns+" FROM payroll_contract_rehearsals WHERE tenant_id=$1 AND contract_id=$2 AND site_id=$3 AND service_start<=$5::date AND service_end>=$4::date ORDER BY id LIMIT $6",[...args,MAX_EVIDENCE_LINES+1]);
+  if([...invoices.rows,...payroll.rows].some(r=>r.service_start<periodStart||r.service_end>periodEnd||r.contract_version_no!==v.version_no))return {status:422,error:"Evidence crosses requested period or contract version"};
+  // Unknown contract allocation is not a zero cost. Hold all overlapping unattributed v2 site lines.
+  const unmatched=await c.query("SELECT al.id FROM allocation_lines al JOIN allocation_runs ar ON ar.tenant_id=al.tenant_id AND ar.id=al.allocation_run_id JOIN payroll_pools pp ON pp.tenant_id=ar.tenant_id AND pp.id=ar.payroll_pool_id LEFT JOIN payroll_contract_rehearsals pr ON pr.tenant_id=al.tenant_id AND pr.allocation_line_id=al.id WHERE al.tenant_id=$1 AND al.site_id=$2 AND al.bucket_type IN ('direct','approved_allocated') AND ar.status='confirmed' AND ar.method_version='payroll-source-row-0.2.0' AND pp.period_start<=$4::date AND pp.period_end>=$3::date AND pr.id IS NULL LIMIT 1",[tenant,siteId,periodStart,periodEnd]);
+  if(unmatched.rowCount)return {status:422,error:"Unattributed confirmed site payroll remains; review contract attribution first"};
+  const legacy=await c.query("SELECT al.id,al.amount::text AS amount,pp.currency,pp.period_start::text AS period_start,pp.period_end::text AS period_end FROM allocation_lines al JOIN allocation_runs ar ON ar.tenant_id=al.tenant_id AND ar.id=al.allocation_run_id JOIN payroll_pools pp ON pp.tenant_id=ar.tenant_id AND pp.id=ar.payroll_pool_id WHERE al.tenant_id=$1 AND al.site_id=$2 AND al.bucket_type IN ('direct','approved_allocated') AND ar.status='confirmed' AND ar.method_version<>'payroll-source-row-0.2.0' AND pp.period_start<=$4::date AND pp.period_end>=$3::date ORDER BY al.id LIMIT $5",[tenant,siteId,periodStart,periodEnd,MAX_EVIDENCE_LINES+1]);
+  if(legacy.rowCount>MAX_EVIDENCE_LINES)return {status:422,error:"Legacy evidence exceeds review limit"};
+  let contribution;try{contribution=unifiedRehearsalContribution(invoices.rows,payroll.rows);}catch(e){if(e instanceof RangeError)return {status:422,error:e.message};throw e;}
+  const evidence={method:"unified-rehearsal-0.1.0",tenantId:tenant,contractId,siteId,periodStart,periodEnd,contractVersion:v,invoiceLines:invoices.rows,payrollLines:payroll.rows,excludedLegacyPayroll:legacy.rows,limitations:["Incomplete synthetic contribution, not audited profit.","No automatic invoice or payroll promotion. No shared allocation line splitting or cross-period proration.","Legacy payroll and non-site, excluded or unallocated amounts are not included. Other contract attributions are excluded.","Invoice tax basis is reviewer-attested; actual GST treatment and source authenticity remain unverified.","No evidence of complete supplier coverage or absence of economic overlap between invoice and payroll sources."]};
+  return {status:200,contribution,evidence,evidenceSha256:snapshotDigest(evidence)};
+ },{repeatableRead:true});
+ const {status,...out}=result;res.status(status).json({...out,synthetic:true,financialInclusionAuthorized:false,issuerAuthenticated:false,persisted:false});
 }catch(e){next(e);}});
 
 app.post("/v1/tenants/:tenantId/calculations",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{

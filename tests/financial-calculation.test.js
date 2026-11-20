@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {decimalCents,formatCents,contributionTotals,canonicalSnapshot,snapshotDigest,MAX_EVIDENCE_LINES,invoiceCostBridge} from "../src/financial-calculation.js";
+import {decimalCents,formatCents,contributionTotals,canonicalSnapshot,snapshotDigest,MAX_EVIDENCE_LINES,invoiceCostBridge,unifiedRehearsalContribution} from "../src/financial-calculation.js";
 test("decimal parsing preserves cents and rejects ambiguous representations",()=>{
  assert.equal(decimalCents("999999999999.99"),99999999999999n);
  assert.equal(decimalCents("-0.01"),-1n);assert.equal(formatCents(-1n),"-0.01");
@@ -38,4 +38,13 @@ test("synthetic invoice bridge separates supplier and subcontractor amounts",()=
  const r=[row("a","revenue","100.01"),row("b","supplier","10.02"),row("c","subcontractor","20.03")];
  assert.deepEqual(invoiceCostBridge(r),{currency:"AUD",taxBasis:"gst_exclusive",revenue:"100.01",supplierCost:"10.02",subcontractorCost:"20.03",externalCost:"30.05",revenueLessExternalCost:"69.96",payrollIncluded:false,completeness:"incomplete"});
  for(const invalid of [[...r,r[1]],r.slice(1),[...r,{...row("d","supplier","1"),currency:"USD"}],[...r,{...row("d","supplier","1"),tax_basis:"gst_inclusive"}],[...r,row("d","supplier","-1")]])assert.throws(()=>invoiceCostBridge(invalid));
+});
+
+test("unified rehearsal uses exact labour, supplier and subcontractor costs once",()=>{
+ const i=(id,cost_kind,amount)=>({id,cost_kind,amount,currency:"AUD",tax_basis:"gst_exclusive"});
+ const p=(allocation_line_id,bucket_type,amount)=>({allocation_line_id,bucket_type,amount,currency:"AUD"});
+ const invoices=[i("r","revenue","100.01"),i("s","supplier","10.02"),i("c","subcontractor","20.03")];
+ const labour=[p("a","direct","30.01"),p("b","approved_allocated","0.05")];
+ assert.deepEqual(unifiedRehearsalContribution(invoices,labour),{currency:"AUD",invoiceTaxBasis:"gst_exclusive",revenue:"100.01",supplierCost:"10.02",subcontractorCost:"20.03",directLabour:"30.01",allocatedLabour:"0.05",labourCost:"30.06",deliveryCost:"60.11",contribution:"39.90",marginPercent:"39.90",completeness:"incomplete"});
+ for(const bad of [[],[...labour,labour[0]],[p("a","non_site","1")],[p("a","direct","-1")],[{...p("a","direct","1"),currency:"USD"}]])assert.throws(()=>unifiedRehearsalContribution(invoices,bad));
 });

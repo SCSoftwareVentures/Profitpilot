@@ -99,6 +99,19 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("UPDATE tenant_memberships SET role='reviewer' WHERE tenant_id=$1 AND user_id=$2",[tenantB,userC]);
     const rehearsalB=await insertB("INSERT INTO invoice_confirmation_rehearsals(tenant_id,claim_id,contract_id,site_id,reviewer_id,service_start,service_end,currency,tax_basis,cost_kind,evidence_reference) VALUES($1,$2,$3,$4,$5,'2026-02-01','2026-02-28','AUD','gst_exclusive','revenue','CI.fixture')",[tenantB,claimB,contractB,siteB,userC]);
     await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantB,userC]);
+    await admin.query("UPDATE tenant_memberships SET role='reviewer' WHERE tenant_id=$1 AND user_id=$2",[tenantB,userC]);
+    const payrollBatchB=await insertB("INSERT INTO import_batches(tenant_id,source_type,source_period_start,source_period_end,permission_ref,status,file_sha256,file_name,created_by) VALUES($1,'payroll','2026-02-01','2026-02-28','CI','uploaded',$2,'rehearsal-payroll-b.csv',$3)",[tenantB,"8".repeat(64),userC]);
+    const payrollRawB=await insertB("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,$3)",[tenantB,payrollBatchB,JSON.stringify({source_ref:"CI-B:rehearsal-pay",amount:"20.00",currency:"AUD",period_start:"2026-02-01",period_end:"2026-02-28"})]);
+    await insertB("INSERT INTO mapping_decisions(tenant_id,raw_row_id,target_type,decision,method_version) VALUES($1,$2,'payroll_row','candidate','payroll-validator-0.1.0')",[tenantB,payrollRawB]);
+    await admin.query("UPDATE import_batches SET status='review' WHERE id=$1",[payrollBatchB]);
+    const rehearsalPoolB=await insertB("INSERT INTO payroll_pools(tenant_id,batch_id,period_start,period_end,total_amount,currency,source_ref) VALUES($1,$2,'2026-02-01','2026-02-28',20,'AUD','reconciled:CI-rehearsal-b')",[tenantB,payrollBatchB]);
+    const rehearsalRunB=await insertB("INSERT INTO allocation_runs(tenant_id,payroll_pool_id,method_version,status,direct_amount,residual_amount,reviewer_id) VALUES($1,$2,'payroll-source-row-0.2.0','draft',20,0,$3)",[tenantB,rehearsalPoolB,userC]);
+    const rehearsalSourceB=await insertB("INSERT INTO payroll_source_records(tenant_id,raw_row_id,payroll_pool_id,source_ref,amount) VALUES($1,$2,$3,'CI-B:rehearsal-pay',20)",[tenantB,payrollRawB,rehearsalPoolB]);
+    const rehearsalLineB=await insertB("INSERT INTO allocation_lines(tenant_id,allocation_run_id,site_id,bucket_type,amount,source_ref,source_record_id) VALUES($1,$2,$3,'direct',20,'CI-B:rehearsal-pay',$4)",[tenantB,rehearsalRunB,siteB,rehearsalSourceB]);
+    await admin.query("UPDATE allocation_runs SET status='confirmed' WHERE id=$1",[rehearsalRunB]);
+    await admin.query("UPDATE import_batches SET status='accepted' WHERE id=$1",[payrollBatchB]);
+    await insertB("INSERT INTO payroll_contract_rehearsals(tenant_id,allocation_line_id,contract_id,reviewer_id,evidence_reference) VALUES($1,$2,$3,$4,'CI.B.attribution')",[tenantB,rehearsalLineB,contractB,userC]);
+    await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantB,userC]);
     const fixturePrivacy=await insertB("INSERT INTO privacy_requests(tenant_id,requester_id,client_request_id,request_type) VALUES($1,$2,gen_random_uuid(),'access')",[tenantB,userC]);
     // Automatically include every current public tenant-owned table (plus tenants)
     // and require its fixture, forced RLS, and both positive and negative visibility.
@@ -482,6 +495,26 @@ test("authenticated API enforces tenant membership, role permissions and import 
       assert.equal(result.sourceRows,2);assert.equal(result.allocationLines,4);
       const linked=await admin.query("SELECT count(*)::int AS n FROM allocation_lines WHERE allocation_run_id=$1 AND source_record_id IS NOT NULL",[result.runId]);
       assert.equal(linked.rows[0].n,4);
+      // Source-linked payroll attribution and unified contribution rehearsal.
+      const directLine=(await admin.query("SELECT id FROM allocation_lines WHERE allocation_run_id=$1 AND bucket_type='direct'",[result.runId])).rows[0].id;
+      const attribSql="INSERT INTO payroll_contract_rehearsals(tenant_id,allocation_line_id,contract_id,reviewer_id,evidence_reference) VALUES($1,$2,$3,private.payroll_reviewer_id(),'CI.attribution') RETURNING id,amount::text";
+      const attrib=(line,contract=contractA)=>withTenant(tenantA,"ci-api-analyst",c=>c.query(attribSql,[tenantA,line,contract]));
+      await assert.rejects(()=>attrib(directLine),e=>e.code==="23514");
+      await admin.query("UPDATE tenants SET invoice_rehearsal_enabled=true WHERE id=$1",[tenantA]);
+      try{
+       await assert.rejects(()=>attrib(rehearsalLineB),e=>e.code==="23514");
+       await assert.rejects(()=>attrib(directLine,contractB),e=>e.code==="23514");
+       const unifiedRequest=()=>request(`/v1/tenants/${tenantA}/prototype/unified-contribution`,{subject:"ci-api-analyst",method:"POST",body:{synthetic:true,contractId:contractA,siteId:siteA,periodStart:"2026-02-01",periodEnd:"2026-02-28"}});
+       const held=await unifiedRequest();assert.equal(held.status,422);assert.match((await held.json()).error,/Unattributed/);
+       const attributed=await attrib(directLine);assert.equal(attributed.rows[0].amount,"30.01");
+       await assert.rejects(()=>attrib(directLine),e=>e.code==="23505");
+       await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("UPDATE payroll_contract_rehearsals SET amount=0")),e=>e.code==="42501");
+       const unified=await unifiedRequest();assert.equal(unified.status,200);const u=await unified.json();
+       assert.equal(u.contribution.revenue,"100.00");assert.equal(u.contribution.labourCost,"30.01");assert.equal(u.contribution.contribution,"69.99");
+       assert.equal(u.contribution.completeness,"incomplete");assert.equal(u.persisted,false);assert.equal(u.financialInclusionAuthorized,false);
+       assert.equal(u.evidence.excludedLegacyPayroll.length,1);assert.equal(snapshotDigest(u.evidence),u.evidenceSha256);
+       assert.equal((await admin.query("SELECT count(*)::int n FROM audit_events WHERE object_id=$1 AND action='payroll_contract_rehearsed'",[attributed.rows[0].id])).rows[0].n,1);
+      }finally{await admin.query("UPDATE tenants SET invoice_rehearsal_enabled=false WHERE id=$1",[tenantA]);}
       const sr=await admin.query("SELECT id,source_ref FROM payroll_source_records WHERE payroll_pool_id=$1 ORDER BY source_ref",[result.poolId]);
       await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("INSERT INTO allocation_lines(tenant_id,allocation_run_id,site_id,bucket_type,amount,source_ref,source_record_id) VALUES($1,$2,$3,'direct',1,$4,$5)",[tenantA,result.runId,siteA,sr.rows[0].source_ref,sr.rows[0].id])),err=>["42501","23514"].includes(err.code),"confirmed allocation must reject later additions");
       // Admin fixture tests the confirmation invariant independently of HTTP.

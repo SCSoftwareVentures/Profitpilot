@@ -310,6 +310,28 @@ paths:
         "200": { description: Incomplete synthetic invoice-only bridge }
         "403": { description: Synthetic rehearsal not provisioned }
         "422": { description: Inconsistent or insufficient evidence }
+  /tenants/{tenantId}/prototype/payroll-attributions:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      summary: Rehearse reviewer-confirmed contract attribution of one whole payroll allocation line
+      description: Default-off synthetic tenant only. Requires accepted, confirmed source-linked v2 site allocation, approved covering contract and evidence reference. Amount and scope derive from database. One whole allocation may be assigned once.
+      responses:
+        "201": { description: Attribution created with audit event }
+        "200": { description: Identical replay }
+        "403": { description: Rehearsal or reviewer not authorised }
+        "409": { description: Attribution conflict }
+        "422": { description: Source or scope invalid }
+  /tenants/{tenantId}/prototype/unified-contribution:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      summary: Exact incomplete synthetic contribution across reviewed invoice and payroll evidence
+      description: Read-only repeatable-read snapshot and SHA-256; rejects unattributed confirmed v2 payroll, partial periods and inconsistent contract version. Explicitly excludes legacy payroll. No production inclusion or persisted report.
+      responses:
+        "200": { description: Exact contribution, evidence and limitations }
+        "403": { description: Synthetic rehearsal not provisioned }
+        "422": { description: Insufficient or incompatible evidence }
   /tenants/{tenantId}/calculations:
     parameters:
       - $ref: '#/components/parameters/TenantId'

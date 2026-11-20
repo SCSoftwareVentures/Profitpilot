@@ -62,3 +62,23 @@ export function invoiceCostBridge(rows){
  const externalCost=bounded(buckets.supplier+buckets.subcontractor);
  return {currency:"AUD",taxBasis:basis,revenue:formatCents(buckets.revenue),supplierCost:formatCents(buckets.supplier),subcontractorCost:formatCents(buckets.subcontractor),externalCost:formatCents(externalCost),revenueLessExternalCost:formatCents(bounded(buckets.revenue-externalCost)),payrollIncluded:false,completeness:"incomplete"};
 }
+
+export function unifiedRehearsalContribution(invoices,payroll){
+ const bridge=invoiceCostBridge(invoices);
+ if(!Array.isArray(payroll)||!payroll.length||payroll.length>MAX_EVIDENCE_LINES)throw new RangeError("Explicit contract-attributed payroll evidence required");
+ const allocations=new Set(),buckets={direct:0n,approved_allocated:0n};
+ for(const row of payroll){
+  if(!row||typeof row.allocation_line_id!=="string"||allocations.has(row.allocation_line_id)||row.currency!=="AUD"||!Object.hasOwn(buckets,row.bucket_type))throw new RangeError("Invalid or duplicate attributed payroll evidence");
+  allocations.add(row.allocation_line_id);
+  const cents=decimalCents(row.amount);
+  if(cents<=0n)throw new RangeError("Positive attributed payroll required");
+  buckets[row.bucket_type]=bounded(buckets[row.bucket_type]+cents);
+ }
+ const labour=bounded(buckets.direct+buckets.approved_allocated);
+ const delivery=bounded(labour+decimalCents(bridge.externalCost));
+ const revenue=decimalCents(bridge.revenue);
+ const contribution=bounded(revenue-delivery);
+ return {currency:"AUD",invoiceTaxBasis:bridge.taxBasis,revenue:bridge.revenue,supplierCost:bridge.supplierCost,subcontractorCost:bridge.subcontractorCost,
+  directLabour:formatCents(buckets.direct),allocatedLabour:formatCents(buckets.approved_allocated),labourCost:formatCents(labour),deliveryCost:formatCents(delivery),
+  contribution:formatCents(contribution),marginPercent:formatCents(divideRounded(contribution*10000n,revenue)),completeness:"incomplete"};
+}
