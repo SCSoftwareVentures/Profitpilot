@@ -175,7 +175,10 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const previewResult=await preview.json();
     assert.equal(previewResult.automaticallyAccepted,0);
     assert.equal(previewResult.issuerAuthenticated,false);
-    assert.deepEqual(previewResult.items.map(x=>x.status),["candidate","held","candidate","held"]);
+    assert.deepEqual(previewResult.items.map(x=>x.status),["held","held","candidate","held"]);
+    const reversed=await request(previewPath,{subject:"ci-api-analyst",method:"POST",body:{...previewBody,rows:[...previewBody.rows].reverse()}});
+    assert.equal(reversed.status,200);
+    assert.deepEqual((await reversed.json()).items.map(({status,reason})=>({status,reason})).reverse(),previewResult.items.map(({status,reason})=>({status,reason})));
     for(const [subject,body,status] of [
       [undefined,previewBody,401],
       ["ci-api-reader",previewBody,403],

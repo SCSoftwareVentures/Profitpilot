@@ -31,7 +31,7 @@ The first delivery mode is a concierge validation service using secure, authoris
 
 - Payroll prototype: structural validation, reviewer-attested controls, exact decimal whole-row allocations, residuals, tenant-scoped source lineage and duplicate reference rollback (migration 009). CI #2947 passed. Migration 010 introduces v0.2 split-source allocations, source-record foreign keys, reviewer-only write policies, draft-to-confirmed database validation and post-confirmation insertion protection. CI #2948 passed. Legacy/manual and v0.1 runs are not retrospectively validated; statutory payroll compliance remains outstanding.
 
-- Migration 011: bounded UTF-8 CSV upload, server and PostgreSQL SHA-256 checks, metadata-only source receipts, original byte retention, atomic ingestion and post-receipt sealing. CI pending. Byte integrity is distinct from source issuer identity. No malware scanner, production encryption/retention or issuer signature claim.
+- Migration 011: bounded UTF-8 CSV upload, server and PostgreSQL SHA-256 checks, metadata-only source receipts, original byte retention, atomic ingestion and post-receipt sealing. CI #2963 passed at cba35f2. Byte integrity is distinct from source issuer identity. No malware scanner, production encryption/retention or issuer signature claim.
 
 ## What is not established
 
@@ -64,3 +64,7 @@ G6 is a post-build paid software-pilot exit gate.
 ## Repository safety
 
 This repository is public at the time this status file was written. Never commit customer exports, employee-identifiable records, confidential contracts, credentials, API keys, payment secrets or private source documents. Keep any real pilot data in an appropriately authorised, secure environment under documented terms.
+
+## Synthetic invoice identity rehearsal
+
+The tenant-authorized synthetic preview is non-persistent and unauthenticated as to issuer identity. The conflict-classifier update holds every member of exact and alias conflicts without first-row preference. New unit/API regression tests require CI confirmation. Cross-batch database canonical identity enforcement and representative authorized source-owner validation remain outstanding.

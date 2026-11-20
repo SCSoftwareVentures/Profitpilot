@@ -23,6 +23,37 @@ paths:
       responses:
         "200": { description: Contract list }
         "403": { description: Tenant membership or role not authorised }
+  /tenants/{tenantId}/prototype/invoice-identity-preview:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      summary: Classify synthetic invoice identity conflicts without persistence
+      description: Owner, admin, analyst or reviewer only. All members of exact or potential alias conflicts are held. This preview cannot authenticate issuers, confirm invoices or authorise financial inclusion.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [synthetic, rows]
+              properties:
+                synthetic: { const: true }
+                rows:
+                  type: array
+                  minItems: 1
+                  maxItems: 200
+                  items:
+                    type: object
+                    additionalProperties: false
+                    properties:
+                      direction: { type: string, maxLength: 200 }
+                      issuerKey: { type: string, maxLength: 200 }
+                      invoiceReference: { type: string, maxLength: 200 }
+      responses:
+        "200": { description: Ordered candidate or held rows; synthetic true, issuerAuthenticated false, automaticallyAccepted zero }
+        "400": { description: Invalid synthetic input }
+        "401": { description: Unauthenticated }
+        "403": { description: Tenant membership or role not authorised }
   /tenants/{tenantId}/imports:
     parameters:
       - $ref: '#/components/parameters/TenantId'

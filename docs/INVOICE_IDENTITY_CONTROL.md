@@ -1,9 +1,9 @@
 # Invoice identity and evidence control — proposed validation specification
 
-Status: proposed; not implemented or verified. No G5 build approval implied.
+Status: synthetic preview implemented; production invoice identity enforcement remains proposed. No G5 build approval implied.
 
 ## Observed gaps
-The original-file endpoint checks SHA-256 and seals rows; the CSV parser rejects repeated trimmed invoice IDs within one file. The legacy JSON endpoint accepts row objects and the structural validator does not enforce duplicate IDs. Batch locking does not serialize separate batches. File identity is not invoice identity. Existing CSV schema contains invoice_id, site, date, amount but no stable issuer/account identity or currency; invoice numbers alone cannot safely identify supplier invoices across issuers.
+The original-file endpoint checks SHA-256 and seals rows; the CSV parser rejects repeated trimmed invoice IDs within one file. The legacy JSON endpoint accepts row objects; the structural validator now holds repeated references within a validation batch. Batch locking does not serialize separate batches. File identity is not invoice identity. Existing CSV schema contains invoice_id, site, date, amount but no stable issuer/account identity or currency; invoice numbers alone cannot safely identify supplier invoices across issuers.
 
 ## Proposed controls
 - Preserve original rows and receipts; never silently delete duplicates or mutate evidence.
@@ -22,7 +22,10 @@ The original-file endpoint checks SHA-256 and seals rows; the CSV parser rejects
 6. Migration conflict report, clean install and upgrade path, legacy rows not silently upgraded.
 
 ## Blockers
-Migration 011 CI and latest invoice fixture correction have no confirmed results in the available connector. Verify push-triggered CI separately. Obtain authorised representative exports under G0 and verify issuer/reference semantics before schema enforcement. Production build remains gated by G0–G5.
+Push-triggered CI #2963 passed at cba35f2, including the preceding source-receipt and synthetic-preview work. New classifier changes require their own verification. Obtain authorised representative exports under G0 and verify issuer/reference semantics before schema enforcement. Production build remains gated by G0–G5.
 
 ## Follow-up database audit
 Migration 005 already enforces one confirmed match per tenant/invoice line and one confirmed allocation run per payroll pool using partial unique indexes. The latest calculation guard is defense in depth, not a replacement for these indexes. The base invoices table also has UNIQUE(tenant_id,direction,invoice_number), which blocks duplicate numbers but conflates distinct supplier issuers. Do not drop that constraint until an issuer-aware replacement and migration conflict inventory are validated. Raw import rows still permit repeated references across separate files; candidate evidence must not be confused with canonical invoices. CI configuration runs on pushes, whereas the available commit workflow lookup filters to pull requests; empty results are not evidence that CI did not run.
+
+## Synthetic preview conflict grouping
+The preview now performs two passes over a bounded synthetic input. All members of an exact issuer/reference conflict or potential alias group are held, including the first observed row. A distinct issuer or direction is a separate namespace; issuer keys remain case-sensitive pending source-owner rules. Alias detection (case and leading-zero numeric variants) is a review signal, not canonicalisation. The preview never persists rows, authenticates issuers or permits financial inclusion; it does not detect cross-request duplicates. Regression coverage includes reversed order, malformed rows, source immutability and namespace isolation.
