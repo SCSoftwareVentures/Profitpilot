@@ -9,6 +9,8 @@ import {parseSourceFile,MAX_SOURCE_BYTES} from "./source-file.js";
 import {authRequired,requireRole} from "./auth.js";
 import {validateInvoiceRows,validatePayrollRows,reconcilePayroll,isIsoDate} from "../src/engine.js";
 
+import {classifyInvoiceIdentity} from "../src/invoice-identity.js";
+
 const MAX_IMPORT_ROWS=2000;
 const isUuid=value=>typeof value==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
@@ -30,6 +32,14 @@ async function membership(req,res,next){
   req.membership={tenantId,role:r.rows[0].role};next();
  }catch(e){next(e);}
 }
+// Synthetic-only preview: caller-supplied identifiers are not authenticated issuer evidence.
+app.post("/v1/tenants/:tenantId/prototype/invoice-identity-preview",membership,requireRole("owner","admin","analyst","reviewer"),(req,res)=>{
+ const {synthetic,rows}=req.body||{};
+ if(synthetic!==true||!Array.isArray(rows)||rows.length<1||rows.length>200||rows.some(r=>!r||typeof r!=="object"||Array.isArray(r)||Object.keys(r).some(k=>!["direction","issuerKey","invoiceReference"].includes(k))||Object.values(r).some(v=>typeof v!=="string"||v.length>200)))return res.status(400).json({error:"Explicit synthetic mode and 1–200 bounded invoice identity rows required"});
+ const items=classifyInvoiceIdentity(rows).map((r,i)=>({rowNumber:i+1,...r}));
+ res.set("Cache-Control","no-store");
+ res.json({synthetic:true,issuerAuthenticated:false,automaticallyAccepted:0,items});
+});
 app.get("/v1/me",async(req,res)=>{res.json({subject:req.identity.subject,email:req.identity.email,membershipsEndpoint:"Membership discovery is not exposed until a separately reviewed security-definer function is installed."});});
 app.get("/v1/tenants/:tenantId/contracts",membership,async(req,res,next)=>{try{const rows=await withTenant(req.membership.tenantId,req.identity.subject,async c=>(await c.query("SELECT id,customer_name,status FROM contracts WHERE tenant_id=$1 ORDER BY customer_name",[req.membership.tenantId])).rows);res.json({items:rows});}catch(e){next(e);}});
 app.post("/v1/tenants/:tenantId/imports",membership,requireRole("owner","admin","analyst"),async(req,res,next)=>{
