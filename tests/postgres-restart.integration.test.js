@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import {execFile} from "node:child_process";
-import {randomUUID} from "node:crypto";
+import {randomBytes,randomUUID} from "node:crypto";
 import {once} from "node:events";
 import {createServer} from "node:http";
 import test from "node:test";
@@ -30,8 +30,8 @@ async function withAdmin(fn){
 test("the same API recovers after a PostgreSQL restart and rolls back interrupted writes",
      {skip:!container,timeout:75_000},async()=>{
   assert.match(container,/^[a-f0-9]{64}$/,"use the full ID of a disposable PostgreSQL container");
-  assert.ok(process.env.TEST_ADMIN_DATABASE_URL && process.env.TEST_APP_DATABASE_URL && process.env.TENANT_CONTEXT_HMAC_SECRET,
-    "the restart test requires the admin URL, restricted runtime URL and tenant context key");
+  assert.ok(process.env.TEST_ADMIN_DATABASE_URL && process.env.TEST_APP_DATABASE_URL,
+    "the restart test requires both the admin and restricted runtime URLs");
   const fingerprint=await withAdmin(async admin=>(await admin.query(fingerprintQuery)).rows[0].system_identifier);
   const {stdout}=await docker("exec",container,"sh","-ec",
     'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -h 127.0.0.1 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "$1"',
@@ -41,7 +41,12 @@ test("the same API recovers after a PostgreSQL restart and rolls back interrupte
   const [tenant,foreignTenant,user,foreignUser,foreignRequest,firstWrite,secondWrite,recoveredWrite]=
     Array.from({length:8},()=>randomUUID());
   const subject="ci-restart-"+user;
+  const keyId="ci-restart-"+randomUUID();
+  const signingKey=randomBytes(32).toString("hex");
   await withAdmin(async admin=>{
+    // The authenticated API suite can revoke its own key during rotation tests.
+    await admin.query("INSERT INTO private.tenant_context_keys(key_id,secret,active) VALUES ($1,decode($2,'hex'),true)",
+      [keyId,signingKey]);
     await admin.query("INSERT INTO tenants(id,legal_name) VALUES ($1,'CI restart tenant'),($2,'CI restart foreign tenant')",
       [tenant,foreignTenant]);
     await admin.query("INSERT INTO users(id,auth_subject,email,status) VALUES ($1,$2,$3,'active'),($4,$5,$6,'active')",
@@ -73,7 +78,8 @@ test("the same API recovers after a PostgreSQL restart and rolls back interrupte
     const base=`http://127.0.0.1:${server.address().port}`;
     Object.assign(process.env,{
       NODE_ENV:"test",PROFITPILOT_PROFILE:"prototype",DATABASE_URL:process.env.TEST_APP_DATABASE_URL,
-      DATABASE_SSL:"false",AUTH_ISSUER:issuer,AUTH_AUDIENCE:audience,AUTH_JWKS_URL:base+"/.well-known/jwks.json"
+      DATABASE_SSL:"false",AUTH_ISSUER:issuer,AUTH_AUDIENCE:audience,AUTH_JWKS_URL:base+"/.well-known/jwks.json",
+      TENANT_CONTEXT_HMAC_KEY_ID:keyId,TENANT_CONTEXT_HMAC_SECRET:signingKey
     });
     const database=await import("../server/db.js");
     pool=database.pool;
