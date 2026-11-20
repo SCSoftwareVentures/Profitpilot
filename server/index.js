@@ -8,7 +8,7 @@ import {withTenant,health} from "./db.js";
 import {parseSourceFile,MAX_SOURCE_BYTES} from "./source-file.js";
 import {allowedImportRows} from "./privacy.js";
 import {deploymentProfile,readSecret} from "./deployment.js";
-import {scanSource} from "./malware.js";
+import {scanSource,SCANNER_PATH} from "./malware.js";
 import {accessSync,constants as fsConstants} from "node:fs";
 import {authRequired,requireRole} from "./auth.js";
 import {validateInvoiceRows,validatePayrollRows,reconcilePayroll,isIsoDate} from "../src/engine.js";
@@ -20,7 +20,7 @@ const isUuid=value=>typeof value==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9
 
 const profile=deploymentProfile();
 if(profile.protectedMode&&!/^(?:[a-f0-9]{2}){32,}$/i.test(readSecret("TENANT_CONTEXT_HMAC_SECRET")))throw new Error("Invalid mounted signing key");
-if(profile.protectedMode)accessSync("/usr/bin/clamscan",fsConstants.X_OK);
+if(profile.protectedMode)accessSync(SCANNER_PATH,fsConstants.X_OK);
 const app=express();
 app.disable("x-powered-by");
 app.use(helmet());

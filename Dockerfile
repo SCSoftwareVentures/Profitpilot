@@ -33,18 +33,23 @@ USER 1000:1000
 EXPOSE 8080
 CMD ["/usr/local/bin/node","server/index.js"]
 
-# Add only the command-line scanner and its actual signed APK dependencies.
-# No scripts are executed in the assembly root; scanner updates are managed externally.
+# Compile only a bounded stdin adapter against the vendor's libclamav headers.
+FROM node:22-alpine AS scanner-build
+RUN apk add --no-cache build-base clamav-dev
+COPY native/scan-source.c /build/scan-source.c
+RUN cc -std=c11 -O2 -Wall -Wextra -Werror -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro,-z,now -o /build/profitpilot-scan /build/scan-source.c -lclamav
+
+# Install the signed runtime libraries, not freshclam, daemon or shell packages.
 FROM prototype-root AS protected-root
-RUN apk --root /rootfs --no-scripts --no-cache add clamav-scanner && \
+RUN apk --root /rootfs --no-scripts --no-cache add clamav-libs clamav-libunrar && \
     ! apk --root /rootfs info -e busybox && ! apk --root /rootfs info -e busybox-binsh && ! apk --root /rootfs info -e ssl_client && \
     mkdir -p /rootfs/var/lib/clamav && chmod 755 /rootfs/var/lib/clamav && \
-    test -x /rootfs/usr/bin/clamscan && test ! -e /rootfs/bin/sh && \
+    test ! -e /rootfs/bin/sh && \
     test -s /rootfs/lib/apk/db/installed
 
 FROM api-runtime AS protected
 COPY --from=protected-root /rootfs/ /
-ENV MALWARE_SCAN_MODE=clamav
+COPY --from=scanner-build /build/profitpilot-scan /usr/local/bin/profitpilot-scan
 USER 1000:1000
 
 # Keep ordinary builds synthetic by default.
