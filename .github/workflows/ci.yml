@@ -188,9 +188,74 @@ jobs:
           rm "$SIGDIR/marker"
           docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --cap-drop ALL --security-opt no-new-privileges -v "$SIGDIR:/var/lib/clamav:ro" --entrypoint node profitpilot-protected:ci --input-type=module -e 'import {scanSource} from "./server/malware.js"; import assert from "node:assert/strict"; assert.equal(await scanSource(Buffer.from("Ordinary harmless fixture"),{enabled:true}),"scanner_reported_clean"); assert.equal(await scanSource(Buffer.from("ProfitPilot harmless scanner test marker 2026"),{enabled:true}),"infected"); console.log("Native scanner accepted clean fixture and rejected custom harmless signature");'
 
+      - name: Scan prototype container vulnerabilities
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          version: v0.68.2
+          scan-type: image
+          image-ref: profitpilot-api:ci
+          scanners: vuln
+          format: json
+          output: prototype-vulnerabilities.json
+          exit-code: '0'
+          cache: false
+      - name: Scan protected container vulnerabilities
+        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+        with:
+          scan-type: image
+          image-ref: profitpilot-protected:ci
+          scanners: vuln
+          format: json
+          output: protected-vulnerabilities.json
+          exit-code: '0'
+          skip-setup-trivy: true
+          cache: false
+      - name: Retain container vulnerability reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: container-vulnerability-reports
+          path: |
+            prototype-vulnerabilities.json
+            protected-vulnerabilities.json
+          if-no-files-found: warn
+      - name: Enforce container vulnerability severity policy
+        run: node scripts/check-container-vulnerabilities.mjs prototype-vulnerabilities.json protected-vulnerabilities.json
+
+  static_analysis:
+    name: CodeQL JavaScript static security analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+          build-mode: none
+      - name: Analyze source
+        uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4
+        with:
+          category: /language:javascript-typescript
+          output: codeql-results
+      - name: Retain analysis results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: javascript-static-analysis
+          path: codeql-results
+          if-no-files-found: warn
+
   provenance:
     name: Source package, SBOM and signed provenance
-    needs: [verify, database]
+    needs: [verify, database, static_analysis]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
