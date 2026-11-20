@@ -4,15 +4,16 @@ if(paths.length!==2)throw Error("Both container reports are required");
 let blocked=0;
 for(const path of paths){
  const r=JSON.parse(readFileSync(path,"utf8"));
- if(!Array.isArray(r.Results)||!r.Results.length)throw Error("Missing scan results: "+path);
- const findings=r.Results.flatMap(x=>x.Vulnerabilities||[]);
+ if(!Array.isArray(r.matches)||!r.source||!r.descriptor)throw Error("Invalid scan report: "+path);
  const counts=Object.create(null);
- for(const v of findings){
-  counts[v.Severity]=(counts[v.Severity]||0)+1;
-  // Critical findings always block. High findings with a published fix block.
-  // Unfixed high findings remain visible and require buyer risk review.
-  if(v.Severity==="CRITICAL"||(v.Severity==="HIGH"&&String(v.FixedVersion||"").trim())){
-   blocked++; console.error(path,v.VulnerabilityID,v.PkgName,v.InstalledVersion,v.FixedVersion||"no fix");
+ for(const match of r.matches){
+  const v=match.vulnerability;
+  if(!v||typeof v.severity!=="string"||!match.artifact)throw Error("Invalid finding in "+path);
+  const severity=v.severity.toUpperCase();
+  counts[severity]=(counts[severity]||0)+1;
+  const versions=v.fix?.versions||[];
+  if(severity==="CRITICAL"||(severity==="HIGH"&&versions.length>0)){
+   blocked++;console.error(path,v.id,match.artifact.name,match.artifact.version,versions.join(",")||"no fix");
   }
  }
  console.log(path,JSON.stringify(counts));

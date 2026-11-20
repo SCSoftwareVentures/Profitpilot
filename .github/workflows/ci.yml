@@ -70,8 +70,12 @@ jobs:
 
       - name: Generate ephemeral tenant context signing key
         run: |
-          echo "TENANT_CONTEXT_HMAC_SECRET=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
-          echo "POSTGRES_APP_PASSWORD=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+          SIGNING_KEY="$(openssl rand -hex 32)"
+          APP_PASSWORD="$(openssl rand -hex 32)"
+          echo "::add-mask::$SIGNING_KEY"
+          echo "::add-mask::$APP_PASSWORD"
+          echo "TENANT_CONTEXT_HMAC_SECRET=$SIGNING_KEY" >> "$GITHUB_ENV"
+          echo "POSTGRES_APP_PASSWORD=$APP_PASSWORD" >> "$GITHUB_ENV"
 
       - name: Apply schema, runtime role and migrations
         env:
@@ -188,28 +192,35 @@ jobs:
           rm "$SIGDIR/marker"
           docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --cap-drop ALL --security-opt no-new-privileges -v "$SIGDIR:/var/lib/clamav:ro" --entrypoint node profitpilot-protected:ci --input-type=module -e 'import {scanSource} from "./server/malware.js"; import assert from "node:assert/strict"; assert.equal(await scanSource(Buffer.from("Ordinary harmless fixture"),{enabled:true}),"scanner_reported_clean"); assert.equal(await scanSource(Buffer.from("ProfitPilot harmless scanner test marker 2026"),{enabled:true}),"infected"); console.log("Native scanner accepted clean fixture and rejected custom harmless signature");'
 
-      - name: Scan prototype container vulnerabilities
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
+  container_security:
+    name: Container vulnerability analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
-          version: v0.68.2
-          scan-type: image
-          image-ref: profitpilot-api:ci
-          scanners: vuln
-          format: json
-          output: prototype-vulnerabilities.json
-          exit-code: '0'
-          cache: false
-      - name: Scan protected container vulnerabilities
-        uses: aquasecurity/trivy-action@b6643a29fecd7f34b3597bc6acb0a98b03d33ff8 # v0.33.1
-        with:
-          scan-type: image
-          image-ref: profitpilot-protected:ci
-          scanners: vuln
-          format: json
-          output: protected-vulnerabilities.json
-          exit-code: '0'
-          skip-setup-trivy: true
-          cache: false
+          persist-credentials: false
+      - name: Install checksum-verified Grype
+        run: |
+          set -euo pipefail
+          WORK="$(mktemp -d)"
+          trap 'rm -rf "$WORK"' EXIT
+          curl --fail --silent --show-error --location --retry 3 'https://github.com/anchore/grype/releases/download/v0.104.1/grype_0.104.1_linux_amd64.tar.gz' -o "$WORK/grype.tar.gz"
+          printf '%s  %s\n' '2cb820b6c81f88fd6aff3fb4ca5a7161e9ab70af0f27fc5e99cd16deb987cd5f' "$WORK/grype.tar.gz" | sha256sum --check
+          tar -xzf "$WORK/grype.tar.gz" -C "$WORK" grype
+          install -m 0755 "$WORK/grype" "$RUNNER_TEMP/grype"
+          "$RUNNER_TEMP/grype" version
+      - name: Build both container profiles
+        run: |
+          docker build --pull -t profitpilot-api:security .
+          docker build --target protected -t profitpilot-protected:security .
+      - name: Scan both images with current vulnerability database
+        run: |
+          set -euo pipefail
+          "$RUNNER_TEMP/grype" db update
+          "$RUNNER_TEMP/grype" docker:profitpilot-api:security -o json > prototype-vulnerabilities.json
+          "$RUNNER_TEMP/grype" docker:profitpilot-protected:security -o json > protected-vulnerabilities.json
       - name: Retain container vulnerability reports
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -255,7 +266,7 @@ jobs:
 
   provenance:
     name: Source package, SBOM and signed provenance
-    needs: [verify, database, static_analysis]
+    needs: [verify, database, static_analysis, container_security]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
