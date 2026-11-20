@@ -30,3 +30,7 @@ Independent security assessment, real IdP/TLS/storage/signature operation, compl
 - Runtime audit integrity: event vocabulary/object-type/source-existence gate, cannot forge nonexistent source receipt; no independent tamper-resistant log certification.
 - Source privacy: runtime raw-row SQL rejects bidi controls and unsupported keys; HTTP minimisation remains.
 - Mounted secrets: protected owner-only file permissions; O_NOFOLLOW rejects symlink final components, requiring regular-file mounts. Operational secret manager compatibility must be tested by buyer.
+
+## S10 additional review checks
+- Privacy closure: requester may not authorise own review; opener and closer are distinct currently authorised owner/admin/reviewer roles (HTTP requires owner/admin). Immutable opener reference and dual-review regression test. No automatic erasure/export or externally verified legal outcome.
+- Privacy queue: tenant-scoped 200-row cursor pagination for admin and requester, with requester ID in administrative response. A case listing is not an exhaustive enterprise data-subject response.

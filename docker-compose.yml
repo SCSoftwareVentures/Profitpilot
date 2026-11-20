@@ -33,6 +33,7 @@ services:
       - ./database/migrations/018_payroll_contract_rehearsal.sql:/docker-entrypoint-initdb.d/020-payroll-contract-rehearsal.sql:ro
       - ./database/migrations/019_privacy_audit_and_index.sql:/docker-entrypoint-initdb.d/021-privacy-audit.sql:ro
       - ./database/migrations/020_audit_privacy_least_privilege.sql:/docker-entrypoint-initdb.d/022-audit-privacy-least-privilege.sql:ro
+      - ./database/migrations/021_privacy_case_dual_review.sql:/docker-entrypoint-initdb.d/023-privacy-dual-review.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s

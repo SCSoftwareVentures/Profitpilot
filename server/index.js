@@ -52,10 +52,21 @@ app.post("/v1/tenants/:tenantId/prototype/invoice-identity-preview",membership,r
  res.json({synthetic:true,issuerAuthenticated:false,automaticallyAccepted:0,items});
 });
 
-const privacyColumns="id,request_type,status,created_at,reviewed_at,review_reference";
+const privacyColumns="id,requester_id,request_type,status,created_at,reviewed_at,review_reference";
 app.get("/v1/tenants/:tenantId/privacy-requests",membership,async(req,res,next)=>{try{
- const rows=await withTenant(req.membership.tenantId,req.identity.subject,c=>c.query("SELECT "+privacyColumns+" FROM privacy_requests WHERE tenant_id=$1 ORDER BY created_at DESC,id DESC LIMIT 200",[req.membership.tenantId]));
- res.json({items:rows.rows,limit:200,scope:"Own requests or authorised tenant administration; case tracking only"});
+ const cursor=req.query.cursor??null;
+ if(cursor!==null&&!isUuid(cursor))return res.status(400).json({error:"Invalid privacy cursor"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
+  if(cursor!==null){
+   const anchor=await c.query("SELECT id FROM privacy_requests WHERE tenant_id=$1 AND id=$2",[req.membership.tenantId,cursor]);
+   if(!anchor.rowCount)return {invalidCursor:true};
+  }
+  const cases=await c.query("SELECT "+privacyColumns+" FROM privacy_requests WHERE tenant_id=$1 AND ($2::uuid IS NULL OR (created_at,id)<(SELECT created_at,id FROM privacy_requests WHERE tenant_id=$1 AND id=$2)) ORDER BY created_at DESC,id DESC LIMIT 201",[req.membership.tenantId,cursor]);
+  const page=cases.rows.slice(0,200);
+  return {items:page,limit:200,additionalRequests:cases.rowCount>200,nextCursor:cases.rowCount>200?page.at(-1).id:null,scope:"Own requests or authorised tenant administration; case tracking only"};
+ },{repeatableRead:true});
+ if(result.invalidCursor)return res.status(404).json({error:"Privacy cursor unavailable"});
+ res.json(result);
 }catch(e){next(e);}});
 app.post("/v1/tenants/:tenantId/privacy-requests",membership,async(req,res,next)=>{try{
  const body=req.body||{}, {clientRequestId,requestType}=body;
@@ -75,7 +86,10 @@ app.post("/v1/tenants/:tenantId/privacy-requests/:requestId/review",membership,r
  const result=await withTenant(req.membership.tenantId,req.identity.subject,c=>c.query("UPDATE privacy_requests SET status=$1,reviewed_by=private.actor_id(),reviewed_at=now(),review_reference=$2 WHERE tenant_id=$3 AND id=$4 AND requester_id<>private.actor_id() AND ((status='requested' AND $1='reviewing') OR (status='reviewing' AND $1 IN ('closed_attested','declined'))) RETURNING "+privacyColumns,[decision,reviewReference,req.membership.tenantId,req.params.requestId]));
  if(!result.rowCount)return res.status(409).json({error:"Request unavailable, self-review prohibited or invalid transition"});
  res.json({item:result.rows[0],automatedErasure:false,externalFulfilmentVerified:false});
-}catch(e){next(e);}});
+}catch(e){
+ if(e.code==="23514")return res.status(409).json({error:"Independent privacy review required or decision conflicts with current case"});
+ next(e);
+}});
 
 
 app.get("/v1/tenants/:tenantId/privacy/self-access",membership,async(req,res,next)=>{try{

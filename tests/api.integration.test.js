@@ -598,11 +598,16 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const reviewPath=privacyPath+"/"+privacyItem.item.id+"/review";
     const privacyReview=(status,reviewReference="CI.case.1")=>request(reviewPath,{subject:"ci-api-analyst",method:"POST",body:{status,reviewReference}});
     assert.equal((await privacyReview("reviewing")).status,403);
+    const independentReviewer="cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+    await admin.query("INSERT INTO users(id,auth_subject,email,status) VALUES ($1,'ci-api-privacy-closer','privacy-closer@example.invalid','active') ON CONFLICT(id) DO UPDATE SET status='active'",[independentReviewer]);
+    await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'admin','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role='admin',status='active'",[tenantA,independentReviewer]);
     await admin.query("UPDATE tenant_memberships SET role='admin' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);
     try{
       assert.equal((await privacyReview("closed_attested")).status,409);
       assert.equal((await privacyReview("reviewing")).status,200);
-      const closed=await privacyReview("closed_attested");assert.equal(closed.status,200);
+      const premature=await privacyReview("closed_attested");assert.equal(premature.status,409,"initiating reviewer cannot close own case");
+      await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("UPDATE privacy_requests SET review_started_by=$1 WHERE tenant_id=$2 AND id=$3",[independentReviewer,tenantA,privacyItem.item.id])),e=>e.code==="42501","review initiator is immutable to the runtime role");
+      const closed=await request(reviewPath,{subject:"ci-api-privacy-closer",method:"POST",body:{status:"closed_attested",reviewReference:"CI.closure.2"}});assert.equal(closed.status,200);
       assert.equal((await closed.json()).externalFulfilmentVerified,false);
       assert.equal((await privacyReview("reviewing")).status,409);
       assert.equal((await admin.query("SELECT count(*)::int AS n FROM audit_events WHERE tenant_id=$1 AND object_id=$2 AND action='privacy_request_review'",[tenantA,privacyItem.item.id])).rows[0].n,2);
@@ -633,6 +638,18 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const page2=await (await request(accessPath+"?cursor="+page1.nextCursor,{subject:"ci-api-reader"})).json();
     assert.equal(page2.privacyRequests.length,2);assert.equal(page2.nextCursor,null);
     assert.equal(new Set([...page1.privacyRequests,...page2.privacyRequests].map(r=>r.id)).size,202);
+    const queue1=await (await request(privacyPath,{subject:"ci-api-reader"})).json();
+    assert.equal(queue1.items.length,200);assert.equal(queue1.additionalRequests,true);
+    const queue2=await (await request(privacyPath+"?cursor="+queue1.nextCursor,{subject:"ci-api-reader"})).json();
+    assert.equal(queue2.items.length,2);assert.equal(queue2.nextCursor,null);
+    assert.equal(new Set([...queue1.items,...queue2.items].map(r=>r.id)).size,202);
+    assert.ok(queue1.items.every(r=>r.requester_id===userB));
+    assert.equal((await request(privacyPath+"?cursor="+fixturePrivacy,{subject:"ci-api-reader"})).status,404);
+    assert.equal((await request(privacyPath+"?cursor=invalid",{subject:"ci-api-reader"})).status,400);
+    const adminQueue1=await (await request(privacyPath,{subject:"ci-api-privacy-closer"})).json();
+    assert.equal(adminQueue1.items.length,200);assert.equal(adminQueue1.additionalRequests,true);
+    const adminQueue2=await (await request(privacyPath+"?cursor="+adminQueue1.nextCursor,{subject:"ci-api-privacy-closer"})).json();
+    assert.equal(adminQueue2.items.length,2);assert.equal(adminQueue2.nextCursor,null);
     assert.equal((await request(accessPath+"?cursor="+page1.nextCursor,{subject:"ci-api-analyst"})).status,404);
     assert.equal((await request(accessPath+"?cursor=bad",{subject:"ci-api-reader"})).status,400);
     // Scoped, independently reviewed erasure of an unused client-declared import; synthetic database only.

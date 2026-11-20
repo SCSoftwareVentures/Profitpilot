@@ -120,3 +120,5 @@ S8: strict scan gates, pinned Node base, native analyzer, vendor CVD verificatio
 CI #2990 exposed the integration harness hitting the unchanged 100-request/minute limiter after new privacy paging probes. Separate isolated test phases via the limiter's internal reset method; explicitly exercise 100 unauthenticated malformed JSON requests rejected before parsing and request 101 throttled. No HTTP reset path or production threshold override. New CI pending.
 
 S9 audit privacy and secret hardening: need-to-know audit visibility, runtime action/source semantics gate, database Unicode bidi rejection, no-follow owner-only protected secrets. Adds runtime database negative tests and documentation. CI pending; privileged DB tampering/operational key custody and real privacy fulfilment remain external gates.
+
+S10: dual authorised privacy review (different opener and closer; no self-review); complete paged case listing for administrators and subject; no operational verification claims. CI pending.
