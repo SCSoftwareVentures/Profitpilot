@@ -7,6 +7,7 @@ import {randomUUID} from "node:crypto";
 import {withTenant,health} from "./db.js";
 import {parseSourceFile,MAX_SOURCE_BYTES} from "./source-file.js";
 import {allowedImportRows} from "./privacy.js";
+import {deploymentProfile,readSecret} from "./deployment.js";
 import {authRequired,requireRole} from "./auth.js";
 import {validateInvoiceRows,validatePayrollRows,reconcilePayroll,isIsoDate} from "../src/engine.js";
 
@@ -15,6 +16,8 @@ import {classifyInvoiceIdentity} from "../src/invoice-identity.js";
 const MAX_IMPORT_ROWS=2000;
 const isUuid=value=>typeof value==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
+const profile=deploymentProfile();
+if(profile.protectedMode&&!/^(?:[a-f0-9]{2}){32,}$/i.test(readSecret("TENANT_CONTEXT_HMAC_SECRET")))throw new Error("Invalid mounted signing key");
 const app=express();
 app.disable("x-powered-by");
 app.use(helmet());
@@ -129,6 +132,7 @@ app.get("/v1/tenants/:tenantId/imports/:batchId/source",membership,async(req,res
  }catch(e){next(e);}});
 
 app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requireRole("owner","admin","analyst"),async(req,res,next)=>{try{
+ if(profile.protectedMode)return res.status(403).json({error:"Protected ingestion requires original-file scanning"});
  const {rows,startRow=1}=req.body||{};
  if(!isUuid(req.params.batchId)||!Array.isArray(rows)||rows.length<1||rows.length>200||rows.some(x=>!x||typeof x!=="object"||Array.isArray(x))||!Number.isSafeInteger(startRow)||startRow<1||startRow+rows.length-1>MAX_IMPORT_ROWS)return res.status(400).json({error:"Provide 1–200 row objects and a valid one-based startRow (maximum 2000 rows per batch)"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{

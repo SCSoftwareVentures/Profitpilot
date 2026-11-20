@@ -44,6 +44,7 @@ services:
       - no-new-privileges:true
     environment:
       NODE_ENV: production
+      PROFITPILOT_PROFILE: prototype
       PORT: 8080
       DATABASE_URL: postgres://profitpilot_app:${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD}@db:5432/profitpilot
       DATABASE_SSL: "false"

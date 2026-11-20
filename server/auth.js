@@ -1,4 +1,5 @@
 import {createRemoteJWKSet,jwtVerify} from "jose";
+import {deploymentProfile,validMfa} from "./deployment.js";
 let jwks,jwksUrl;
 export function identityConfig(env=process.env){
  const {AUTH_ISSUER,AUTH_AUDIENCE,AUTH_JWKS_URL}=env;
@@ -21,6 +22,9 @@ export function authRequired(){
    if(!jwks||jwksUrl!==c.url.href){jwks=createRemoteJWKSet(c.url,{timeoutDuration:5000,cooldownDuration:30000});jwksUrl=c.url.href;}
    const {payload}=await jwtVerify(token,jwks,{issuer:c.issuer,audience:c.audience,algorithms:["RS256","ES256"],requiredClaims:["sub","iat","exp"],maxTokenAge:3600,clockTolerance:5});
    if(!validSubject(payload.sub)||!validTokenLifetime(payload))return res.status(401).json({error:"Invalid identity or token lifetime"});
+   const profile=deploymentProfile();
+   if(!validMfa(payload,profile.acr,Math.floor(Date.now()/1000),["GET","HEAD"].includes(req.method)?43200:900))
+    return res.status(403).json({error:"Verified recent multi-factor authentication required"});
    req.identity={subject:payload.sub,email:typeof payload.email==="string"&&payload.email.length<=320?payload.email:null};
    next();
   }catch{res.status(401).json({error:"Invalid or expired access token"});}
