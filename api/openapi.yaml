@@ -116,7 +116,7 @@ paths:
       - $ref: '#/components/parameters/BatchId'
     post:
       summary: Persist parsed invoice row objects for a source batch
-      description: Accepts 1–200 contiguous JSON row objects per request, maximum 2000 per batch. Exact JSONB-equivalent replays are idempotent; differing overlaps or new rows after validation are rejected atomically. Client-side parsing only.
+      description: Accepts 1–200 contiguous JSON row objects per request, maximum 2000 per batch. Exact JSONB-equivalent replays are idempotent; differing overlaps or new rows after validation are rejected atomically. Client-side parsing only. Source-specific scalar fields only (bounded strings or null); unknown fields, nested values and controls rejected with 422.
       requestBody:
         required: true
         content:

@@ -33,6 +33,9 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
+      - name: Dependency vulnerability audit (high and critical gate)
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Syntax checks
         run: npm run check
 
@@ -85,6 +88,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/010_payroll_allocation_integrity.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/011_source_file_receipts.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/012_invoice_identity_claims.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/013_runtime_actor_policies.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:
@@ -115,7 +119,7 @@ jobs:
         run: |
           set -eu
           DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@127.0.0.1:5432/profitpilot"
-          docker run -d --network host --name profitpilot-api-ci -e NODE_ENV=production -e PORT=8080 -e DATABASE_URL="$DATABASE_URL" -e DATABASE_SSL=false -e CORS_ORIGIN="$CORS_ORIGIN" -e AUTH_ISSUER="$AUTH_ISSUER" -e AUTH_AUDIENCE="$AUTH_AUDIENCE" -e AUTH_JWKS_URL="$AUTH_JWKS_URL" -e TENANT_CONTEXT_HMAC_SECRET="$TENANT_CONTEXT_HMAC_SECRET" profitpilot-api:ci
+          docker run -d --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --cap-drop ALL --security-opt no-new-privileges --network host --name profitpilot-api-ci -e NODE_ENV=production -e PORT=8080 -e DATABASE_URL="$DATABASE_URL" -e DATABASE_SSL=false -e CORS_ORIGIN="$CORS_ORIGIN" -e AUTH_ISSUER="$AUTH_ISSUER" -e AUTH_AUDIENCE="$AUTH_AUDIENCE" -e AUTH_JWKS_URL="$AUTH_JWKS_URL" -e TENANT_CONTEXT_HMAC_SECRET="$TENANT_CONTEXT_HMAC_SECRET" profitpilot-api:ci
           for attempt in $(seq 1 30); do
             if curl --fail --silent http://127.0.0.1:8080/health | grep -q '"database":"connected"'; then
               echo 'Production container health check passed'

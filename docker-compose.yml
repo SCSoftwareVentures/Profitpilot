@@ -25,6 +25,7 @@ services:
       - ./database/migrations/010_payroll_allocation_integrity.sql:/docker-entrypoint-initdb.d/012-payroll-allocation-integrity.sql:ro
       - ./database/migrations/011_source_file_receipts.sql:/docker-entrypoint-initdb.d/013-source-file-receipts.sql:ro
       - ./database/migrations/012_invoice_identity_claims.sql:/docker-entrypoint-initdb.d/014-invoice-identity-claims.sql:ro
+      - ./database/migrations/013_runtime_actor_policies.sql:/docker-entrypoint-initdb.d/015-runtime-actor-policies.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s
@@ -33,6 +34,13 @@ services:
     restart: unless-stopped
   api:
     build: .
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     environment:
       NODE_ENV: production
       PORT: 8080

@@ -1,22 +1,29 @@
-import {createRemoteJWKSet, jwtVerify} from "jose";
-let jwks;
-function config(){
- const {AUTH_ISSUER,AUTH_AUDIENCE,AUTH_JWKS_URL}=process.env;
- if(!AUTH_ISSUER||!AUTH_AUDIENCE||!AUTH_JWKS_URL)throw new Error("Authentication is not configured. Set AUTH_ISSUER, AUTH_AUDIENCE and AUTH_JWKS_URL.");
- return {issuer:AUTH_ISSUER,audience:AUTH_AUDIENCE,url:new URL(AUTH_JWKS_URL)};
+import {createRemoteJWKSet,jwtVerify} from "jose";
+let jwks,jwksUrl;
+export function identityConfig(env=process.env){
+ const {AUTH_ISSUER,AUTH_AUDIENCE,AUTH_JWKS_URL}=env;
+ if(!AUTH_ISSUER||!AUTH_AUDIENCE||!AUTH_JWKS_URL)throw new Error("Authentication is not configured");
+ const url=new URL(AUTH_JWKS_URL),issuer=new URL(AUTH_ISSUER);
+ const localTest=env.NODE_ENV==="test"&&url.protocol==="http:"&&["127.0.0.1","[::1]","localhost"].includes(url.hostname);
+ if((url.protocol!=="https:"&&!localTest)||url.username||url.password||url.hash||
+ issuer.protocol!=="https:"||issuer.username||issuer.password||issuer.hash)throw new Error("Invalid authentication configuration");
+ return {issuer:AUTH_ISSUER,audience:AUTH_AUDIENCE,url};
 }
+export const validSubject=value=>typeof value==="string"&&value.length>0&&value.length<=255&&value===value.trim()&&!/[\x00-\x1f\x7f-\x9f]/u.test(value);
+export const validTokenLifetime=payload=>Number.isSafeInteger(payload.iat)&&Number.isSafeInteger(payload.exp)&&payload.exp>payload.iat&&payload.exp-payload.iat<=3600;
 export function authRequired(){
  return async(req,res,next)=>{
+  const token=req.headers.authorization?.match(/^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/i)?.[1];
+  if(!token||token.length>8192)return res.status(401).json({error:"Authentication required"});
+  let c;
+  try{c=identityConfig();}catch{return res.status(503).json({error:"Authentication unavailable"});}
   try{
-   const c=config();
-   if(!jwks)jwks=createRemoteJWKSet(c.url);
-   const token=req.headers.authorization?.match(/^Bearer\s+(.+)$/i)?.[1];
-   if(!token)return res.status(401).json({error:"Authentication required"});
-   const {payload}=await jwtVerify(token,jwks,{issuer:c.issuer,audience:c.audience,algorithms:["RS256","ES256"]});
-   if(typeof payload.sub!=="string"||!payload.sub)return res.status(401).json({error:"Invalid identity subject"});
-   req.identity={subject:payload.sub,email:typeof payload.email==="string"?payload.email:null};
+   if(!jwks||jwksUrl!==c.url.href){jwks=createRemoteJWKSet(c.url,{timeoutDuration:5000,cooldownDuration:30000});jwksUrl=c.url.href;}
+   const {payload}=await jwtVerify(token,jwks,{issuer:c.issuer,audience:c.audience,algorithms:["RS256","ES256"],requiredClaims:["sub","iat","exp"],maxTokenAge:3600,clockTolerance:5});
+   if(!validSubject(payload.sub)||!validTokenLifetime(payload))return res.status(401).json({error:"Invalid identity or token lifetime"});
+   req.identity={subject:payload.sub,email:typeof payload.email==="string"&&payload.email.length<=320?payload.email:null};
    next();
-  }catch(e){res.status(401).json({error:e.message.includes("not configured")?"Authentication unavailable":"Invalid or expired access token"});}
+  }catch{res.status(401).json({error:"Invalid or expired access token"});}
  };
 }
 export function requireRole(...roles){

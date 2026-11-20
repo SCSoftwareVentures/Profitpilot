@@ -115,6 +115,9 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await withTenant(tenantB,"ci-api-tenant-b-only",client=>visibility(client,tenantB));
     await withTenant(tenantA,"ci-api-analyst",client=>visibility(client,tenantA));
     await visibility(appPool,null);
+    const blockedMatch=await withTenant(tenantB,"ci-api-tenant-b-only",c=>c.query("UPDATE match_reviews SET decision='confirmed',reviewer_id=$1,reviewed_at=now() WHERE id=$2",[userC,matchB]));
+    assert.equal(blockedMatch.rowCount,0,"database must deny analyst match confirmation");
+    await assert.rejects(()=>withTenant(tenantB,"ci-api-tenant-b-only",c=>c.query("UPDATE mapping_decisions SET decision='accepted' WHERE raw_row_id=$1",[rawB])),e=>e.code==="42501");
 
     // Role grants are checked on the actual runtime connection. A valid signed
     // context must not turn an analyst into an owner or permit evidence rewrites.
@@ -196,11 +199,22 @@ test("authenticated API enforces tenant membership, role permissions and import 
     }
     assert.deepEqual(await snapshot(),beforePreview,"preview must not persist financial or mapping records");
 
+    // HTTP authentication rejects missing expiry, excessive lifetime and malformed subject.
+    const rawJwt=async({subject="ci-api-analyst",expiry,issued=true}={})=>{
+      let jwt=new SignJWT({}).setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(issuer).setAudience(audience).setSubject(subject);
+      if(issued)jwt=jwt.setIssuedAt();if(expiry!==undefined)jwt=jwt.setExpirationTime(expiry);
+      return jwt.sign(privateKey);
+    };
+    for(const jwt of [await rawJwt(),await rawJwt({expiry:"2h"}),await rawJwt({expiry:"5m",issued:false}),await rawJwt({expiry:"5m",subject:"bad\nsubject"}),await rawJwt({expiry:Math.floor(Date.now()/1000)-60})]){
+      const denial=await fetch(base+"/v1/me",{headers:{authorization:"Bearer "+jwt}});
+      assert.equal(denial.status,401);assert.equal(denial.headers.get("cache-control"),"no-store");
+    }
     const noToken=await request("/v1/me");
     assert.equal(noToken.status,401,"requests without a bearer token must be rejected");
 
     const own=await request(`/v1/tenants/${tenantA}/contracts`,{subject:"ci-api-analyst"});
     assert.equal(own.status,200);
+    assert.equal(own.headers.get("cache-control"),"no-store");
     const ownBody=await own.json();
     assert.equal(ownBody.items.length,1);
     assert.equal(ownBody.items[0].id,contractA);
@@ -279,6 +293,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const created=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-analyst",method:"POST",body:importBody});
     assert.equal(created.status,201);
     const createdBody=await created.json();
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type) VALUES($1,$2,'forged','fixture')",[tenantA,userB])),e=>e.code==="42501");
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-reader",c=>c.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,'{}')",[tenantA,createdBody.batch.id])),e=>e.code==="42501");
     const storedBatch=await admin.query("SELECT tenant_id FROM import_batches WHERE id=$1",[createdBody.batch.id]);
     assert.equal(storedBatch.rows[0].tenant_id,tenantA,"client-supplied tenant identifiers must not override the authenticated path tenant");
     const duplicate=await request(`/v1/tenants/${tenantA}/imports`,{subject:"ci-api-analyst",method:"POST",body:importBody});
@@ -297,6 +313,9 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const row3={...row1,invoice_id:"CI-3"};
     const post=(suffix,body)=>request(path+suffix,{subject:"ci-api-analyst",method:"POST",body});
     assert.equal((await post("/rows",{startRow:2,rows:[row2]})).status,409,"gaps rejected");
+    assert.equal((await post("/rows",{rows:[{...row1,employee_name:"CI unwanted personal data"}]})).status,422);
+    assert.equal((await post("/rows",{rows:[{...row1,site:{name:"CI unwanted nested data"}}]})).status,422);
+    assert.equal((await admin.query("SELECT count(*)::int AS n FROM raw_import_rows WHERE batch_id=$1",[batchId])).rows[0].n,0);
     const first=await post("/rows",{rows:[row1]});
     assert.equal(first.status,201);
     assert.equal((await first.json()).inserted,1);

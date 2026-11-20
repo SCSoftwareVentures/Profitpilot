@@ -6,6 +6,7 @@ import rateLimit from "express-rate-limit";
 import {randomUUID} from "node:crypto";
 import {withTenant,health} from "./db.js";
 import {parseSourceFile,MAX_SOURCE_BYTES} from "./source-file.js";
+import {allowedImportRows} from "./privacy.js";
 import {authRequired,requireRole} from "./auth.js";
 import {validateInvoiceRows,validatePayrollRows,reconcilePayroll,isIsoDate} from "../src/engine.js";
 
@@ -18,7 +19,8 @@ const app=express();
 app.disable("x-powered-by");
 app.use(helmet());
 app.use(cors({origin:(process.env.CORS_ORIGIN||"").split(",").map(x=>x.trim()).filter(Boolean),credentials:false,methods:["GET","POST"]}));
-app.use(express.json({limit:"100kb"}));
+app.use("/v1",(_req,res,next)=>{res.set("Cache-Control","no-store");res.set("Pragma","no-cache");next();});
+app.use(express.json({limit:"100kb",inflate:false}));
 app.use(rateLimit({windowMs:60_000,limit:100,standardHeaders:true,legacyHeaders:false}));
 app.get("/health",async(req,res)=>{try{await health();res.json({status:"ok",database:"connected"});}catch{res.status(503).json({status:"unavailable"});}});
 app.use("/v1",authRequired());
@@ -105,8 +107,9 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requireRole("o
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async client=>{
   const tenant=req.membership.tenantId,batchId=req.params.batchId,payload=JSON.stringify(rows);
   // Serialise all ingestion and validation operations for the same batch.
-  const batch=await client.query("SELECT id,status FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[batchId,tenant]);
+  const batch=await client.query("SELECT id,status,source_type FROM import_batches WHERE id=$1 AND tenant_id=$2 FOR UPDATE",[batchId,tenant]);
   if(!batch.rowCount)return {status:404,error:"Import batch not found"};
+  if(!allowedImportRows(rows,batch.rows[0].source_type))return {status:422,error:"Rows must contain only allowed scalar source fields; remove unnecessary personal information"};
   const verified=await client.query("SELECT 1 FROM import_source_receipts WHERE tenant_id=$1 AND batch_id=$2",[tenant,batchId]);
   if(verified.rowCount)return {status:409,error:"Byte-verified rows cannot be replaced or extended through JSON ingestion"};
   const state=await client.query("SELECT COUNT(*)::int AS n,COALESCE(MAX(row_number),0)::int AS last FROM raw_import_rows WHERE batch_id=$1 AND tenant_id=$2",[batchId,tenant]);

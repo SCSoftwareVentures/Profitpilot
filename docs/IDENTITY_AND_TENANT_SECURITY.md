@@ -84,3 +84,9 @@ Append-only events for login/security changes, membership, source upload/access,
 - Privacy impact assessment, retention schedule and verified deletion tests.
 
 No production security certification is implied by this plan.
+
+## Security hardening baseline S1
+- API JWTs require issuer, audience, approved asymmetric algorithm, bounded subject, issued-at and expiration claims; lifetime at most one hour, five-second clock tolerance. JWKS HTTPS only outside an isolated loopback test. API responses (including denials) use no-store; compressed JSON is rejected.
+- Client-declared invoice/payroll rows now allow only source-specific fields, bounded strings or null; reject nested payloads and control characters before storage. This minimises accidental personal data, not a guarantee that allowed free text is anonymous. Legacy records not rewritten.
+- Migration 013 adds independent restrictive runtime role/actor policies for import, raw rows, mappings, invoice match decisions, calculations and audit insert. Unused mapping update grant removed. Actor binding prevents attributing a runtime write to another membership; privileged DB administrators and compromised signing process remain separate threat boundaries.
+- API container starts with read-only root, temporary filesystem, all capabilities dropped and no-new-privileges in Compose and CI. Dependency audit high/critical gate added; no complete independent software supply-chain certification.
