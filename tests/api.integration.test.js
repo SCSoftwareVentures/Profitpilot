@@ -130,6 +130,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const oldB=await createRunB("a".repeat(64)),nextB=await createRunB("b".repeat(64));
     await insertB("INSERT INTO calculation_restatements(tenant_id,prior_run_id,next_run_id,reviewed_by,reason_code,evidence_reference) VALUES($1,$2,$3,$4,'synthetic_changed_evidence','CI.fixture.restate')",[tenantB,oldB,nextB,independentB]);
     const fixturePrivacy=await insertB("INSERT INTO privacy_requests(tenant_id,requester_id,client_request_id,request_type) VALUES($1,$2,gen_random_uuid(),'access')",[tenantB,userC]);
+    const securepayCaseB=await insertB("INSERT INTO securepay_case_rehearsals(tenant_id,client_request_id,job_reference,claim_reference,opened_by) VALUES($1,gen_random_uuid(),'job.ci-tenantB','claim.ci-tenantB',$2)",[tenantB,userC]);
+    await insertB("INSERT INTO securepay_evidence_rehearsals(tenant_id,case_id,client_request_id,recorded_by,evidence_type,evidence_reference) VALUES($1,$2,gen_random_uuid(),$3,'operator_review_note','note.ci-tenantB')",[tenantB,securepayCaseB,userC]);
     // Automatically include every current public tenant-owned table (plus tenants)
     // and require its fixture, forced RLS, and both positive and negative visibility.
     const catalog=await admin.query("SELECT c.relname AS name,c.relrowsecurity AS rls,c.relforcerowsecurity AS forced FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND (c.relname='tenants' OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attname='tenant_id' AND NOT a.attisdropped)) ORDER BY c.relname");
@@ -147,7 +149,10 @@ test("authenticated API enforces tenant membership, role permissions and import 
         else assert.equal(result.rowCount,0,name+" exposed rows without signed context");
       }
     }
+    // Exercise full tenant inventory using an authorised operator, since SecurePay is operator-only.
+    await admin.query("UPDATE tenant_memberships SET role='owner' WHERE tenant_id=$1 AND user_id=$2",[tenantB,userC]);
     await withTenant(tenantB,"ci-api-tenant-b-only",client=>visibility(client,tenantB));
+    await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantB,userC]);
     await withTenant(tenantA,"ci-api-analyst",client=>visibility(client,tenantA));
     await visibility(appPool,null);
     const blockedMatch=await withTenant(tenantB,"ci-api-tenant-b-only",c=>c.query("UPDATE match_reviews SET decision='confirmed',reviewer_id=$1,reviewed_at=now() WHERE id=$2",[userC,matchB]));
