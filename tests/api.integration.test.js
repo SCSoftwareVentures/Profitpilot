@@ -118,7 +118,9 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const verifiedPayB=(await admin.query("SELECT id,allocation_line_id,amount::text,bucket_type,contract_version_no,currency FROM payroll_contract_rehearsals WHERE tenant_id=$1 AND allocation_line_id=$2",[tenantB,rehearsalLineB])).rows;
     const reportB=unifiedRehearsalContribution(verifiedInvB,verifiedPayB);
     const evidenceB={method:"unified-rehearsal-0.1.0",tenantId:tenantB,contractId:contractB,siteId:siteB,periodStart:"2026-02-01",periodEnd:"2026-02-28",invoiceLines:verifiedInvB,payrollLines:verifiedPayB,excludedLegacyPayroll:[],limitations:["Synthetic source fixture only"]};
+    await admin.query("UPDATE tenant_memberships SET role='reviewer' WHERE tenant_id=$1 AND user_id=$2",[tenantB,userC]);
     await insertB("INSERT INTO unified_report_snapshots(tenant_id,client_request_id,contract_id,site_id,period_start,period_end,created_by,contribution,evidence,evidence_sha256) VALUES($1,gen_random_uuid(),$2,$3,'2026-02-01','2026-02-28',$4,$5::jsonb,$6::jsonb,$7)",[tenantB,contractB,siteB,userC,JSON.stringify(reportB),JSON.stringify(evidenceB),reportDigest(evidenceB)]);
+    await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantB,userC]);
     // Every new tenant-owned table needs a populated tenant-B negative-control
     // fixture. This restatement uses synthetic admin-only digests, never real finance.
     const independentB="dddddddd-dddd-4ddd-8ddd-dddddddddddd";
