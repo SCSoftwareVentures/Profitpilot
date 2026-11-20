@@ -75,3 +75,6 @@ These prototypes are for design review only. They are not a deployed product or 
 ## Architecture specification baseline A1
 
 [Complete internal design package and requirement catalogue](docs/specification/README.md) — target design, not a completed application or production approval.
+
+## Security and privacy handover
+[Protected deployment requirements, privacy lifecycle and independent review gates](docs/SECURITY_PRIVACY_HANDOVER.md). Main-branch CI includes encrypted synthetic recovery, native scanner fixture testing, dependency inventory and source package provenance. Review corresponding run before relying on any claimed result.

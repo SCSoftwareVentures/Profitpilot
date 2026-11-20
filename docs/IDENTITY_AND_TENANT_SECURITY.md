@@ -92,3 +92,6 @@ No production security certification is implied by this plan.
 - API container starts with read-only root, temporary filesystem, all capabilities dropped and no-new-privileges in Compose and CI. Dependency audit high/critical gate added; no complete independent software supply-chain certification.
 
 The S1 follow-up enforces source-field allowlisting in a runtime database trigger as well as both HTTP ingestion routes. CI rehearses a synthetic database dump/restore, compares selected row counts and receipt hashes, and checks restored RLS deny-by-default. This is not production encrypted backup, RPO/RTO or disaster-recovery evidence.
+
+## S2/S3 buyer security and operational controls
+See [SECURITY_PRIVACY_HANDOVER.md](SECURITY_PRIVACY_HANDOVER.md). Protected mode requires database TLS, mounted secret files, trusted MFA ACR and a local scanner executable. API scan failures refuse storage. Privacy cases track requests and human review, not automated erasure. Exact npm lock and lifecycle scripts disabled. CI rehearses encrypted recovery and a native scanner with an isolated harmless test signature; the source evidence package includes a CycloneDX npm inventory, checksums and signed build provenance. These are synthetic controls, not proof of actual deployment, fresh production scanner signatures or legal compliance.

@@ -28,3 +28,6 @@ The Compose database initialization scripts run only when the named database vol
 - JSON ingestion is client-declared. Original CSV ingestion supports bounded uncompressed UTF-8 files, checksum checks and metadata receipts. Original bytes stored in PostgreSQL; production encryption, retention and malware scanning are not established.
 - Invoice and payroll structural validation and reviewed payroll reconciliation are implemented.
 - Do not use real personal, payroll or customer information in this prototype.
+
+## Profiles and dependency installation
+Use npm ci --ignore-scripts with the committed lock. Compose defaults to the synthetic prototype. Protected images require an explicitly selected Docker target, verified database TLS, mounted secrets, trusted MFA assurance configuration and independently maintained ClamAV definitions. See SECURITY_PRIVACY_HANDOVER.md. No actual customer data until release approval.

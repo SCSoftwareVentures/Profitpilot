@@ -23,10 +23,12 @@ jobs:
     timeout-minutes: 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Set up Node.js 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
 
@@ -62,7 +64,9 @@ jobs:
           --health-retries 10
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
 
       - name: Generate ephemeral tenant context signing key
         run: |
@@ -109,26 +113,36 @@ jobs:
           npm ci --ignore-scripts --no-audit --no-fund
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/api.integration.test.js
 
-      - name: Rehearse synthetic database backup and restore
+      - name: Rehearse encrypted synthetic database backup and restore
         env:
           PGPASSWORD: ci-admin-password
           PG_CONTAINER: ${{ job.services.postgres.id }}
         run: |
-          set -eu
+          set -euo pipefail
           umask 077
           ADMIN_URL="postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot"
           RESTORE_URL="postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot_restore"
-          DUMP="$(mktemp)"
-          trap 'rm -f "$DUMP"' EXIT
-          docker exec -e PGPASSWORD="$PGPASSWORD" "$PG_CONTAINER" pg_dump -h 127.0.0.1 -U profitpilot_admin -d profitpilot --format=custom > "$DUMP"
+          BACKUP_DIR="$(mktemp -d)"
+          trap 'rm -rf "$BACKUP_DIR"' EXIT
+          export GNUPGHOME="$BACKUP_DIR/gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          openssl rand -hex 32 > "$BACKUP_DIR/passphrase"
+          docker exec -e PGPASSWORD="$PGPASSWORD" "$PG_CONTAINER" pg_dump -h 127.0.0.1 -U profitpilot_admin -d profitpilot --format=custom | gpg --batch --yes --pinentry-mode loopback --no-symkey-cache --passphrase-file "$BACKUP_DIR/passphrase" --symmetric --cipher-algo AES256 --output "$BACKUP_DIR/backup.gpg"
+          test -s "$BACKUP_DIR/backup.gpg"
+          openssl rand -hex 32 > "$BACKUP_DIR/wrong-passphrase"
+          if gpg --batch --yes --pinentry-mode loopback --no-symkey-cache --passphrase-file "$BACKUP_DIR/wrong-passphrase" --decrypt "$BACKUP_DIR/backup.gpg" >/dev/null 2>&1; then
+            echo "Encrypted backup accepted an incorrect key"; exit 1
+          fi
+          DUMP="$BACKUP_DIR/verified.dump"
+          gpg --batch --yes --pinentry-mode loopback --no-symkey-cache --passphrase-file "$BACKUP_DIR/passphrase" --decrypt --output "$DUMP" "$BACKUP_DIR/backup.gpg"
           createdb -h localhost -U profitpilot_admin profitpilot_restore
-          docker exec -i -e PGPASSWORD="$PGPASSWORD" "$PG_CONTAINER" pg_restore -h 127.0.0.1 -U profitpilot_admin -d profitpilot_restore --exit-on-error < "$DUMP"
+          docker exec -i -e PGPASSWORD="$PGPASSWORD" "$PG_CONTAINER" pg_restore -h 127.0.0.1 -U profitpilot_admin -d profitpilot_restore --exit-on-error --single-transaction < "$DUMP"
           QUERY="SELECT (SELECT count(*) FROM tenants),(SELECT count(*) FROM raw_import_rows),(SELECT count(*) FROM audit_events),(SELECT count(*) FROM invoice_identity_claims),(SELECT count(*) FROM calculation_runs),(SELECT count(*) FROM privacy_requests),(SELECT count(*) FROM import_source_receipts WHERE sha256=encode(public.digest(original_bytes,'sha256'),'hex'));"
           test "$(psql "$ADMIN_URL" -At -c "$QUERY")" = "$(psql "$RESTORE_URL" -At -c "$QUERY")"
           RESTORED_APP="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot_restore"
           test "$(psql "$RESTORED_APP" -At -c 'SELECT count(*) FROM tenants;')" = "0"
           psql "$RESTORE_URL" -v ON_ERROR_STOP=1 -c "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM import_source_receipts WHERE sha256<>encode(public.digest(original_bytes,'sha256'),'hex')) THEN RAISE EXCEPTION 'Restored source receipt checksum mismatch'; END IF; END \$\$;"
-          echo 'Synthetic database restored; record counts, receipt hashes and deny-by-default RLS checked'
+          echo 'Encrypted synthetic database restored; wrong-key rejection, counts, receipt hashes and deny-by-default RLS checked'
           dropdb -h localhost -U profitpilot_admin profitpilot_restore
 
       - name: Build production API image
@@ -155,3 +169,72 @@ jobs:
           docker logs profitpilot-api-ci
           docker rm -f profitpilot-api-ci
           exit 1
+
+
+      - name: Build protected scanner image
+        run: docker build --target protected --pull -t profitpilot-protected:ci .
+
+      - name: Verify native scanner with isolated harmless test signature
+        run: |
+          set -euo pipefail
+          SIGDIR="$(mktemp -d)"
+          trap 'rm -rf "$SIGDIR"' EXIT
+          chmod 755 "$SIGDIR"
+          printf '%s' 'ProfitPilot harmless scanner test marker 2026' > "$SIGDIR/marker"
+          HASH="$(md5sum "$SIGDIR/marker" | cut -d ' ' -f1)"
+          SIZE="$(wc -c < "$SIGDIR/marker" | tr -d ' ')"
+          printf '%s:%s:%s\n' "$HASH" "$SIZE" 'ProfitPilot.CI.Harmless.Marker' > "$SIGDIR/local.hdb"
+          rm "$SIGDIR/marker"
+          docker run --rm --network none --read-only --tmpfs /tmp:rw,noexec,nosuid,size=64m --cap-drop ALL --security-opt no-new-privileges -v "$SIGDIR:/var/lib/clamav:ro" --entrypoint node profitpilot-protected:ci --input-type=module -e 'import {scanSource} from "./server/malware.js"; import assert from "node:assert/strict"; assert.equal(await scanSource(Buffer.from("Ordinary harmless fixture"),{enabled:true}),"scanner_reported_clean"); assert.equal(await scanSource(Buffer.from("ProfitPilot harmless scanner test marker 2026"),{enabled:true}),"infected"); console.log("Native scanner accepted clean fixture and rejected custom harmless signature");'
+
+  provenance:
+    name: Source package, SBOM and signed provenance
+    needs: [verify, database]
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Build source evidence and dependency inventory
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          mkdir release-evidence
+          git archive --format=tar.gz --prefix=profitpilot/ "$GITHUB_SHA" > release-evidence/profitpilot-source.tar.gz
+          npm sbom --sbom-format=cyclonedx --omit=dev > release-evidence/dependencies.cdx.json
+          node -e 'const s=JSON.parse(require("fs").readFileSync("release-evidence/dependencies.cdx.json")); if(s.bomFormat!=="CycloneDX"||!s.components?.length)process.exit(1)'
+          printf '%s\n' "$GITHUB_SHA" > release-evidence/COMMIT.txt
+          (cd release-evidence && sha256sum profitpilot-source.tar.gz dependencies.cdx.json COMMIT.txt > SHA256SUMS && sha256sum -c SHA256SUMS)
+          tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -czf profitpilot-source-evidence.tar.gz -C release-evidence .
+      - name: Sign source evidence provenance
+        id: attest
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: profitpilot-source-evidence.tar.gz
+      - name: Verify signed provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          gh attestation verify profitpilot-source-evidence.tar.gz --repo "$GITHUB_REPOSITORY" --bundle "$BUNDLE_PATH"
+          cp "$BUNDLE_PATH" profitpilot-attestation.jsonl
+      - name: Retain buyer-verifiable source evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: profitpilot-source-evidence-${{ github.sha }}
+          path: |
+            profitpilot-source-evidence.tar.gz
+            profitpilot-attestation.jsonl
+          if-no-files-found: error
+          retention-days: 30
