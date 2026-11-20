@@ -53,6 +53,26 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   const openedB=await request(rootB,{subject:"sp-s2-foreign",method:"POST",body:{...payload,clientRequestId:randomUUID()}});
   assert.equal(openedB.status,201);
   assert.equal((await request(rootA+"/"+openedB.body.item.id,{subject:"sp-s2-owner"})).status,404);
+  assert.equal((await request(rootA)).status,401);
+  assert.equal((await request(rootA,{subject:"sp-s2-reader"})).status,403);
+  assert.equal((await request(rootA,{subject:"sp-s2-foreign"})).status,403);
+  assert.equal((await request(rootA+"?cursor=not-a-uuid",{subject:"sp-s2-owner"})).status,400);
+  assert.equal((await request(rootA+"?cursor="+openedB.body.item.id,{subject:"sp-s2-owner"})).status,404);
+  const listB=await request(rootB,{subject:"sp-s2-foreign"});
+  assert.equal(listB.status,200);assert.deepEqual(listB.body.items.map(x=>x.id),[openedB.body.item.id]);
+  await withTenant(a,"sp-s2-owner",c=>c.query(
+   "INSERT INTO securepay_case_rehearsals(tenant_id,client_request_id,job_reference,claim_reference,opened_by) SELECT $1,gen_random_uuid(),'job.page-'||g,'claim.page-'||g,private.actor_id() FROM generate_series(1,101) g",[a]));
+  const casePage1=await request(rootA,{subject:"sp-s2-owner"});
+  assert.equal(casePage1.status,200,JSON.stringify(casePage1.body));
+  assert.equal(casePage1.body.items.length,100);
+  assert.equal(casePage1.body.hasMore,true);assert.ok(casePage1.body.nextCursor);
+  assert.equal(casePage1.body.paymentAuthority,false);assert.equal(casePage1.body.partyIdentityVerified,false);
+  assert.ok(casePage1.body.items.every(x=>x.synthetic===true&&x.funds_moved===false&&x.id!==openedB.body.item.id));
+  const casePage2=await request(rootA+"?cursor="+casePage1.body.nextCursor,{subject:"sp-s2-owner"});
+  assert.equal(casePage2.status,200,JSON.stringify(casePage2.body));
+  assert.equal(casePage2.body.items.length,2);assert.equal(casePage2.body.hasMore,false);
+  assert.equal(casePage2.body.nextCursor,null);
+  assert.equal(new Set([...casePage1.body.items,...casePage2.body.items].map(x=>x.id)).size,102);
   const evidence={clientRequestId:randomUUID(),evidenceType:"claim_reported",evidenceReference:"opaque.claim.001"};
   const ep=rootA+"/"+caseId+"/evidence";
   assert.equal((await request(ep,{subject:"sp-s2-reader",method:"POST",body:evidence})).status,403);
