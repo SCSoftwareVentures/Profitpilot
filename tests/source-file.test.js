@@ -29,3 +29,7 @@ test("invoice source rejects blank and repeated IDs without conflating distinct 
   assert.equal(distinct.rows.length,2);
  }
 });
+
+test("CSV parser rejects non-Buffer inputs regardless of their length",()=>{
+ for(const input of ["x",["x"],{length:1,byteLength:1},new Uint8Array([65]),null])assert.throws(()=>parseSourceFile(input,"customer_invoice"));
+});

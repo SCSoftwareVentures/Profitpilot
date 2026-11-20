@@ -7,7 +7,7 @@ const headersByType={
  supplier_invoice:["invoice_id","site","date","amount"]
 };
 export function parseSourceFile(bytes,sourceType){
- if(!Buffer.isBuffer(bytes)||!bytes.length||bytes.length>MAX_SOURCE_BYTES)throw new Error("CSV size outside supported bounds");
+ if(!(bytes instanceof Buffer)||!Buffer.isBuffer(bytes)||bytes.byteLength<1||bytes.byteLength>MAX_SOURCE_BYTES)throw new Error("CSV size outside supported bounds");
  const expected=headersByType[sourceType];
  if(!Array.isArray(expected))throw new Error("Unsupported source type");
  let text;

@@ -112,8 +112,11 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/file",membership,requireRole("o
   if(!req.is("text/csv")||(req.get("content-encoding")||"identity").toLowerCase()!=="identity")return res.status(415).json({error:"Only uncompressed text/csv is supported"});
   next();
  },express.raw({type:"text/csv",limit:MAX_SOURCE_BYTES,inflate:false}),async(req,res,next)=>{try{
- if(!Buffer.isBuffer(req.body)||!req.body.length)return res.status(422).json({error:"CSV body required"});
- const scanStatus=await scanSource(req.body,{enabled:profile.scannerEnabled});
+ const bytes=req.body;
+ if(!(bytes instanceof Buffer)||!Buffer.isBuffer(bytes))return res.status(422).json({error:"CSV body required"});
+ const byteCount=bytes.byteLength;
+ if(byteCount<1||byteCount>MAX_SOURCE_BYTES)return res.status(422).json({error:"CSV body outside supported bounds"});
+ const scanStatus=await scanSource(bytes,{enabled:profile.scannerEnabled});
  if(scanStatus==="infected")return res.status(422).json({error:"File rejected by malware scanner"});
  if(scanStatus==="unavailable"||(profile.protectedMode&&scanStatus!=="scanner_reported_clean"))return res.status(503).json({error:"Malware scan unavailable; file not stored"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
@@ -123,7 +126,7 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/file",membership,requireRole("o
   const b=batch.rows[0];
   if(!b.file_name.toLowerCase().endsWith(".csv")||b.file_name.includes("/")||b.file_name.includes(String.fromCharCode(92))||Array.from(b.file_name).some(ch=>ch.charCodeAt(0)<32||ch.charCodeAt(0)===127))return {status:422,error:"Source filename must be a plain CSV filename"};
   let parsed;
-  try{parsed=parseSourceFile(req.body,b.source_type);}catch(e){return {status:422,error:e.message};}
+  try{parsed=parseSourceFile(bytes,b.source_type);}catch(e){return {status:422,error:e.message};}
   if(!allowedImportRows(parsed.rows,b.source_type))return {status:422,error:"CSV source fields contain unsupported values"};
   if(parsed.sha256!==b.file_sha256)return {status:422,error:"Uploaded bytes do not match the declared SHA-256"};
   const prior=await c.query("SELECT sha256,byte_count,row_count,parser_version,scan_status FROM import_source_receipts WHERE tenant_id=$1 AND batch_id=$2",[tenant,batchId]);
@@ -135,7 +138,7 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/file",membership,requireRole("o
   if(!actor.rowCount)throw Object.assign(new Error("Active ingestion membership required"),{status:403});
   const userId=actor.rows[0].id;
   await c.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) SELECT $1,$2,p.ordinality::int,p.value FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY AS p(value,ordinality)",[tenant,batchId,JSON.stringify(parsed.rows)]);
-  const receipt=await c.query("INSERT INTO import_source_receipts(tenant_id,batch_id,sha256,byte_count,row_count,parser_version,original_bytes,received_by,scan_status) VALUES($1,$2,$3,$4,$5,'strict-csv-0.1.0',$6,$7,$8) RETURNING sha256,byte_count,row_count,parser_version,scan_status",[tenant,batchId,parsed.sha256,req.body.length,parsed.rows.length,req.body,userId,scanStatus]);
+  const receipt=await c.query("INSERT INTO import_source_receipts(tenant_id,batch_id,sha256,byte_count,row_count,parser_version,original_bytes,received_by,scan_status) VALUES($1,$2,$3,$4,$5,'strict-csv-0.1.0',$6,$7,$8) RETURNING sha256,byte_count,row_count,parser_version,scan_status",[tenant,batchId,parsed.sha256,byteCount,parsed.rows.length,bytes,userId,scanStatus]);
   await c.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'source_file_verified','import_batch',$3,'Original CSV checksum matched',$4)",[tenant,userId,batchId,JSON.stringify(receipt.rows[0])]);
   return {status:201,sourceIntegrity:"byte_verified",receipt:receipt.rows[0]};
  });

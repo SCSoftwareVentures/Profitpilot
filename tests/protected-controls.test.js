@@ -23,3 +23,17 @@ test("MFA checks trusted assurance and fresh signed authentication time",()=>{
  assert.ok(validMfa({acr:"strong",auth_time:100},"strong",500,900));
  for(const p of [{acr:"weak",auth_time:100},{acr:"strong"},{acr:"strong",auth_time:2000},{acr:"strong",auth_time:-1000}])assert.equal(validMfa(p,"strong",500,900),false);
 });
+
+test("mounted secret input is bounded and must be a nonempty regular UTF-8 file",()=>{
+ const dir=mkdtempSync(join(tmpdir(),"pp-secret-"));
+ try{
+  const path=join(dir,"secret"),env={TEST_SECRET_FILE:path};
+  for(const value of [""," ","x".repeat(8193),Buffer.from([0xff])]){
+   writeFileSync(path,value);
+   assert.throws(()=>readSecret("TEST_SECRET",env));
+  }
+  writeFileSync(path,"x".repeat(8192));
+  assert.equal(readSecret("TEST_SECRET",env).length,8192);
+  assert.throws(()=>readSecret("TEST_SECRET",{TEST_SECRET_FILE:dir}));
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});

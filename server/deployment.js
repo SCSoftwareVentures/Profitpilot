@@ -1,4 +1,4 @@
-import {readFileSync,statSync} from "node:fs";
+import {openSync,fstatSync,readSync,closeSync,constants} from "node:fs";
 
 // Prototype is synthetic only. Protected mode enforces prerequisites, not release approval.
 export function deploymentProfile(env=process.env){
@@ -15,9 +15,22 @@ export function readSecret(name,env=process.env){
  const path=env[name+"_FILE"];
  if(path){
   if(env[name])throw new Error("Ambiguous secret configuration: "+name);
-  const stat=statSync(path);
-  if(!stat.isFile()||stat.size<1||stat.size>8192)throw new Error("Invalid mounted secret: "+name);
-  return readFileSync(path,"utf8").trim();
+  // Open once and check/read the same descriptor; path replacement cannot switch the file mid-check.
+  const fd=openSync(path,constants.O_RDONLY|constants.O_NONBLOCK);
+  try{
+   const stat=fstatSync(fd);
+   if(!stat.isFile()||stat.size<1||stat.size>8192)throw new Error("Invalid mounted secret: "+name);
+   const bytes=Buffer.alloc(8193);let offset=0;
+   while(offset<bytes.byteLength){
+    const n=readSync(fd,bytes,offset,bytes.byteLength-offset,null);
+    if(n===0)break;
+    offset+=n;
+   }
+   if(offset<1||offset>8192)throw new Error("Invalid mounted secret: "+name);
+   const value=new TextDecoder("utf-8",{fatal:true}).decode(bytes.subarray(0,offset)).trim();
+   if(!value)throw new Error("Empty mounted secret: "+name);
+   return value;
+  }finally{closeSync(fd);}
  }
  return env[name]||"";
 }
