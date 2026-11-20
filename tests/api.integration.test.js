@@ -488,6 +488,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const sourceInfo=await request(sourcePath+"/source",{subject:"ci-api-reader"});
     const sourceInfoBody=await sourceInfo.json();
     assert.equal(sourceInfoBody.sourceIntegrity,"byte_verified");
+    assert.equal(sourceInfoBody.receipt.scan_status,"not_configured");
     assert.equal(sourceInfoBody.issuerAuthenticated,false);
     assert.ok(!JSON.stringify(sourceInfoBody).includes("original_bytes"));
     assert.equal((await request(`/v1/tenants/${tenantA}/imports/${verifiedB}/source`,{subject:"ci-api-analyst"})).status,404);

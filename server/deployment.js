@@ -5,12 +5,11 @@ export function deploymentProfile(env=process.env){
  const mode=env.PROFITPILOT_PROFILE||(env.NODE_ENV==="production"?null:"prototype");
  if(!["prototype","protected"].includes(mode))throw new Error("Explicit PROFITPILOT_PROFILE required");
  const protectedMode=mode==="protected";
- const socketPath=env.MALWARE_SCANNER_SOCKET||null;
+ const scannerEnabled=env.MALWARE_SCAN_MODE==="clamav";
  const acr=env.AUTH_MFA_ACR||null;
- if(socketPath&&(!socketPath.startsWith("/")||socketPath.length>100||socketPath.includes("\0")))throw new Error("Scanner requires a bounded absolute Unix socket path");
- if(protectedMode&&(!socketPath||!acr||acr.length>200||env.DATABASE_SSL!=="true"||!env.DATABASE_URL_FILE||!env.TENANT_CONTEXT_HMAC_SECRET_FILE))
+ if(protectedMode&&(!scannerEnabled||!acr||acr.length>200||env.DATABASE_SSL!=="true"||!env.DATABASE_URL_FILE||!env.TENANT_CONTEXT_HMAC_SECRET_FILE))
   throw new Error("Protected profile requires database TLS, mounted secrets, scanner and trusted MFA claim");
- return {mode,protectedMode,socketPath,acr};
+ return {mode,protectedMode,scannerEnabled,acr};
 }
 export function readSecret(name,env=process.env){
  const path=env[name+"_FILE"];

@@ -9,9 +9,9 @@ test("protected profile rejects missing prerequisites and TLS overrides",()=>{
  try{
   const url=join(dir,"url"),key=join(dir,"key");
   writeFileSync(url,"postgres://app@db.invalid/profitpilot\n");writeFileSync(key,"a".repeat(64));
-  const env={NODE_ENV:"production",PROFITPILOT_PROFILE:"protected",DATABASE_SSL:"true",DATABASE_URL_FILE:url,TENANT_CONTEXT_HMAC_SECRET_FILE:key,AUTH_MFA_ACR:"trusted-mfa",MALWARE_SCANNER_SOCKET:"/run/clamd/clamd.sock"};
+  const env={NODE_ENV:"production",PROFITPILOT_PROFILE:"protected",DATABASE_SSL:"true",DATABASE_URL_FILE:url,TENANT_CONTEXT_HMAC_SECRET_FILE:key,AUTH_MFA_ACR:"trusted-mfa",MALWARE_SCAN_MODE:"clamav"};
   assert.throws(()=>deploymentProfile({NODE_ENV:"production"}));
-  for(const k of ["DATABASE_SSL","DATABASE_URL_FILE","TENANT_CONTEXT_HMAC_SECRET_FILE","AUTH_MFA_ACR","MALWARE_SCANNER_SOCKET"])assert.throws(()=>deploymentProfile({...env,[k]:undefined}));
+  for(const k of ["DATABASE_SSL","DATABASE_URL_FILE","TENANT_CONTEXT_HMAC_SECRET_FILE","AUTH_MFA_ACR","MALWARE_SCAN_MODE"])assert.throws(()=>deploymentProfile({...env,[k]:undefined}));
   assert.deepEqual(databaseConfig(env).ssl,{rejectUnauthorized:true});
   assert.equal(readSecret("TENANT_CONTEXT_HMAC_SECRET",env),"a".repeat(64));
   assert.throws(()=>readSecret("DATABASE_URL",{...env,DATABASE_URL:"ambiguous"}));

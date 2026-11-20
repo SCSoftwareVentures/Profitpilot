@@ -11,7 +11,7 @@
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
     "test": "node --test",
-    "check": "node --check server/index.js && node --check server/auth.js && node --check server/db.js && node --check src/engine.js && node --check server/source-file.js && node --check src/invoice-identity.js && node --check tests/invoice-identity-prototype.test.js && node --check tests/api.integration.test.js && node --check tests/specification.test.js && node --check server/privacy.js && node --check tests/security-controls.test.js && node --check server/deployment.js && node --check tests/protected-controls.test.js"
+    "check": "node --check server/index.js && node --check server/auth.js && node --check server/db.js && node --check src/engine.js && node --check server/source-file.js && node --check src/invoice-identity.js && node --check tests/invoice-identity-prototype.test.js && node --check tests/api.integration.test.js && node --check tests/specification.test.js && node --check server/privacy.js && node --check tests/security-controls.test.js && node --check server/deployment.js && node --check tests/protected-controls.test.js && node --check server/malware.js && node --check tests/malware.test.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

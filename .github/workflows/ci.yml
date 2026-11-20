@@ -90,6 +90,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/012_invoice_identity_claims.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/013_runtime_actor_policies.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/014_privacy_requests.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/015_scan_receipts.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:

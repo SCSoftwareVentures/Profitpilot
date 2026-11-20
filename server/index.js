@@ -8,6 +8,7 @@ import {withTenant,health} from "./db.js";
 import {parseSourceFile,MAX_SOURCE_BYTES} from "./source-file.js";
 import {allowedImportRows} from "./privacy.js";
 import {deploymentProfile,readSecret} from "./deployment.js";
+import {scanSource} from "./malware.js";
 import {authRequired,requireRole} from "./auth.js";
 import {validateInvoiceRows,validatePayrollRows,reconcilePayroll,isIsoDate} from "../src/engine.js";
 
@@ -97,6 +98,10 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/file",membership,requireRole("o
   if(!req.is("text/csv")||(req.get("content-encoding")||"identity").toLowerCase()!=="identity")return res.status(415).json({error:"Only uncompressed text/csv is supported"});
   next();
  },express.raw({type:"text/csv",limit:MAX_SOURCE_BYTES,inflate:false}),async(req,res,next)=>{try{
+ if(!Buffer.isBuffer(req.body)||!req.body.length)return res.status(422).json({error:"CSV body required"});
+ const scanStatus=await scanSource(req.body,{enabled:profile.scannerEnabled});
+ if(scanStatus==="infected")return res.status(422).json({error:"File rejected by malware scanner"});
+ if(scanStatus==="unavailable"||(profile.protectedMode&&scanStatus!=="scanner_reported_clean"))return res.status(503).json({error:"Malware scan unavailable; file not stored"});
  const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
   const tenant=req.membership.tenantId,batchId=req.params.batchId;
   const batch=await c.query("SELECT id,status,source_type,file_sha256,file_name FROM import_batches WHERE tenant_id=$1 AND id=$2 FOR UPDATE",[tenant,batchId]);
@@ -107,8 +112,8 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/file",membership,requireRole("o
   try{parsed=parseSourceFile(req.body,b.source_type);}catch(e){return {status:422,error:e.message};}
   if(!allowedImportRows(parsed.rows,b.source_type))return {status:422,error:"CSV source fields contain unsupported values"};
   if(parsed.sha256!==b.file_sha256)return {status:422,error:"Uploaded bytes do not match the declared SHA-256"};
-  const prior=await c.query("SELECT sha256,byte_count,row_count,parser_version FROM import_source_receipts WHERE tenant_id=$1 AND batch_id=$2",[tenant,batchId]);
-  if(prior.rowCount)return {status:200,receipt:prior.rows[0],sourceIntegrity:"byte_verified",idempotent:true};
+  const prior=await c.query("SELECT sha256,byte_count,row_count,parser_version,scan_status FROM import_source_receipts WHERE tenant_id=$1 AND batch_id=$2",[tenant,batchId]);
+  if(prior.rowCount){if(profile.protectedMode&&prior.rows[0].scan_status!=="scanner_reported_clean")return {status:409,error:"Legacy unscanned receipt requires controlled review"};return {status:200,receipt:prior.rows[0],sourceIntegrity:"byte_verified",idempotent:true};}
   if(b.status!=="uploaded")return {status:409,error:"Batch is not open for original-file ingestion"};
   const existing=await c.query("SELECT 1 FROM raw_import_rows WHERE tenant_id=$1 AND batch_id=$2 LIMIT 1",[tenant,batchId]);
   if(existing.rowCount)return {status:409,error:"Client-ingested rows cannot be retroactively labelled byte-verified"};
@@ -116,7 +121,7 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/file",membership,requireRole("o
   if(!actor.rowCount)throw Object.assign(new Error("Active ingestion membership required"),{status:403});
   const userId=actor.rows[0].id;
   await c.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) SELECT $1,$2,p.ordinality::int,p.value FROM jsonb_array_elements($3::jsonb) WITH ORDINALITY AS p(value,ordinality)",[tenant,batchId,JSON.stringify(parsed.rows)]);
-  const receipt=await c.query("INSERT INTO import_source_receipts(tenant_id,batch_id,sha256,byte_count,row_count,parser_version,original_bytes,received_by) VALUES($1,$2,$3,$4,$5,'strict-csv-0.1.0',$6,$7) RETURNING sha256,byte_count,row_count,parser_version",[tenant,batchId,parsed.sha256,req.body.length,parsed.rows.length,req.body,userId]);
+  const receipt=await c.query("INSERT INTO import_source_receipts(tenant_id,batch_id,sha256,byte_count,row_count,parser_version,original_bytes,received_by,scan_status) VALUES($1,$2,$3,$4,$5,'strict-csv-0.1.0',$6,$7,$8) RETURNING sha256,byte_count,row_count,parser_version,scan_status",[tenant,batchId,parsed.sha256,req.body.length,parsed.rows.length,req.body,userId,scanStatus]);
   await c.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'source_file_verified','import_batch',$3,'Original CSV checksum matched',$4)",[tenant,userId,batchId,JSON.stringify(receipt.rows[0])]);
   return {status:201,sourceIntegrity:"byte_verified",receipt:receipt.rows[0]};
  });
@@ -125,10 +130,10 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/file",membership,requireRole("o
 
 app.get("/v1/tenants/:tenantId/imports/:batchId/source",membership,async(req,res,next)=>{try{
  if(!isUuid(req.params.batchId))return res.status(400).json({error:"Invalid batch ID"});
- const r=await withTenant(req.membership.tenantId,req.identity.subject,c=>c.query("SELECT b.id,b.file_sha256,r.sha256,r.byte_count,r.row_count,r.parser_version,r.received_at FROM import_batches b LEFT JOIN import_source_receipts r ON r.tenant_id=b.tenant_id AND r.batch_id=b.id WHERE b.tenant_id=$1 AND b.id=$2",[req.membership.tenantId,req.params.batchId]));
+ const r=await withTenant(req.membership.tenantId,req.identity.subject,c=>c.query("SELECT b.id,b.file_sha256,r.sha256,r.byte_count,r.row_count,r.parser_version,r.scan_status,r.received_at FROM import_batches b LEFT JOIN import_source_receipts r ON r.tenant_id=b.tenant_id AND r.batch_id=b.id WHERE b.tenant_id=$1 AND b.id=$2",[req.membership.tenantId,req.params.batchId]));
  if(!r.rowCount)return res.status(404).json({error:"Import batch not found"});
  const row=r.rows[0];
- res.json({batchId:row.id,declaredSha256:row.file_sha256,sourceIntegrity:row.sha256?"byte_verified":"client_declared",receipt:row.sha256?{sha256:row.sha256,byte_count:row.byte_count,row_count:row.row_count,parser_version:row.parser_version,received_at:row.received_at}:null,issuerAuthenticated:false});
+ res.json({batchId:row.id,declaredSha256:row.file_sha256,sourceIntegrity:row.sha256?"byte_verified":"client_declared",receipt:row.sha256?{sha256:row.sha256,byte_count:row.byte_count,row_count:row.row_count,parser_version:row.parser_version,scan_status:row.scan_status,received_at:row.received_at}:null,issuerAuthenticated:false});
  }catch(e){next(e);}});
 
 app.post("/v1/tenants/:tenantId/imports/:batchId/rows",membership,requireRole("owner","admin","analyst"),async(req,res,next)=>{try{
