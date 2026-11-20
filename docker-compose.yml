@@ -36,6 +36,7 @@ services:
       - ./database/migrations/021_privacy_case_dual_review.sql:/docker-entrypoint-initdb.d/023-privacy-dual-review.sql:ro
       - ./database/migrations/022_privacy_case_evidence_gate.sql:/docker-entrypoint-initdb.d/024-privacy-evidence-gate.sql:ro
       - ./database/migrations/023_calculation_restatement.sql:/docker-entrypoint-initdb.d/025-calculation-restatement.sql:ro
+      - ./database/migrations/024_unified_report_snapshots.sql:/docker-entrypoint-initdb.d/026-unified-reports.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s

@@ -112,6 +112,14 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("UPDATE import_batches SET status='accepted' WHERE id=$1",[payrollBatchB]);
     await insertB("INSERT INTO payroll_contract_rehearsals(tenant_id,allocation_line_id,contract_id,reviewer_id,evidence_reference) VALUES($1,$2,$3,$4,'CI.B.attribution')",[tenantB,rehearsalLineB,contractB,userC]);
     await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantB,userC]);
+    // Tenant-B materialisation is required by the complete, non-vacuous RLS inventory.
+    const {unifiedRehearsalContribution,snapshotDigest:reportDigest}=await import("../src/financial-calculation.js");
+    const verifiedInvB=(await admin.query("SELECT id,amount::text,cost_kind,contract_version_no FROM invoice_confirmation_rehearsals WHERE tenant_id=$1 AND id=$2",[tenantB,rehearsalB])).rows;
+    const verifiedPayB=(await admin.query("SELECT id,allocation_line_id,amount::text,bucket_type,contract_version_no,currency FROM payroll_contract_rehearsals WHERE tenant_id=$1 AND allocation_line_id=$2",[tenantB,rehearsalLineB])).rows;
+    verifiedInvB.forEach(x=>x.currency="AUD");
+    const reportB=unifiedRehearsalContribution(verifiedInvB,verifiedPayB);
+    const evidenceB={method:"unified-rehearsal-0.1.0",tenantId:tenantB,contractId:contractB,siteId:siteB,periodStart:"2026-02-01",periodEnd:"2026-02-28",invoiceLines:verifiedInvB,payrollLines:verifiedPayB,excludedLegacyPayroll:[],limitations:["Synthetic source fixture only"]};
+    await insertB("INSERT INTO unified_report_snapshots(tenant_id,client_request_id,contract_id,site_id,period_start,period_end,created_by,contribution,evidence,evidence_sha256) VALUES($1,gen_random_uuid(),$2,$3,'2026-02-01','2026-02-28',$4,$5::jsonb,$6::jsonb,$7)",[tenantB,contractB,siteB,userC,JSON.stringify(reportB),JSON.stringify(evidenceB),reportDigest(evidenceB)]);
     // Every new tenant-owned table needs a populated tenant-B negative-control
     // fixture. This restatement uses synthetic admin-only digests, never real finance.
     const independentB="dddddddd-dddd-4ddd-8ddd-dddddddddddd";
@@ -563,6 +571,25 @@ test("authenticated API enforces tenant membership, role permissions and import 
        assert.equal(u.contribution.revenue,"100.00");assert.equal(u.contribution.labourCost,"30.01");assert.equal(u.contribution.contribution,"69.99");
        assert.equal(u.contribution.completeness,"incomplete");assert.equal(u.persisted,false);assert.equal(u.financialInclusionAuthorized,false);
        assert.equal(u.evidence.excludedLegacyPayroll.length,1);assert.equal(snapshotDigest(u.evidence),u.evidenceSha256);
+       const reportPath=`/v1/tenants/${tenantA}/prototype/unified-reports`;
+       const reportBody={synthetic:true,clientRequestId:"99999999-9999-4999-8999-999999999998",contractId:contractA,siteId:siteA,periodStart:"2026-02-01",periodEnd:"2026-02-28"};
+       const saveReport=(body=reportBody,subject="ci-api-analyst")=>request(reportPath,{subject,method:"POST",body});
+       const saved=await saveReport();assert.equal(saved.status,201);
+       const persisted=(await saved.json()).item;
+       assert.equal(persisted.contribution.contribution,"69.99");
+       assert.equal(persisted.evidence_sha256,u.evidenceSha256);
+       assert.equal(persisted.contribution.completeness,"incomplete");
+       assert.equal((await saveReport()).status,200,"identical replay is safe");
+       assert.equal((await saveReport({...reportBody,clientRequestId:"99999999-9999-4999-8999-999999999997"})).status,409,"same evidence cannot be duplicated via alternate request ID");
+       assert.equal((await saveReport({...reportBody,periodStart:"2026-01-01"})).status,422,"partial service periods must not persist");
+       const fetched=await request(reportPath+"/"+persisted.id,{subject:"ci-api-analyst"});
+       assert.equal(fetched.status,200);assert.equal((await fetched.json()).item.evidence_sha256,u.evidenceSha256);
+       assert.equal((await request(reportPath+"/"+persisted.id,{subject:"ci-api-tenant-b-only"})).status,403);
+       await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("UPDATE unified_report_snapshots SET evidence='{}' WHERE id=$1",[persisted.id])),e=>e.code==="42501");
+       await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("DELETE FROM unified_report_snapshots WHERE id=$1",[persisted.id])),e=>e.code==="42501");
+       await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("INSERT INTO unified_report_snapshots(tenant_id,client_request_id,contract_id,site_id,period_start,period_end,created_by,contribution,evidence,evidence_sha256) VALUES($1,gen_random_uuid(),$2,$3,'2026-02-01','2026-02-28',private.actor_id(),$4,$5,$6)",[tenantA,contractA,siteA,JSON.stringify({...u.contribution,revenue:"99999.00"}),JSON.stringify(u.evidence),u.evidenceSha256])),e=>e.code==="23514","database rejects fabricated totals");
+       assert.equal((await admin.query("SELECT count(*)::int n FROM audit_events WHERE tenant_id=$1 AND object_id=$2 AND action='unified_report_saved'",[tenantA,persisted.id])).rows[0].n,1);
+
        assert.equal((await admin.query("SELECT count(*)::int n FROM audit_events WHERE object_id=$1 AND action='payroll_contract_rehearsed'",[attributed.rows[0].id])).rows[0].n,1);
       }finally{await admin.query("UPDATE tenants SET invoice_rehearsal_enabled=false WHERE id=$1",[tenantA]);}
       const sr=await admin.query("SELECT id,source_ref FROM payroll_source_records WHERE payroll_pool_id=$1 ORDER BY source_ref",[result.poolId]);

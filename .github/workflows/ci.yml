@@ -107,6 +107,7 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/021_privacy_case_dual_review.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/022_privacy_case_evidence_gate.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/023_calculation_restatement.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/024_unified_report_snapshots.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:
@@ -149,7 +150,7 @@ jobs:
           gpg --batch --yes --pinentry-mode loopback --no-symkey-cache --passphrase-file "$BACKUP_DIR/passphrase" --decrypt --output "$DUMP" "$BACKUP_DIR/backup.gpg"
           createdb -h localhost -U profitpilot_admin profitpilot_restore
           docker exec -i -e PGPASSWORD="$PGPASSWORD" "$PG_CONTAINER" pg_restore -h 127.0.0.1 -U profitpilot_admin -d profitpilot_restore --exit-on-error --single-transaction < "$DUMP"
-          QUERY="SELECT (SELECT count(*) FROM tenants),(SELECT count(*) FROM raw_import_rows),(SELECT count(*) FROM audit_events),(SELECT count(*) FROM invoice_identity_claims),(SELECT count(*) FROM invoice_confirmation_rehearsals),(SELECT count(*) FROM payroll_contract_rehearsals),(SELECT count(*) FROM calculation_runs),(SELECT count(*) FROM calculation_restatements),(SELECT count(*) FROM privacy_requests),(SELECT count(*) FROM import_source_receipts WHERE sha256=encode(public.digest(original_bytes,'sha256'),'hex'));"
+          QUERY="SELECT (SELECT count(*) FROM tenants),(SELECT count(*) FROM raw_import_rows),(SELECT count(*) FROM audit_events),(SELECT count(*) FROM invoice_identity_claims),(SELECT count(*) FROM invoice_confirmation_rehearsals),(SELECT count(*) FROM payroll_contract_rehearsals),(SELECT count(*) FROM calculation_runs),(SELECT count(*) FROM calculation_restatements),(SELECT count(*) FROM unified_report_snapshots),(SELECT count(*) FROM privacy_requests),(SELECT count(*) FROM import_source_receipts WHERE sha256=encode(public.digest(original_bytes,'sha256'),'hex'));"
           test "$(psql "$ADMIN_URL" -At -c "$QUERY")" = "$(psql "$RESTORE_URL" -At -c "$QUERY")"
           RESTORED_APP="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot_restore"
           test "$(psql "$RESTORED_APP" -At -c 'SELECT count(*) FROM tenants;')" = "0"

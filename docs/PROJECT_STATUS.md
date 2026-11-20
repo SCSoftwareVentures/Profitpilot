@@ -128,3 +128,5 @@ S11 signed audit checkpoint CLI and tests: Ed25519 attest/verify, tenant-scoped 
 S12: prior checkpoint signature, tenant and full event-prefix verification required before successor signing, plus tested historical continuity using real PostgreSQL audit events. External witness, safe key rotation, large-tenant pagination and legal/operational assurance still remain. CI pending.
 
 F4 synthetic calculation restatement lineage: immutable old/new run links with independently authorised reviewer, same scope, changed verified evidence digests, idempotency, audit, tenant RLS and no live-financial activation. Existing calculation records remain unchanged; unified F3 preview still not persisted. CI pending.
+
+F5 synthetic source-backed unified report persistence: repeatable-read exact contribution snapshots, database validation against actual invoice/payroll source rows, immutable/tenant-RLS, idempotent request keys, audit and digest-checked read endpoint. Incomplete and not production-activated. CI pending.

@@ -355,6 +355,22 @@ paths:
       responses:
         "200": { description: Old/new run IDs, source digests and reviewer references }
         "404": { description: Restatement not visible }
+  /tenants/{tenantId}/prototype/unified-reports:
+    post:
+      summary: Persist immutable incomplete synthetic contribution report
+      description: Uses the current independently reviewed invoice and contract-attributed payroll evidence in a repeatable-read tenant transaction. Database rechecks actual financial totals and unique source lines. No caller-provided money, payment or production authorisation.
+      responses:
+        "201": { description: New source-linked report and digest }
+        "200": { description: Exact idempotent replay }
+        "409": { description: Duplicate source evidence or conflicting request }
+        "422": { description: Invalid or incomplete scoped financial evidence }
+  /tenants/{tenantId}/prototype/unified-reports/{reportId}:
+    get:
+      summary: Retrieve immutable synthetic report with digest verification
+      responses:
+        "200": { description: Stored evidence and exact incompletely covered contribution }
+        "404": { description: Not visible to the tenant }
+        "409": { description: Stored evidence digest mismatch }
   /tenants/{tenantId}/calculations:
     parameters:
       - $ref: '#/components/parameters/TenantId'

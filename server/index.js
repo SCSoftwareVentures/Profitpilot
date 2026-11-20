@@ -410,12 +410,8 @@ app.post("/v1/tenants/:tenantId/prototype/payroll-attributions",membership,requi
  });
  const {status,...out}=result;res.status(status).json({...out,synthetic:true,financialInclusionAuthorized:false});
 }catch(e){if(["23514","23503"].includes(e.code))return res.status(422).json({error:"Confirmed source-linked payroll and approved contract/site required"});next(e);}});
-app.post("/v1/tenants/:tenantId/prototype/unified-contribution",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
- const body=req.body||{}, {synthetic,contractId,siteId,periodStart,periodEnd}=body;
- if(profile.mode!=="prototype")return res.status(403).json({error:"Synthetic rehearsal unavailable in protected profile"});
- if(synthetic!==true||Object.keys(body).some(k=>!["synthetic","contractId","siteId","periodStart","periodEnd"].includes(k))||!isUuid(contractId)||!isUuid(siteId)||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodStart>periodEnd)return res.status(400).json({error:"Explicit synthetic scope and valid dates required"});
- const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
-  const tenant=req.membership.tenantId,args=[tenant,contractId,siteId,periodStart,periodEnd];
+async function computeUnifiedSnapshot(c,tenant,contractId,siteId,periodStart,periodEnd){
+  const args=[tenant,contractId,siteId,periodStart,periodEnd];
   const enabled=await c.query("SELECT id FROM tenants WHERE id=$1 AND invoice_rehearsal_enabled",[tenant]);
   if(!enabled.rowCount)return {status:403,error:"Synthetic rehearsal tenant not provisioned"};
   const versions=await c.query("SELECT cv.id,cv.version_no,cv.currency,cv.effective_from::text AS effective_from,cv.effective_to::text AS effective_to,cv.price::text AS price,cv.billing_basis,cv.approved_by FROM contract_versions cv JOIN contracts ct ON ct.tenant_id=cv.tenant_id AND ct.id=cv.contract_id JOIN sites s ON s.tenant_id=ct.tenant_id AND s.business_id=ct.business_id AND s.id=$3 WHERE cv.tenant_id=$1 AND cv.contract_id=$2 AND ct.status='active' AND s.status='active' AND cv.approved_at IS NOT NULL AND cv.approved_by IS NOT NULL AND cv.effective_from<=$5::date AND (cv.effective_to IS NULL OR cv.effective_to>=$4::date) LIMIT 2",args);
@@ -431,8 +427,45 @@ app.post("/v1/tenants/:tenantId/prototype/unified-contribution",membership,requi
   let contribution;try{contribution=unifiedRehearsalContribution(invoices.rows,payroll.rows);}catch(e){if(e instanceof RangeError)return {status:422,error:e.message};throw e;}
   const evidence={method:"unified-rehearsal-0.1.0",tenantId:tenant,contractId,siteId,periodStart,periodEnd,contractVersion:v,invoiceLines:invoices.rows,payrollLines:payroll.rows,excludedLegacyPayroll:legacy.rows,limitations:["Incomplete synthetic contribution, not audited profit.","No automatic invoice or payroll promotion. No shared allocation line splitting or cross-period proration.","Legacy payroll and non-site, excluded or unallocated amounts are not included. Other contract attributions are excluded.","Invoice tax basis is reviewer-attested; actual GST treatment and source authenticity remain unverified.","No evidence of complete supplier coverage or absence of economic overlap between invoice and payroll sources."]};
   return {status:200,contribution,evidence,evidenceSha256:snapshotDigest(evidence)};
- },{repeatableRead:true});
+}
+app.post("/v1/tenants/:tenantId/prototype/unified-contribution",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
+ const body=req.body||{},{synthetic,contractId,siteId,periodStart,periodEnd}=body;
+ if(profile.mode!=="prototype")return res.status(403).json({error:"Synthetic rehearsal unavailable in protected profile"});
+ if(synthetic!==true||Object.keys(body).some(k=>!["synthetic","contractId","siteId","periodStart","periodEnd"].includes(k))||![contractId,siteId].every(isUuid)||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodStart>periodEnd)return res.status(400).json({error:"Explicit synthetic scope and valid dates required"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,c=>computeUnifiedSnapshot(c,req.membership.tenantId,contractId,siteId,periodStart,periodEnd),{repeatableRead:true});
  const {status,...out}=result;res.status(status).json({...out,synthetic:true,financialInclusionAuthorized:false,issuerAuthenticated:false,persisted:false});
+}catch(e){next(e);}});
+
+// F5: immutable synthetic unified report, derived and written within one
+// repeatable-read tenant transaction. The API accepts no client amounts or hashes.
+const unifiedReportColumns="id,client_request_id,contract_id,site_id,period_start::text,period_end::text,created_by,evidence_sha256,contribution,evidence,created_at";
+app.post("/v1/tenants/:tenantId/prototype/unified-reports",membership,requireRole("owner","admin","reviewer"),async(req,res,next)=>{try{
+ const body=req.body||{},{synthetic,clientRequestId,contractId,siteId,periodStart,periodEnd}=body;
+ if(profile.mode!=="prototype")return res.status(403).json({error:"Synthetic reporting disabled in protected profile"});
+ if(synthetic!==true||Object.keys(body).some(k=>!["synthetic","clientRequestId","contractId","siteId","periodStart","periodEnd"].includes(k))
+ ||![clientRequestId,contractId,siteId].every(isUuid)||!isIsoDate(periodStart)||!isIsoDate(periodEnd)||periodStart>periodEnd)
+ return res.status(400).json({error:"Valid synthetic request ID and financial scope required"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
+  const tenant=req.membership.tenantId;
+  const proposed=await computeUnifiedSnapshot(c,tenant,contractId,siteId,periodStart,periodEnd);
+  if(proposed.status!==200)return {status:proposed.status,error:proposed.error};
+  const {contribution,evidence,evidenceSha256}=proposed;
+  const args=[tenant,clientRequestId,contractId,siteId,periodStart,periodEnd,JSON.stringify(contribution),JSON.stringify(evidence),evidenceSha256];
+  const inserted=await c.query("INSERT INTO unified_report_snapshots(tenant_id,client_request_id,contract_id,site_id,period_start,period_end,created_by,contribution,evidence,evidence_sha256) VALUES($1,$2,$3,$4,$5,$6,private.actor_id(),$7::jsonb,$8::jsonb,$9) ON CONFLICT DO NOTHING RETURNING "+unifiedReportColumns,args);
+  if(inserted.rowCount)return {status:201,item:inserted.rows[0]};
+  const replay=await c.query("SELECT "+unifiedReportColumns+" FROM unified_report_snapshots WHERE tenant_id=$1 AND client_request_id=$2 AND contract_id=$3 AND site_id=$4 AND period_start=$5 AND period_end=$6 AND created_by=private.actor_id() AND evidence_sha256=$7",[tenant,clientRequestId,contractId,siteId,periodStart,periodEnd,evidenceSha256]);
+  return replay.rowCount?{status:200,item:replay.rows[0]}:{status:409,error:"A different request or evidence snapshot already exists"};
+ },{repeatableRead:true});
+ const {status,...out}=result;
+ res.status(status).json({...out,synthetic:true,completeness:"incomplete",issuerAuthenticated:false,financialInclusionAuthorized:false,externalVerification:false});
+}catch(e){if(["23514","23503","22P02","22003"].includes(e.code))return res.status(422).json({error:"Invalid source-linked synthetic report"});next(e);}});
+app.get("/v1/tenants/:tenantId/prototype/unified-reports/:reportId",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
+ if(!isUuid(req.params.reportId))return res.status(400).json({error:"Invalid unified report ID"});
+ const data=await withTenant(req.membership.tenantId,req.identity.subject,c=>c.query("SELECT "+unifiedReportColumns+" FROM unified_report_snapshots WHERE tenant_id=$1 AND id=$2",[req.membership.tenantId,req.params.reportId]));
+ if(!data.rowCount)return res.status(404).json({error:"Unified report not found"});
+ const item=data.rows[0];
+ if(snapshotDigest(item.evidence)!==item.evidence_sha256)return res.status(409).json({error:"Stored financial evidence integrity mismatch"});
+ res.json({item,synthetic:true,completeness:"incomplete",issuerAuthenticated:false,financialInclusionAuthorized:false,externalVerification:false});
 }catch(e){next(e);}});
 
 // F4: durable, review-controlled link between existing immutable calculations.
