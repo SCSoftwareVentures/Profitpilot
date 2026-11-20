@@ -316,6 +316,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal((await post("/rows",{rows:[{...row1,employee_name:"CI unwanted personal data"}]})).status,422);
     assert.equal((await post("/rows",{rows:[{...row1,site:{name:"CI unwanted nested data"}}]})).status,422);
     assert.equal((await admin.query("SELECT count(*)::int AS n FROM raw_import_rows WHERE batch_id=$1",[batchId])).rows[0].n,0);
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,$3)",[tenantA,batchId,JSON.stringify({...row1,employee_name:"CI forbidden field"})])),e=>e.code==="23514");
     const first=await post("/rows",{rows:[row1]});
     assert.equal(first.status,201);
     assert.equal((await first.json()).inserted,1);

@@ -76,6 +76,7 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/file",membership,requireRole("o
   if(!b.file_name.toLowerCase().endsWith(".csv")||b.file_name.includes("/")||b.file_name.includes(String.fromCharCode(92))||Array.from(b.file_name).some(ch=>ch.charCodeAt(0)<32||ch.charCodeAt(0)===127))return {status:422,error:"Source filename must be a plain CSV filename"};
   let parsed;
   try{parsed=parseSourceFile(req.body,b.source_type);}catch(e){return {status:422,error:e.message};}
+  if(!allowedImportRows(parsed.rows,b.source_type))return {status:422,error:"CSV source fields contain unsupported values"};
   if(parsed.sha256!==b.file_sha256)return {status:422,error:"Uploaded bytes do not match the declared SHA-256"};
   const prior=await c.query("SELECT sha256,byte_count,row_count,parser_version FROM import_source_receipts WHERE tenant_id=$1 AND batch_id=$2",[tenant,batchId]);
   if(prior.rowCount)return {status:200,receipt:prior.rows[0],sourceIntegrity:"byte_verified",idempotent:true};

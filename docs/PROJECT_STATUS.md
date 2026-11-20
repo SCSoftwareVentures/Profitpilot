@@ -78,3 +78,5 @@ Migration 012 introduces tenant-scoped, reviewer-only persistent identity reserv
 
 ## Security hardening S1
 Migration 013 independently restricts runtime roles and actor attribution, removes unused mapping mutation authority, and adds negative tests. HTTP authentication now requires bounded lifetime/subject and TLS JWKS outside tests; APIs use no-store and reject compressed JSON; imports use per-source scalar field allowlists. CI adds dependency audit and hardened container smoke. No live identity-provider MFA, production privacy assessment, recovery evidence or independent penetration test claimed. New CI pending.
+
+S1 follow-up adds a runtime database field guard and a synthetic CI backup/restore rehearsal. Actual environment retention, subject access/erasure, key escrow and live disaster recovery remain unresolved.
