@@ -152,6 +152,61 @@ app.post("/v1/tenants/:tenantId/imports/:batchId/validate",membership,requireRol
  }catch(e){next(e);}});
 
 
+
+// Review-only identity registry: reservations do not confirm matches or authorise financial inclusion.
+app.get("/v1/tenants/:tenantId/imports/:batchId/invoice-identities",membership,requireRole("owner","admin","analyst","reviewer"),async(req,res,next)=>{try{
+ if(!isUuid(req.params.batchId))return res.status(400).json({error:"Invalid batch ID"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
+  const args=[req.membership.tenantId,req.params.batchId];
+  const b=await c.query("SELECT source_type FROM import_batches WHERE tenant_id=$1 AND id=$2",args);
+  if(!b.rowCount)return {status:404,error:"Import batch not found"};
+  if(!["customer_invoice","supplier_invoice"].includes(b.rows[0].source_type))return {status:422,error:"Invoice batch required"};
+  const rows=await c.query(`SELECT r.id AS raw_row_id,r.row_number,CASE WHEN jsonb_typeof(r.payload->'invoice_id')='string' THEN r.payload->>'invoice_id' END AS reference,
+   m.decision AS structural_decision,ic.id AS claim_id,ic.issuer_key,ic.source_integrity,
+   (SELECT count(DISTINCT other.batch_id)::int FROM raw_import_rows other JOIN import_batches ob ON ob.tenant_id=other.tenant_id AND ob.id=other.batch_id
+    WHERE other.tenant_id=r.tenant_id AND other.batch_id<>r.batch_id AND ob.source_type=$3
+    AND jsonb_typeof(other.payload->'invoice_id')='string' AND jsonb_typeof(r.payload->'invoice_id')='string'
+    AND private.invoice_review_alias(other.payload->>'invoice_id')=private.invoice_review_alias(r.payload->>'invoice_id')) AS other_batch_count
+   FROM raw_import_rows r LEFT JOIN mapping_decisions m ON m.tenant_id=r.tenant_id AND m.raw_row_id=r.id AND m.method_version='invoice-validator-0.1.0'
+   LEFT JOIN invoice_identity_claims ic ON ic.tenant_id=r.tenant_id AND ic.raw_row_id=r.id
+   WHERE r.tenant_id=$1 AND r.batch_id=$2 ORDER BY r.row_number LIMIT 2001`,[...args,b.rows[0].source_type]);
+  if(rows.rowCount>MAX_IMPORT_ROWS)return {status:409,error:"Batch exceeds review limit"};
+  return {status:200,items:rows.rows,issuerAuthenticated:false,financialInclusionAuthorized:false};
+ });
+ res.set("Cache-Control","no-store");
+ const {status,...body}=result;res.status(status).json(body);
+ }catch(e){next(e);}});
+app.post("/v1/tenants/:tenantId/imports/:batchId/invoice-identities",membership,requireRole("owner","admin","reviewer"),async(req,res,next)=>{try{
+ const {rowNumber,issuerKey,evidenceReference,reason}=req.body||{};
+ if(!isUuid(req.params.batchId)||!Number.isSafeInteger(rowNumber)||rowNumber<1||rowNumber>MAX_IMPORT_ROWS||
+ typeof issuerKey!=="string"||!/^[a-z0-9][a-z0-9._:-]{0,199}$/.test(issuerKey)||
+ typeof evidenceReference!=="string"||evidenceReference.trim().length<3||evidenceReference.length>500||
+ typeof reason!=="string"||reason.trim().length<3||reason.length>2000)return res.status(400).json({error:"Valid row, stable issuer key, evidence reference and review reason required"});
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
+  const tenant=req.membership.tenantId,batchId=req.params.batchId;
+  const batch=await c.query("SELECT source_type,status FROM import_batches WHERE tenant_id=$1 AND id=$2 FOR UPDATE",[tenant,batchId]);
+  if(!batch.rowCount)return {status:404,error:"Import batch not found"};
+  const b=batch.rows[0];
+  if(!["customer_invoice","supplier_invoice"].includes(b.source_type)||b.status!=="review")return {status:422,error:"Reviewed invoice batch required"};
+  const row=await c.query("SELECT r.id,btrim(r.payload->>'invoice_id') AS ref,m.decision,CASE WHEN s.id IS NULL THEN 'client_declared' ELSE 'byte_verified' END AS integrity FROM raw_import_rows r JOIN mapping_decisions m ON m.tenant_id=r.tenant_id AND m.raw_row_id=r.id AND m.method_version='invoice-validator-0.1.0' LEFT JOIN import_source_receipts s ON s.tenant_id=r.tenant_id AND s.batch_id=r.batch_id WHERE r.tenant_id=$1 AND r.batch_id=$2 AND r.row_number=$3 AND jsonb_typeof(r.payload->'invoice_id')='string'",[tenant,batchId,rowNumber]);
+  if(!row.rowCount||row.rows[0].decision!=="candidate"||!row.rows[0].ref||row.rows[0].ref.length>200)return {status:422,error:"Structurally valid invoice candidate required"};
+  const r=row.rows[0],actor=await c.query("SELECT private.payroll_reviewer_id() AS id");
+  if(!actor.rows[0].id)return {status:403,error:"Reviewer membership required"};
+  const args=[tenant,r.id,b.source_type==="customer_invoice"?"customer":"supplier",issuerKey,r.ref,r.integrity,actor.rows[0].id,evidenceReference.trim(),reason.trim()];
+  const inserted=await c.query("INSERT INTO invoice_identity_claims(tenant_id,raw_row_id,direction,issuer_key,invoice_reference,source_integrity,reviewer_id,evidence_reference,reason) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT DO NOTHING RETURNING id,source_integrity",[...args]);
+  if(!inserted.rowCount){
+   const prior=await c.query("SELECT id,source_integrity FROM invoice_identity_claims WHERE tenant_id=$1 AND raw_row_id=$2 AND direction=$3 AND issuer_key=$4 AND invoice_reference=$5 AND source_integrity=$6 AND reviewer_id=$7 AND evidence_reference=$8 AND reason=$9",args);
+   if(prior.rowCount)return {status:200,claim:prior.rows[0],idempotent:true,issuerAuthenticated:false,financialInclusionAuthorized:false};
+   return {status:409,error:"Invoice identity or potential alias already reserved; review conflicting source evidence"};
+  }
+  const claim=inserted.rows[0];
+  await c.query("INSERT INTO audit_events(tenant_id,actor_user_id,action,object_type,object_id,reason,metadata) VALUES($1,$2,'invoice_identity_reserved','invoice_identity_claim',$3,$4,$5)",[tenant,args[6],claim.id,args[8],JSON.stringify({rawRowId:r.id,sourceIntegrity:r.integrity,issuerAuthenticated:false})]);
+  return {status:201,claim,issuerAuthenticated:false,financialInclusionAuthorized:false};
+ });
+ res.set("Cache-Control","no-store");
+ const {status,...body}=result;res.status(status).json(body);
+ }catch(e){if(e.code==="23514")return res.status(422).json({error:"Invoice source integrity or review state does not support reservation"});next(e);}});
+
 app.post("/v1/tenants/:tenantId/imports/:batchId/reconcile-payroll",membership,requireRole("owner","admin","reviewer"),async(req,res,next)=>{try{
  if(!isUuid(req.params.batchId))return res.status(400).json({error:"Invalid batch ID"});
  const {controlTotal,currency,controlReference,reason,assignments=[]}=req.body||{};

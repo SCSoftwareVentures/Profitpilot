@@ -72,3 +72,6 @@ The tenant-authorized synthetic preview is non-persistent and unauthenticated as
 ## A1 architecture and specification baseline
 
 Detailed internal design package and requirement catalogue added at [specification/README.md](specification/README.md). Design coverage is distinct from verified feature implementation and external approval. CI #2964 passed at 93acd20; new specification catalogue tests require current CI confirmation.
+
+## Invoice identity reservation registry
+Migration 012 introduces tenant-scoped, reviewer-only persistent identity reservations with unique exact/alias identities across batches, source-row/receipt lineage, immutable runtime records and review-only conflict reporting. Legacy invoice constraints are unchanged; no automatic promotion into financial calculations. API and database regression tests added; CI pending.

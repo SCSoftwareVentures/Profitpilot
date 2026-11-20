@@ -318,6 +318,40 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal((await request(`/v1/tenants/${tenantA}/imports/not-a-uuid/rows`,{subject:"ci-api-analyst",method:"POST",body:{rows:[row1]}})).status,400);
 
 
+
+    // Persistent invoice claims: independent cross-batch conflicts and reviewer-only reservations.
+    const duplicateBatch=(await admin.query("INSERT INTO import_batches(tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by) VALUES($1,'customer_invoice','CI','review',$2,'duplicate-review.csv',$3) RETURNING id",[tenantA,"8".repeat(64),userA])).rows[0].id;
+    const cloneRow=(await admin.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,$3) RETURNING id",[tenantA,duplicateBatch,JSON.stringify({...row2,invoice_id:"ci-2"})])).rows[0].id;
+    await admin.query("INSERT INTO mapping_decisions(tenant_id,raw_row_id,target_type,decision,method_version) VALUES($1,$2,'invoice_row','candidate','invoice-validator-0.1.0')",[tenantA,cloneRow]);
+    const identityPath=path+"/invoice-identities";
+    const dupPath=`/v1/tenants/${tenantA}/imports/${duplicateBatch}/invoice-identities`;
+    const claimBody={rowNumber:2,issuerKey:"ci.issuer-a",evidenceReference:"CI synthetic issuer register",reason:"CI reviewed identity"};
+    const reviewList=await request(identityPath,{subject:"ci-api-analyst"});
+    assert.equal(reviewList.status,200);
+    assert.equal((await reviewList.json()).items[1].other_batch_count,1);
+    assert.equal((await request(identityPath,{subject:"ci-api-reader"})).status,403);
+    assert.equal((await request(identityPath,{subject:"ci-api-analyst",method:"POST",body:claimBody})).status,403);
+    const realRaw=(await admin.query("SELECT id FROM raw_import_rows WHERE batch_id=$1 AND row_number=2",[batchId])).rows[0].id;
+    await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("INSERT INTO invoice_identity_claims(tenant_id,raw_row_id,direction,issuer_key,invoice_reference,source_integrity,reviewer_id,evidence_reference,reason) VALUES($1,$2,'customer','ci.issuer-a','CI-2','client_declared',$3,'CI source','CI review')",[tenantA,realRaw,userA])),e=>e.code==="42501");
+    await admin.query("UPDATE tenant_memberships SET role='reviewer' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);
+    try{
+      const reserve=(url,body)=>request(url,{subject:"ci-api-analyst",method:"POST",body});
+      const claim=await reserve(identityPath,claimBody);
+      assert.equal(claim.status,201);
+      const claimed=await claim.json();
+      assert.equal(claimed.financialInclusionAuthorized,false);
+      assert.equal(claimed.issuerAuthenticated,false);
+      assert.equal(claimed.claim.source_integrity,"client_declared");
+      assert.equal((await reserve(identityPath,claimBody)).status,200);
+      assert.equal((await reserve(dupPath,{...claimBody,rowNumber:1})).status,409);
+      assert.equal((await reserve(dupPath,{...claimBody,rowNumber:1,issuerKey:"ci.issuer-b"})).status,201);
+      await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",c=>c.query("UPDATE invoice_identity_claims SET reason='changed' WHERE id=$1",[claimed.claim.id])),e=>e.code==="42501");
+      const cross=await withTenant(tenantB,"ci-api-tenant-b-only",c=>c.query("SELECT id FROM invoice_identity_claims"));
+      assert.equal(cross.rowCount,0);
+      assert.equal((await admin.query("SELECT count(*)::int AS n FROM invoice_identity_claims WHERE tenant_id=$1",[tenantA])).rows[0].n,2);
+      assert.equal((await admin.query("SELECT count(*)::int AS n FROM audit_events WHERE tenant_id=$1 AND action='invoice_identity_reserved'",[tenantA])).rows[0].n,2);
+    }finally{await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);}
+
     // Calculation success and fail-closed period/currency checks.
     async function insertFixture(sql,values){return (await admin.query(sql+" RETURNING id",values)).rows[0].id;}
     const siteA=await insertFixture("INSERT INTO sites(tenant_id,business_id,name) VALUES ($1,$2,'CI reconciliation site')",[tenantA,businessA]);

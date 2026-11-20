@@ -146,6 +146,140 @@ paths:
         "422": { description: No rows or unsupported source type }
         "403": { description: Not authorised }
         "404": { description: Batch not found in this tenant }
+  /tenants/{tenantId}/imports/{batchId}/invoice-identities:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    get:
+      summary: Inspect invoice source rows and potential cross-batch reference conflicts
+      description: Owner, admin, analyst or reviewer only. Counts other batches with potential reference aliases in the same direction, not verified issuer duplicates.
+      responses:
+        "200": { description: Review rows, source lineage and identity reservations }
+        "403": { description: Role denied }
+        "404": { description: Batch unavailable }
+        "422": { description: Invoice batch required }
+    post:
+      summary: Reserve a reviewer-attested issuer and invoice reference
+      description: Owner, admin or reviewer only. Unique per tenant, direction, issuer and reference including conservative alias collision guard. No issuer authentication or financial inclusion.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [rowNumber, issuerKey, evidenceReference, reason]
+              properties:
+                rowNumber: { type: integer, minimum: 1, maximum: 2000 }
+                issuerKey: { type: string, pattern: '^[a-z0-9][a-z0-9._:-]{0,199}
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - $ref: '#/components/parameters/BatchId'
+    post:
+      summary: Human-confirm payroll against a reviewer-attested control total
+      description: Owner, admin or reviewer only. Source rows require stable tenant-unique source_ref, decimal amount string, currency and exact batch period_start/period_end. Whole-row assignment remains supported; multiple distinct destinations require explicit decimal amount strings. Unassigned amounts remain unallocated. Database confirmation checks each source, line and bucket total.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [controlTotal, currency, controlReference, reason]
+              properties:
+                controlTotal: { type: string }
+                currency: { type: string }
+                controlReference: { type: string, maxLength: 200 }
+                reason: { type: string, minLength: 3, maxLength: 2000 }
+                assignments:
+                  type: array
+                  maxItems: 2000
+                  items:
+                    type: object
+                    required: [rowNumber, bucket, reason]
+                    properties:
+                      rowNumber: { type: integer, minimum: 1 }
+                      amount: { type: string, description: Positive decimal split amount; omit only for whole-row assignment }
+                      bucket: { type: string, enum: [direct, approved_allocated, non_site, excluded] }
+                      siteId: { type: string, format: uuid }
+                      reason: { type: string, minLength: 3, maxLength: 500 }
+      responses:
+        "201": { description: Pool, allocation run and source lineage created atomically }
+        "403": { description: Reviewer role required }
+        "404": { description: Batch unavailable }
+        "409": { description: Duplicate source or batch already reconciled }
+        "422": { description: Held source rows, invalid allocation or total mismatch }
+  /tenants/{tenantId}/matches/{matchId}/decision:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: matchId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    post:
+      summary: Record a human invoice-match decision
+      description: Candidate scores never auto-confirm a match. Append reviewer, reason and timestamp.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [decision, reason]
+              properties:
+                decision: { type: string, enum: [confirmed, rejected, held] }
+                reason: { type: string, minLength: 3, maxLength: 2000 }
+      responses:
+        "201": { description: Decision appended }
+        "403": { description: Reviewer role required }
+        "409": { description: Match state changed; refresh required }
+  /tenants/{tenantId}/calculations:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    post:
+      summary: Create a versioned contract/site/period calculation run
+      description: Server calculates from immutable input versions; no client-supplied output totals are trusted.
+      responses:
+        "201": { description: Calculation run created }
+        "422": { description: Insufficient or unreconciled source evidence }
+  /tenants/{tenantId}/calculations/{runId}:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+      - name: runId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      summary: Retrieve immutable calculation output and coverage limitations
+      responses:
+        "200": { description: Calculation output }
+        "404": { description: Run not found in this tenant }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    TenantId:
+      name: tenantId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    BatchId:
+      name: batchId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+ }
+                evidenceReference: { type: string, minLength: 3, maxLength: 500 }
+                reason: { type: string, minLength: 3, maxLength: 2000 }
+      responses:
+        "201": { description: Reservation created with audit event }
+        "200": { description: Identical reviewer replay }
+        "400": { description: Invalid request }
+        "403": { description: Reviewer role required }
+        "404": { description: Batch unavailable }
+        "409": { description: Conflicting source or identity reservation }
+        "422": { description: Source not eligible for review reservation }
   /tenants/{tenantId}/imports/{batchId}/reconcile-payroll:
     parameters:
       - $ref: '#/components/parameters/TenantId'
