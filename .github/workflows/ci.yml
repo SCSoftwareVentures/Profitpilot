@@ -68,6 +68,11 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+
       - name: Generate ephemeral tenant context signing key
         run: |
           SIGNING_KEY="$(openssl rand -hex 32)"
@@ -117,6 +122,14 @@ jobs:
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/api.integration.test.js
+
+      - name: Verify automatic API recovery after a PostgreSQL restart
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
+          TEST_POSTGRES_CONTAINER: ${{ job.services.postgres.id }}
+        run: |
+          test -n "$TEST_POSTGRES_CONTAINER"
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" node --test tests/postgres-restart.integration.test.js
 
       - name: Rehearse encrypted synthetic database backup and restore
         env:
