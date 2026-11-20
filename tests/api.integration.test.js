@@ -114,9 +114,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
     await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantB,userC]);
     // Tenant-B materialisation is required by the complete, non-vacuous RLS inventory.
     const {unifiedRehearsalContribution,snapshotDigest:reportDigest}=await import("../src/financial-calculation.js");
-    const verifiedInvB=(await admin.query("SELECT id,amount::text,cost_kind,contract_version_no FROM invoice_confirmation_rehearsals WHERE tenant_id=$1 AND id=$2",[tenantB,rehearsalB])).rows;
+    const verifiedInvB=(await admin.query("SELECT id,amount::text,cost_kind,currency,tax_basis,contract_version_no FROM invoice_confirmation_rehearsals WHERE tenant_id=$1 AND id=$2",[tenantB,rehearsalB])).rows;
     const verifiedPayB=(await admin.query("SELECT id,allocation_line_id,amount::text,bucket_type,contract_version_no,currency FROM payroll_contract_rehearsals WHERE tenant_id=$1 AND allocation_line_id=$2",[tenantB,rehearsalLineB])).rows;
-    verifiedInvB.forEach(x=>x.currency="AUD");
     const reportB=unifiedRehearsalContribution(verifiedInvB,verifiedPayB);
     const evidenceB={method:"unified-rehearsal-0.1.0",tenantId:tenantB,contractId:contractB,siteId:siteB,periodStart:"2026-02-01",periodEnd:"2026-02-28",invoiceLines:verifiedInvB,payrollLines:verifiedPayB,excludedLegacyPayroll:[],limitations:["Synthetic source fixture only"]};
     await insertB("INSERT INTO unified_report_snapshots(tenant_id,client_request_id,contract_id,site_id,period_start,period_end,created_by,contribution,evidence,evidence_sha256) VALUES($1,gen_random_uuid(),$2,$3,'2026-02-01','2026-02-28',$4,$5::jsonb,$6::jsonb,$7)",[tenantB,contractB,siteB,userC,JSON.stringify(reportB),JSON.stringify(evidenceB),reportDigest(evidenceB)]);
