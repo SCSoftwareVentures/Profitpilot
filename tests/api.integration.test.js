@@ -527,6 +527,37 @@ test("authenticated API enforces tenant membership, role permissions and import 
       const foreign=await request(privacyPath+"/"+fixturePrivacy+"/review",{subject:"ci-api-analyst",method:"POST",body:{status:"reviewing",reviewReference:"CI.case.2"}});assert.equal(foreign.status,409);
     }finally{await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userA]);}
     await assert.rejects(()=>withTenant(tenantA,"ci-api-reader",c=>c.query("DELETE FROM privacy_requests")),e=>e.code==="42501");
+    const accessPath=`/v1/tenants/${tenantA}/privacy/self-access`;
+    const selfAccess=await request(accessPath,{subject:"ci-api-reader"});
+    assert.equal(selfAccess.status,200);assert.equal(selfAccess.headers.get("cache-control"),"no-store");
+    const ownExport=await selfAccess.json();
+    assert.equal(ownExport.identity.id,userB);assert.equal(ownExport.identity.email,"reader@example.invalid");
+    assert.equal(ownExport.completeDataSubjectExport,false);
+    assert.equal(ownExport.privacyRequests[0].id,privacyItem.item.id);
+    assert.equal((await request(accessPath,{subject:"ci-api-tenant-b-only"})).status,403);
+    assert.equal((await (await request(accessPath,{subject:"ci-api-analyst"})).json()).privacyRequests.length,0);
+    // Scoped, independently reviewed erasure of an unused client-declared import; synthetic database only.
+    const disposalCase=(await admin.query("INSERT INTO privacy_requests(tenant_id,requester_id,client_request_id,request_type) VALUES($1,$2,gen_random_uuid(),'erasure') RETURNING id",[tenantA,userA])).rows[0].id;
+    const disposable=(await admin.query("INSERT INTO import_batches(tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by) VALUES($1,'customer_invoice','CI','uploaded',$2,'unused-privacy.csv',$3) RETURNING id",[tenantA,"7".repeat(64),userA])).rows[0].id;
+    await admin.query("INSERT INTO raw_import_rows(tenant_id,batch_id,row_number,payload) VALUES($1,$2,1,$3)",[tenantA,disposable,JSON.stringify({invoice_id:"CI-privacy-marker"})]);
+    const dispose=(batch=disposable,policy="CI.policy")=>admin.query("SELECT private.dispose_unused_import($1,$2,$3,$4) AS removed",[tenantA,batch,disposalCase,policy]);
+    await assert.rejects(()=>dispose(),e=>e.code==="23514");
+    await admin.query("UPDATE tenant_memberships SET role='admin' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userB]);
+    try{
+     await admin.query("UPDATE privacy_requests SET status='reviewing',reviewed_by=$1,reviewed_at=now(),review_reference='CI.policy' WHERE id=$2",[userB,disposalCase]);
+     await assert.rejects(()=>dispose(),e=>e.code==="23514");
+     await admin.query("UPDATE import_batches SET retention_hold=false,retention_release_reference='CI.policy' WHERE id=$1",[disposable]);
+     await assert.rejects(()=>dispose(disposable,"CI.wrong"),e=>e.code==="23514");
+     await assert.rejects(()=>dispose(verifiedB),e=>e.code==="23514");
+     await assert.rejects(()=>dispose(sourceBatchId),e=>e.code==="23514");
+     await assert.rejects(()=>withTenant(tenantA,"ci-api-reader",c=>c.query("SELECT private.dispose_unused_import($1,$2,$3,$4)",[tenantA,disposable,disposalCase,"CI.policy"])),e=>e.code==="42501");
+     await assert.rejects(()=>withTenant(tenantA,"ci-api-reader",c=>c.query("UPDATE import_batches SET retention_hold=false WHERE id=$1",[disposable])),e=>e.code==="42501");
+     assert.equal((await dispose()).rows[0].removed,1);
+     assert.equal((await admin.query("SELECT count(*)::int AS n FROM import_batches WHERE id=$1",[disposable])).rows[0].n,0);
+     assert.equal((await admin.query("SELECT count(*)::int AS n FROM raw_import_rows WHERE batch_id=$1",[disposable])).rows[0].n,0);
+     assert.equal((await admin.query("SELECT count(*)::int AS n FROM audit_events WHERE tenant_id=$1 AND object_id=$2 AND action='unused_import_disposed'",[tenantA,disposalCase])).rows[0].n,1);
+     await assert.rejects(()=>dispose(),e=>e.code==="23514");
+    }finally{await admin.query("UPDATE tenant_memberships SET role='read_only' WHERE tenant_id=$1 AND user_id=$2",[tenantA,userB]);}
     const readerWrite=await request(`/v1/tenants/${tenantA}/imports`,{
       subject:"ci-api-reader",method:"POST",
       body:{...importBody,sha256:"c".repeat(64)}

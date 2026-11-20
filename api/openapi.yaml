@@ -15,6 +15,15 @@ paths:
       responses:
         "200": { description: Verified identity only; membership discovery requires a separately reviewed endpoint. }
         "401": { description: Unauthenticated }
+  /tenants/{tenantId}/privacy/self-access:
+    parameters:
+      - $ref: '#/components/parameters/TenantId'
+    get:
+      summary: Download own stored identity, current membership and up to 200 own privacy cases
+      description: Not a complete data-subject export. Does not expose raw source evidence or other members' details.
+      responses:
+        "200": { description: Non-persistent JSON attachment; additional case flag when truncated }
+        "403": { description: Active membership required }
   /tenants/{tenantId}/privacy-requests:
     parameters:
       - $ref: '#/components/parameters/TenantId'

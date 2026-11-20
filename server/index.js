@@ -74,6 +74,18 @@ app.post("/v1/tenants/:tenantId/privacy-requests/:requestId/review",membership,r
  res.json({item:result.rows[0],automatedErasure:false,externalFulfilmentVerified:false});
 }catch(e){next(e);}});
 
+
+app.get("/v1/tenants/:tenantId/privacy/self-access",membership,async(req,res,next)=>{try{
+ const result=await withTenant(req.membership.tenantId,req.identity.subject,async c=>{
+  const identity=await c.query("SELECT u.id,u.email,u.status,u.created_at,m.role,m.status AS membership_status,m.granted_at FROM users u JOIN tenant_memberships m ON m.user_id=u.id WHERE m.tenant_id=$1 AND u.id=private.actor_id()",[req.membership.tenantId]);
+  const cases=await c.query("SELECT "+privacyColumns+" FROM privacy_requests WHERE tenant_id=$1 AND requester_id=private.actor_id() ORDER BY created_at DESC,id DESC LIMIT 201",[req.membership.tenantId]);
+  return {identity:identity.rows[0],privacyRequests:cases.rows.slice(0,200),additionalRequests:cases.rowCount>200};
+ },{repeatableRead:true});
+ if(!result.identity)return res.status(403).json({error:"Active identity required"});
+ res.set("Content-Disposition",'attachment; filename="profitpilot-self-access.json"');
+ res.json({scope:"Own stored identity, current tenant membership and own privacy case metadata only",completeDataSubjectExport:false,...result});
+}catch(e){next(e);}});
+
 app.get("/v1/me",async(req,res)=>{res.json({subject:req.identity.subject,email:req.identity.email,membershipsEndpoint:"Membership discovery is not exposed until a separately reviewed security-definer function is installed."});});
 app.get("/v1/tenants/:tenantId/contracts",membership,async(req,res,next)=>{try{const rows=await withTenant(req.membership.tenantId,req.identity.subject,async c=>(await c.query("SELECT id,customer_name,status FROM contracts WHERE tenant_id=$1 ORDER BY customer_name",[req.membership.tenantId])).rows);res.json({items:rows});}catch(e){next(e);}});
 app.post("/v1/tenants/:tenantId/imports",membership,requireRole("owner","admin","analyst"),async(req,res,next)=>{
