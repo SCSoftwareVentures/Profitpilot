@@ -105,3 +105,6 @@ S6 Debian base experiment (#2981) produced an unacceptable vulnerability regress
 S7 attempts removal of the last protected-image BusyBox findings using minimal signed clamav-scanner package closure, same Alpine rootfs as prototype, genuine inventory, absence checks and explicit missing-signature fail-closed testing. No gate weakened. New CI pending.
 
 CI #2983 rejected clamav-scanner because the signed dependency chain pulled BusyBox. Replace CLI with a small bounded native stdin adapter compiled against signed Alpine clamav-dev, using only installed clamav-libs and clamav-libunrar in the final image. Preserve full real inventory, no shell/dependency bypass, native detection and missing-definitions tests. New CI pending.
+
+## Security verification baseline and core engine F1
+CI #2984 at edba06a completed 5/5 jobs, both Grype images reported zero findings, native malware fixture, encrypted recovery, JavaScript CodeQL and signed source provenance passed. No independent assessment, native C static analysis or production/legal approval claimed. Formula 0.2.0 adds exact integer-cent contribution, bounded evidence, deterministic input snapshot digest and explicit invoice/service-period agreement. Existing legacy numeric fields are only projections. No canonical invoice activation or real-data gate change. New CI pending.

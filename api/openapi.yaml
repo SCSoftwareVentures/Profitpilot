@@ -293,7 +293,7 @@ paths:
       - $ref: '#/components/parameters/TenantId'
     post:
       summary: Create a versioned contract/site/period calculation run
-      description: Server calculates from immutable input versions; no client-supplied output totals are trusted.
+      description: Formula 0.2.0 calculates exact decimal strings from bounded confirmed invoice and payroll evidence in a repeatable-read transaction. Invoice date and reviewed service period must align. Saves an immutable evidence snapshot and SHA-256 digest; numeric compatibility values are non-authoritative. Incomplete management contribution only; no issuer authentication or full cost coverage.
       responses:
         "201": { description: Calculation run created }
         "422": { description: Insufficient or unreconciled source evidence }

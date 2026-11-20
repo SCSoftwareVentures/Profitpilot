@@ -384,10 +384,10 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const versionA=await insertFixture("INSERT INTO contract_versions(tenant_id,contract_id,version_no,effective_from,effective_to,price,billing_basis,approved_by,approved_at) VALUES ($1,$2,1,'2026-02-05','2026-02-28',100,'monthly',$3,now())",[tenantA,contractA,userA]);
     const poolA=await insertFixture("INSERT INTO payroll_pools(tenant_id,batch_id,period_start,period_end,total_amount,currency,source_ref) VALUES ($1,$2,'2026-02-01','2026-02-28',50,'USD','ci')",[tenantA,createdBody.batch.id]);
     const allocationA=await insertFixture("INSERT INTO allocation_runs(tenant_id,payroll_pool_id,method_version,status,direct_amount,residual_amount) VALUES ($1,$2,'ci','confirmed',50,0)",[tenantA,poolA]);
-    await insertFixture("INSERT INTO allocation_lines(tenant_id,allocation_run_id,site_id,bucket_type,amount) VALUES ($1,$2,$3,'direct',50)",[tenantA,allocationA,siteA]);
+    const allocationLineA=await insertFixture("INSERT INTO allocation_lines(tenant_id,allocation_run_id,site_id,bucket_type,amount) VALUES ($1,$2,$3,'direct',50)",[tenantA,allocationA,siteA]);
     const invoiceA=await insertFixture("INSERT INTO invoices(tenant_id,direction,invoice_number,invoice_date,total_amount,tax_basis,source_ref) VALUES ($1,'customer','CI-A','2026-02-14',100,'gst_exclusive','ci')",[tenantA]);
     const lineA=await insertFixture("INSERT INTO invoice_lines(tenant_id,invoice_id,line_number,description,amount) VALUES ($1,$2,1,'CI line',100)",[tenantA,invoiceA]);
-    await insertFixture("INSERT INTO match_reviews(tenant_id,invoice_line_id,contract_id,site_id,service_period_start,service_period_end,confidence,decision,reviewer_id,reviewed_at) VALUES ($1,$2,$3,$4,'2026-02-01','2026-02-28','HIGH','confirmed',$5,now())",[tenantA,lineA,contractA,siteA,userA]);
+    const matchA=await insertFixture("INSERT INTO match_reviews(tenant_id,invoice_line_id,contract_id,site_id,service_period_start,service_period_end,confidence,decision,reviewer_id,reviewed_at) VALUES ($1,$2,$3,$4,'2026-02-01','2026-02-28','HIGH','confirmed',$5,now())",[tenantA,lineA,contractA,siteA,userA]);
     const calculate=()=>request(`/v1/tenants/${tenantA}/calculations`,{subject:"ci-api-analyst",method:"POST",body:{contractId:contractA,siteId:siteA,periodStart:"2026-02-01",periodEnd:"2026-02-28"}});
     const partial=await calculate();
     assert.equal(partial.status,422);
@@ -409,8 +409,21 @@ test("authenticated API enforces tenant membership, role permissions and import 
     assert.equal(validRunBody.outputs.deliveryCost,50);
     assert.equal(validRunBody.outputs.contribution,50);
     assert.equal(validRunBody.outputs.marginPercent,50);
-    const storedRun=await admin.query("SELECT completeness FROM calculation_runs WHERE id=$1",[validRunBody.id]);
+    const storedRun=await admin.query("SELECT completeness,formula_version,inputs,outputs FROM calculation_runs WHERE id=$1",[validRunBody.id]);
     assert.equal(storedRun.rows[0].completeness,"incomplete","limited contribution must not claim full financial completeness");
+    const {snapshotDigest}=await import("../src/financial-calculation.js");
+    const stored=storedRun.rows[0];assert.equal(stored.formula_version,"0.2.0");
+    assert.deepEqual(stored.outputs.exact,{revenue:"100.00",deliveryCost:"50.00",contribution:"50.00",marginPercent:"50.00"});
+    assert.equal(stored.inputs.snapshot.contractVersion.id,versionA);
+    assert.equal(stored.inputs.snapshot.invoiceLines[0].match_id,matchA);
+    assert.equal(stored.inputs.snapshot.invoiceLines[0].invoice_line_id,lineA);
+    assert.equal(stored.inputs.snapshot.allocationLines[0].allocation_line_id,allocationLineA);
+    assert.equal(snapshotDigest(stored.inputs.snapshot),stored.outputs.evidenceSha256);
+    assert.equal(stored.inputs.evidenceSha256,stored.outputs.evidenceSha256);
+    await admin.query("UPDATE match_reviews SET service_period_start='2026-01-31' WHERE id=$1",[matchA]);
+    try{const misaligned=await calculate();assert.equal(misaligned.status,422);assert.match((await misaligned.json()).error,/service period/);}
+    finally{await admin.query("UPDATE match_reviews SET service_period_start='2026-02-01' WHERE id=$1",[matchA]);}
+    assert.equal((await admin.query("SELECT inputs FROM calculation_runs WHERE id=$1",[validRunBody.id])).rows[0].inputs.snapshot.invoiceLines[0].service_period_start,"2026-02-01");
 
 
     const pr1={source_ref:"ci-ledger:pay-001",amount:"40.01",currency:"AUD",period_start:"2026-02-01",period_end:"2026-02-28"};
