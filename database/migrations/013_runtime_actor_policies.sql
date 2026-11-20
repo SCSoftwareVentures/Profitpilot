@@ -30,7 +30,7 @@ CREATE POLICY audit_actor_insert ON audit_events AS RESTRICTIVE FOR INSERT TO pr
  WITH CHECK(actor_user_id=private.actor_id() AND private.actor_role() IN ('owner','admin','analyst','reviewer'));
 -- Execute before the existing raw source append guard; reject even direct SQL writes.
 CREATE FUNCTION private.guard_raw_actor_and_fields() RETURNS trigger LANGUAGE plpgsql SECURITY INVOKER
- SET search_path=pg_catalog,public,private AS $
+ SET search_path=pg_catalog,public,private AS $$
 DECLARE kind text; allowed text[];
 BEGIN
  IF current_user<>'profitpilot_app' THEN RETURN NEW; END IF;
@@ -48,6 +48,6 @@ BEGIN
  OR (jsonb_typeof(e.value)='string' AND (length(e.value#>>'{}')>1000 OR (e.value#>>'{}') ~ '[[:cntrl:]]')))
  THEN RAISE EXCEPTION 'Source contains unsupported fields or values' USING ERRCODE='23514'; END IF;
  RETURN NEW;
-END $;
+END $$;
 CREATE TRIGGER raw_actor_field_guard BEFORE INSERT ON raw_import_rows FOR EACH ROW EXECUTE FUNCTION private.guard_raw_actor_and_fields();
 COMMIT;
