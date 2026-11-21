@@ -126,3 +126,7 @@ The [B9 acquisition dossier specification](docs/CANDIDATE_HANDOVER_B9.md) descri
 ## B10 source-file and SBOM reconciliation (draft)
 
 [B10 source evidence integrity gates](docs/SOURCE_INTEGRITY_B10.md) require the full Git archive to match every file path, byte count and SHA-256 in the B6 inventory, and every CycloneDX dependency to match the locked npm path/version. They reject tampered and inconsistent source packages, but do not certify ownership, legal transfer, actual demand, iPhone compatibility or production readiness.
+
+## B11 scoped OpenSSL runtime reduction (draft)
+
+The [B11 container package experiment](docs/OPENSSL_RUNTIME_REDUCTION_B11.md) removes separately installed OpenSSL APKs from the **basic** API container where unnecessary, preserves mandatory crypto/TLS smoke tests, and retains the same fail-closed scan on both API and ClamAV images. A scanner finding remains a release blocker; neither image is automatically certified secure.
