@@ -14,7 +14,7 @@ No private key is generated, committed, uploaded, read or accepted by the produc
 - Separate pinned owner and independent-security-reviewer Ed25519 public keys, with distinct key IDs and key fingerprints.
 - Expiring requests (at most one hour), scope matched to exact repository/commit/API-and-protected-image/source-dossier digests and change ticket. No approval reuse across changed images or commits.
 - Five non-empty SHA-256 evidence references: penetration test, legal/privacy review, device/accessibility acceptance, recovery/operational readiness and IP/licence review.
-- Read-only, no-follow, bounded external-file CLI. Policy and approval bundle must be distinct and located **outside** the editable repository tree.
+- Read-only, no-follow, bounded external-file CLI. Policy and approval bundle must be distinct and located **outside** the editable repository tree. The public-key policy bytes must match an **independently governed SHA-256 fingerprint** supplied through a separate protected setting.
 - Result explicitly returns false for production readiness, deployment authority, independently verified identity/evidence and buyer demand. This is not an automatic go/no-go certificate.
 - Negative tests: duplicate or forged signatures, both roles using the same key, changed source/evidence, expired and future requests, malformed shape, unsafe file paths and symlink substitution.
 
@@ -25,19 +25,20 @@ With Node.js 22 in a trusted checkout (nothing is deployed):
 ```sh
 export PROFITPILOT_RELEASE_REVIEW_POLICY_FILE=/protected/review/owner-and-security-public-keys.json
 export PROFITPILOT_RELEASE_REVIEW_BUNDLE_FILE=/protected/review/two-signed-review-approval.json
+export PROFITPILOT_RELEASE_REVIEW_POLICY_SHA256=INDEPENDENTLY_PINNED_64_CHARACTER_HEX_HASH
 node scripts/verify-release-review.mjs SOURCE_COMMIT_SHA API_IMAGE_SHA256 PROTECTED_IMAGE_SHA256 SOURCE_DOSSIER_SHA256 CHANGE_TICKET
 ```
 
 The two files must be privately and independently provisioned. **Do not create pseudo-independent roles with the same user/key.** Only the public keys and signatures are needed by the verifier; secret keys must remain outside ChatGPT, source, CI artifacts and untrusted build runners. An evidence digest signs a reference to a report; a qualified reviewer must separately authenticate the actual report and confirm the digest.
 
-The pinned key-policy file is a trust root. It must be managed and independently approved outside an editable feature branch. If a repository author can replace the policy and both signatures, this verifier alone cannot establish independence.
+The pinned key-policy file AND its SHA-256 fingerprint are trust roots. The fingerprint must be independently established and protected outside an editable feature branch, rather than calculated on demand from whichever key-policy file the caller presents. If a repository author can replace the policy and both signatures, this verifier alone cannot establish independence.
 
 ## Verification boundary and integration blockers
 
 1. The latest B12 scan still contains 14 blocked OpenSSL findings in the protected ClamAV image. Both images must be rebuilt and rescanned against currently supported patched libraries or another independently reviewed compliant scanner. **No scanner disabling, vulnerability ignoring or policy lowering.**
 2. Independent security pen test, qualified Australian legal/privacy review, physical iPhone Safari/VoiceOver and a measured production-like disaster recovery drill **have not occurred**. B13 requires their report digests but cannot create those reports or validate their contents.
 3. Cryptographic review is not sufficient by itself. Before it can become a production gate, establish protected GitHub release rules, required checks, two-person governance of public-key policy, environment boundaries and audit retention. Admin/branch protection is not configured by this draft.
-4. There is **no production deployment workflow** bound to B13. This deliberate isolation avoids treating a review proof as permission to deploy.
+4. A signed request is reusable until expiry because B13 has no independently retained, shared replay ledger; do not treat its nonce as one-time-use enforcement. There is **no production deployment workflow** bound to B13. This deliberate isolation avoids treating a review proof as permission to deploy.
 5. Actual customer data, real payments, legal clearance, transfer rights and real buyer demand are outside scope. Never add approval evidence containing employee/customer records to this public repo.
 
 ## CI acceptance and follow-up
