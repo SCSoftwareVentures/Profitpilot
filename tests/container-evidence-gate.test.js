@@ -14,7 +14,8 @@ function report(index){
  return {
   matches:[],
   source:{type:"image",target:{
-   userInput:image,tags:[image],imageID:digest(index?"b":"a"),manifestDigest:digest(index?"d":"c")
+   userInput:image,tags:[image],imageID:digest(index?"b":"a"),manifestDigest:digest(index?"d":"c"),
+   repoDigests:[image.split(":")[0]+"@"+digest(index?"b":"a")]
   }},
   distro:{name:"alpine",version:"3.24.4"},
   descriptor:{
@@ -55,7 +56,7 @@ test("B12 fails closed when reports are swapped, repeated, stale, filtered or su
  const cases=[
   ["swapped image identity",(a,b)=>{b.source.target.userInput=images[0];}],
   ["duplicate image",(a,b)=>{b.source.target.imageID=a.source.target.imageID;}],
-  ["forged image ID",(a)=>{a.source.target.imageID=digest("e");}],
+  ["forged repository digest",(a)=>{a.source.target.repoDigests=["profitpilot-api@"+digest("e")];}],
   ["missing image digest",(a)=>{delete a.source.target.manifestDigest;}],
   ["stale scanner result",(a)=>{a.descriptor.timestamp="2026-01-01T00:00:00Z";}],
   ["stale vulnerability database",(a)=>{a.descriptor.db.status.built="2026-01-01T00:00:00Z";}],
