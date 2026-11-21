@@ -97,21 +97,27 @@ async function exercise(){
    assert.ok(tlsInfo.rows[0].cipher,"TLS cipher must be negotiated");
    console.log("B25 PASS: real PostgreSQL TLS handshake with verified CA and active TLS session");
   }finally{await pool.end();}
-  async function rejectDb({url=dbUrl,ssl},label){
+  async function rejectDb({url=dbUrl,ssl,verifyError},label){
    const c=new pg.Client({connectionString:url,ssl,connectionTimeoutMillis:2000});
    try{
-    await assert.rejects(c.connect(),undefined,label);
+    // A generic DNS failure or ECONNREFUSED is NOT proof that the
+    // PostgreSQL HBA or TLS peer identity actually rejected this client.
+    await assert.rejects(c.connect(),error=>Boolean(verifyError(error)),label);
    }finally{await c.end().catch(()=>{});}
    console.log("B25 correctly denied PostgreSQL connection: "+label);
   }
-  await rejectDb({ssl:false},"plaintext TCP prohibited by hostnossl HBA");
+  await rejectDb({ssl:false,verifyError:error=>
+   error?.code==="28000"&&/pg_hba.conf|rejects connection|no encryption/i.test(error.message)
+  },"plaintext TCP prohibited by hostnossl HBA");
   // Deliberately change the client *connection hostname* to a separate
   // loopback alias omitted from the certificate SAN. Supplying only an
   // ssl.servername option is not a reliable hostname test in node-postgres:
   // the connection host may take precedence over that field.
   await rejectDb({
     url:dbUrl.replace("@localhost:","@invalid-db-host-ci.invalid:"),
-    ssl:{rejectUnauthorized:true}
+    ssl:{rejectUnauthorized:true},
+    verifyError:error=>error?.code==="ERR_TLS_CERT_ALTNAME_INVALID"||
+      /Hostname\/IP does not match certificate/i.test(error?.message||"")
    },"mismatched TLS certificate hostname");
 
   const app=express();
