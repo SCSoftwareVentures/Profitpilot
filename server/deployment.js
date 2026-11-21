@@ -1,15 +1,39 @@
 import {openSync,fstatSync,readSync,closeSync,constants} from "node:fs";
 
+// Protected deployments may explicitly allow only canonical HTTPS browser origins.
+// Empty allowlist denies cross-origin browser requests; it is not a wildcard.
+export function protectedCorsOrigins(raw){
+ if(raw===undefined||raw===null||raw==="")return [];
+ if(typeof raw!=="string"||raw.length>2048)throw Error("Invalid protected CORS configuration");
+ const origins=raw.split(",").map(x=>x.trim());
+ if(origins.length>8||origins.some(x=>!x)||new Set(origins).size!==origins.length)
+  throw Error("Invalid or duplicate protected CORS origins");
+ for(const origin of origins){
+  let url;
+  try{url=new URL(origin);}catch{throw Error("Invalid protected CORS origin");}
+  if(origin.includes("*")||url.protocol!=="https:"||url.origin!==origin||
+    url.username||url.password||url.search||url.hash||url.pathname!=="/"||
+    !url.hostname||["localhost","127.0.0.1","0.0.0.0","[::1]"].includes(url.hostname)||
+    url.hostname.endsWith(".localhost"))
+   throw Error("Protected CORS requires exact HTTPS origins");
+ }
+ return origins;
+}
+
 // Prototype is synthetic only. Protected mode enforces prerequisites, not release approval.
 export function deploymentProfile(env=process.env){
  const mode=env.PROFITPILOT_PROFILE||(env.NODE_ENV==="production"?null:"prototype");
  if(!["prototype","protected"].includes(mode))throw new Error("Explicit PROFITPILOT_PROFILE required");
  const protectedMode=mode==="protected";
+ if(protectedMode&&env.NODE_ENV!=="production")
+  throw Error("Protected profile requires NODE_ENV=production");
+ const corsOrigins=protectedMode?protectedCorsOrigins(env.CORS_ORIGIN):
+  (env.CORS_ORIGIN||"").split(",").map(x=>x.trim()).filter(Boolean);
  const scannerEnabled=env.MALWARE_SCAN_MODE==="clamav";
  const acr=env.AUTH_MFA_ACR||null;
  if(protectedMode&&(!scannerEnabled||!acr||acr.length>200||env.DATABASE_SSL!=="true"||!env.DATABASE_URL_FILE||!env.TENANT_CONTEXT_HMAC_SECRET_FILE))
   throw new Error("Protected profile requires database TLS, mounted secrets, scanner and trusted MFA claim");
- return {mode,protectedMode,scannerEnabled,acr};
+ return {mode,protectedMode,scannerEnabled,acr,corsOrigins};
 }
 export function readSecret(name,env=process.env){
  const path=env[name+"_FILE"];
