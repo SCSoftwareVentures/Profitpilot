@@ -165,6 +165,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
       [tenantB,securepayCaseB,provenanceEvidenceB.id,signedClaimProvenanceB,userC,signerKeyB,signerNonceB,contentHashB,signatureB,statementHashB,keyHashB]);
     await insertB("INSERT INTO securepay_signed_claim_revocations(tenant_id,case_id,evidence_id,claim_id,client_request_id,revoked_by,reason_code,revocation_reference) VALUES($1,$2,$3,$4,gen_random_uuid(),$5,'administrative_hold','s7.ci-tenantB')",
       [tenantB,securepayCaseB,provenanceEvidenceB.id,signedClaimB,userC]);
+    await insertB("INSERT INTO securepay_job_issuer_attestations(tenant_id,case_id,evidence_id,claim_id,client_request_id,recorded_by,issuer,token_jti,issuer_subject_sha256,token_sha256,issued_at,expires_at) VALUES($1,$2,$3,$4,gen_random_uuid(),$5,'https://synthetic-ci-issuer.invalid/',gen_random_uuid(),$6,$6,now(),now()+interval '5 minutes')",
+      [tenantB,securepayCaseB,provenanceEvidenceB.id,signedClaimB,userC,"c".repeat(64)]);
 
     const snapshotB=checkOperatorReviewer(securepayCaseRowB,securepayEvidenceB,independentB);
     assert.equal(snapshotB.eligibleForNonbindingOperatorReview,true,"tenant B review fixture must satisfy internal actor separation");

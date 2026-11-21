@@ -12,7 +12,9 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
  const issuer="https://profitpilot-sp-ci.invalid/",audience="profitpilot-api";
  const {publicKey,privateKey}=generateKeyPairSync("rsa",{modulusLength:2048});
  const jwk=await exportJWK(publicKey);Object.assign(jwk,{kid:"securepay-ci-key",use:"sig",alg:"RS256"});
- const jwks=createServer((req,res)=>{if(req.url!=="/jwks"){res.writeHead(404).end();return;}res.writeHead(200,{"content-type":"application/json"}).end(JSON.stringify({keys:[jwk]}));});
+ const {publicKey:issuerPublic,privateKey:issuerPrivate}=generateKeyPairSync("rsa",{modulusLength:2048});
+ const issuerJwk=await exportJWK(issuerPublic);Object.assign(issuerJwk,{kid:"securepay-issuer-ci-key",use:"sig",alg:"RS256"});
+ const jwks=createServer((req,res)=>{if(!["/jwks","/issuer-jwks"].includes(req.url)){res.writeHead(404).end();return;}res.writeHead(200,{"content-type":"application/json"}).end(JSON.stringify({keys:[req.url==="/jwks"?jwk:issuerJwk]}));});
  await new Promise(resolve=>jwks.listen(0,"127.0.0.1",resolve));
  process.env.NODE_ENV="test";process.env.DATABASE_URL=process.env.TEST_APP_DATABASE_URL;
  process.env.AUTH_ISSUER=issuer;process.env.AUTH_AUDIENCE=audience;
@@ -25,7 +27,7 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'owner','active'),($1,$3,'read_only','active'),($4,$5,'owner','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status=EXCLUDED.status",[a,owner,reader,b,foreign]);
   await admin.query("INSERT INTO users(id,auth_subject,email) VALUES($1,'sp-s3-reviewer','s3reviewer@sp.invalid') ON CONFLICT(auth_subject) DO NOTHING",["dddddddd-dddd-4ddd-8ddd-dddddddddddd"]);
   await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'reviewer','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status=EXCLUDED.status",[a,"dddddddd-dddd-4ddd-8ddd-dddddddddddd"]);
-  const [{default:app},{pool,withTenant}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);appPool=pool;
+  const [{default:app,requestLimiter},{pool,withTenant}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);appPool=pool;
   api=createServer(app);await new Promise(resolve=>api.listen(0,"127.0.0.1",resolve));
   async function request(path,{subject,method="GET",body}={}){
    const headers={};if(subject){
@@ -141,6 +143,50 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   assert.equal(verifiedProof.body.cryptographicSignatureValid,true);assert.equal(verifiedProof.body.trustVerified,false);
   assert.equal(verifiedProof.body.claimStatus,"untrusted_unverified");assert.equal(verifiedProof.body.revoked,false);
   assert.equal(verifiedProof.body.operationallyUsable,false);
+  const issuerPath=partyRoute+"/"+claimCreated.body.item.id+"/issuer-attestations";
+  const attestationIssuer="https://securepay-issuer-ci.invalid/";
+  const originalAuthority=process.env.SECUREPAY_AUTHORITY_JWKS_URL;
+  const invalidConfigured=await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:{clientRequestId:randomUUID(),attestationJwt:"malformed"}});
+  assert.equal(invalidConfigured.status,400);
+  const baseIssuerPayload={tenantId:a,caseId,evidenceId:created.body.item.id,claimId:claimCreated.body.item.id,
+   jobReference:payload.jobReference,claimedPartyRole:"customer",keySpkiSha256:claimCreated.body.item.key_spki_sha256,
+   permission:"synthetic_job_claim_review_only"};
+  const signIssuer=async(data)=>new SignJWT(data).setProtectedHeader({alg:"RS256",kid:issuerJwk.kid})
+   .setIssuer(attestationIssuer).setAudience("securepay-synthetic").setSubject("opaque.synthetic.party001")
+   .setJti(randomUUID()).setIssuedAt().setNotBefore("0s").setExpirationTime("5m").sign(issuerPrivate);
+  const authorityJwt=await signIssuer(baseIssuerPayload);
+  const attestationPayload={clientRequestId:randomUUID(),attestationJwt:authorityJwt};
+  delete process.env.SECUREPAY_AUTHORITY_JWKS_URL;
+  assert.equal((await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:attestationPayload})).status,503);
+  process.env.SECUREPAY_AUTHORITY_ISSUER=attestationIssuer;
+  process.env.SECUREPAY_AUTHORITY_AUDIENCE="securepay-synthetic";
+  process.env.SECUREPAY_AUTHORITY_JWKS_URL="http://127.0.0.1:"+jwks.address().port+"/issuer-jwks";
+  assert.equal((await request(issuerPath,{subject:"sp-s2-reader",method:"POST",body:attestationPayload})).status,403);
+  assert.equal((await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:{...attestationPayload,identityVerified:true}})).status,400);
+  const attested=await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:attestationPayload});
+  assert.equal(attested.status,201,JSON.stringify(attested));
+  assert.equal(attested.body.issuerSignatureVerifiedAtRequest,true);
+  assert.equal(attested.body.identityVerified,false);assert.equal(attested.body.jobAuthorityVerified,false);
+  assert.equal(attested.body.item.identity_verified,false);
+  assert.equal(attested.body.item.job_authority_verified,false);
+  assert.equal((await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:attestationPayload})).status,200);
+  assert.equal((await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:{...attestationPayload,attestationJwt:authorityJwt+"a"}})).status,409);
+  const forgedJwt=await signIssuer({...baseIssuerPayload,jobReference:"other.job"});
+  assert.equal((await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:{clientRequestId:randomUUID(),attestationJwt:forgedJwt}})).status,422);
+  const wrongTenantJwt=await signIssuer({...baseIssuerPayload,tenantId:b});
+  assert.equal((await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:{clientRequestId:randomUUID(),attestationJwt:wrongTenantJwt}})).status,422);
+  const badRoleJwt=await signIssuer({...baseIssuerPayload,claimedPartyRole:"tradesperson"});
+  assert.equal((await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:{clientRequestId:randomUUID(),attestationJwt:badRoleJwt}})).status,422);
+  const failedIssuerList=await request(issuerPath,{subject:"sp-s2-owner"});
+  assert.equal(failedIssuerList.status,200);
+  assert.equal(failedIssuerList.body.items.length,1);
+  assert.equal(failedIssuerList.body.signatureReverifiedAtRead,false);
+  assert.equal(failedIssuerList.body.items[0].usableForJobAuthorization,false);
+  assert.equal((await request(rootA+"/"+openedB.body.item.id+"/evidence/"+created.body.item.id+"/signed-party-claims/"+claimCreated.body.item.id+"/issuer-attestations",{subject:"sp-s2-owner"})).status,404);
+  if(originalAuthority!==undefined)process.env.SECUREPAY_AUTHORITY_JWKS_URL=originalAuthority;
+  // Isolate the large synthetic S2-S8 integration phases; API throttling remains 100/min in production and is separately asserted in api.integration.test.js.
+  await requestLimiter.resetKey("127.0.0.1");
+
   const trustPreflight="/v1/tenants/"+a+"/prototype/securepay-party-job-trust/"+caseId;
   const beforeRevoke=await request(trustPreflight,{subject:"sp-s2-owner"});
   assert.equal(beforeRevoke.status,200,JSON.stringify(beforeRevoke));
@@ -167,6 +213,15 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   assert.equal(reverified.body.revoked,true);assert.equal(reverified.body.claimStatus,"revoked");
   assert.ok(reverified.body.blockingGates.includes("synthetic_claim_revoked"));
   assert.equal(reverified.body.operationallyUsable,false);
+  const revokedIssuerAttempt=await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:{clientRequestId:randomUUID(),attestationJwt:await signIssuer(baseIssuerPayload)}});
+  assert.equal(revokedIssuerAttempt.status,409,JSON.stringify(revokedIssuerAttempt));
+  const revokedIssuerList=await request(issuerPath,{subject:"sp-s2-owner"});
+  assert.equal(revokedIssuerList.status,200);
+  assert.equal(revokedIssuerList.body.items[0].underlyingClaimRevoked,true);
+  assert.equal(revokedIssuerList.body.items[0].usableForJobAuthorization,false);
+  await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query("DELETE FROM securepay_job_issuer_attestations WHERE id=$1",[attested.body.item.id])),/permission denied|append-only/i);
+  await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query("INSERT INTO securepay_job_issuer_attestations(tenant_id,case_id,evidence_id,claim_id,client_request_id,recorded_by,issuer,token_jti,issuer_subject_sha256,token_sha256,issued_at,expires_at) VALUES($1,$2,$3,$4,gen_random_uuid(),private.actor_id(),$5,gen_random_uuid(),$6,$6,now(),now()+interval '2 minutes')",[a,caseId,created.body.item.id,claimCreated.body.item.id,attestationIssuer,"a".repeat(64)])),/row-level security|permission denied/i);
+
   const afterList=await request(partyRoute,{subject:"sp-s2-owner"});
   assert.equal(afterList.status,200);assert.equal(afterList.body.items[0].revoked,true);
   assert.equal(afterList.body.items[0].operationallyUsable,false);
