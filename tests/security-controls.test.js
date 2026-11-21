@@ -20,3 +20,31 @@ test("import minimisation rejects arbitrary fields, nested values and controls",
  for(const row of [{name:"Person"},{amount:{name:"Person"}},{amount:100},{site:"x\nY"},{site:"x".repeat(1001)},JSON.parse('{"__proto__":"x"}'),{}])assert.equal(allowedImportRows([row],"customer_invoice"),false);
  assert.equal(allowedImportRows([{invoice_id:"x"}],"__proto__"),false);
 });
+
+test("B16 protected identity preflight rejects local/IP identity endpoints and malformed audiences",()=>{
+ const protectedEnv={...env,PROFITPILOT_PROFILE:"protected",NODE_ENV:"production"};
+ assert.equal(identityConfig(protectedEnv).issuer,env.AUTH_ISSUER);
+ for(const url of [
+  "https://127.0.0.1/jwks","https://[::1]/jwks",
+  "https://10.0.0.12/jwks","https://169.254.169.254/jwks",
+  "https://localhost/jwks","https://id.internal.localhost/jwks",
+  "https://service.local/jwks"
+ ]){
+  assert.throws(()=>identityConfig({...protectedEnv,AUTH_JWKS_URL:url}),/nonlocal DNS hosts/,url);
+ }
+ for(const issuer of [
+  "https://127.0.0.1/","https://[::1]/","https://id.localhost/"
+ ]){
+  assert.throws(()=>identityConfig({...protectedEnv,AUTH_ISSUER:issuer}),/nonlocal DNS hosts/,issuer);
+ }
+ for(const audience of [""," "," aud","aud\nnew", "x".repeat(257),undefined]){
+  assert.throws(()=>identityConfig({...protectedEnv,AUTH_AUDIENCE:audience}),/Authentication is not configured/);
+ }
+ for(const url of [
+  "http://issuer.invalid/jwks",
+  "https://admin:password@issuer.invalid/jwks",
+  "https://issuer.invalid/jwks#fragment"
+ ]){
+  assert.throws(()=>identityConfig({...protectedEnv,AUTH_JWKS_URL:url}),/Invalid authentication configuration/);
+ }
+});
