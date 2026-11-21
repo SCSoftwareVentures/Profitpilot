@@ -6,7 +6,7 @@ export function identityConfig(env=process.env){
  const {AUTH_ISSUER,AUTH_AUDIENCE,AUTH_JWKS_URL}=env;
  if(typeof AUTH_ISSUER!=="string"||typeof AUTH_JWKS_URL!=="string"||
    typeof AUTH_AUDIENCE!=="string"||AUTH_AUDIENCE.length<1||AUTH_AUDIENCE.length>256||
-   AUTH_AUDIENCE!==AUTH_AUDIENCE.trim()||/[\\x00-\\x1f\\x7f]/.test(AUTH_AUDIENCE)||
+   AUTH_AUDIENCE!==AUTH_AUDIENCE.trim()||/[\x00-\x1f\x7f]/.test(AUTH_AUDIENCE)||
    AUTH_ISSUER.length>2048||AUTH_JWKS_URL.length>2048)
   throw new Error("Authentication is not configured");
  const url=new URL(AUTH_JWKS_URL),issuer=new URL(AUTH_ISSUER);
@@ -18,7 +18,7 @@ export function identityConfig(env=process.env){
  // Refuse explicitly local/IP literal identity endpoints in protected mode.
  // Hostname checks do NOT substitute for an outbound egress policy or DNS pinning.
  const internalHost=h=>{
-  const n=h.replace(/^\\[|\\]$/g,"").toLowerCase();
+  const n=h.replace(/^\[|\]$/g,"").toLowerCase();
   return isIP(n)!==0||n==="localhost"||n.endsWith(".localhost")||
    n.endsWith(".local")||n==="0.0.0.0";
  };
