@@ -1,4 +1,4 @@
-import {readFileSync,statSync} from "node:fs";
+import {openSync,fstatSync,readSync,closeSync,constants} from "node:fs";
 
 // Strict CI release gate, not a vulnerability exploitability assessment.
 // The exact expected image tags and scan timestamps bind the Grype evidence
@@ -28,9 +28,26 @@ let blocked=0;
 for(let i=0;i<paths.length;i++){
  const path=paths[i], [canonical,expectedImage]=expected[i];
  if(path!==canonical)throw Error("Expected canonical report "+canonical+" in order");
- const size=statSync(path).size;
- if(size<=0||size>16*1024*1024)throw Error("Invalid scan report size: "+path);
- const r=JSON.parse(readFileSync(path,"utf8"));
+ // Pin the validated file to a single descriptor. A path-level stat/read
+ // introduces a check/use race; a bounded descriptor read cannot follow
+ // a substituted symlink or silently expand to an unbounded file.
+ const fd=openSync(path,constants.O_RDONLY|constants.O_NOFOLLOW);
+ let r;
+ try{
+  const stat=fstatSync(fd),size=stat.size;
+  if(!stat.isFile()||size<=0||size>16*1024*1024)
+   throw Error("Invalid scan report size: "+path);
+  const bytes=Buffer.alloc(size);
+  let offset=0;
+  while(offset<size){
+   const n=readSync(fd,bytes,offset,size-offset,offset);
+   if(n===0)throw Error("Scan report truncated during read: "+path);
+   offset+=n;
+  }
+  if(readSync(fd,Buffer.alloc(1),0,1,size)!==0)
+   throw Error("Scan report enlarged during read: "+path);
+  r=JSON.parse(bytes.toString("utf8"));
+ }finally{closeSync(fd)}
  if(!object(r)||!Array.isArray(r.matches)||!object(r.source)||!object(r.descriptor))
   throw Error("Invalid scan report: "+path);
  const target=r.source.target,descriptor=r.descriptor,config=descriptor.configuration,db=descriptor.db?.status;
