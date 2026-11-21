@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createServer} from "node:http";
+import {mkdtempSync,writeFileSync,renameSync,rmSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {createHash,createHmac,randomBytes,randomUUID,generateKeyPairSync,sign} from "node:crypto";
 import {generateKeyPair,exportJWK,SignJWT} from "jose";
 import pg from "pg";
@@ -37,7 +40,7 @@ test("authenticated API enforces tenant membership, role permissions and import 
   process.env.AUTH_JWKS_URL=`http://127.0.0.1:${jwksAddress.port}/.well-known/jwks.json`;
   if(!process.env.TENANT_CONTEXT_HMAC_SECRET)throw new Error("CI tenant context signing key is required");
   const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL});
-  const [{default:app,requestLimiter},{pool:appPool,withTenant}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);
+  const [{default:app,requestLimiter},{pool:appPool,withTenant,withTenantUsingPool}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);
   const api=createServer(app);
   await new Promise(resolve=>api.listen(0,"127.0.0.1",resolve));
   const apiAddress=api.address();
@@ -378,6 +381,41 @@ test("authenticated API enforces tenant membership, role permissions and import 
     process.env.TENANT_CONTEXT_HMAC_KEY_ID="rotation-next";
     const activeSecondary=await withTenant(tenantA,"ci-api-analyst",client=>client.query("SELECT id FROM contracts"));
     assert.equal(activeSecondary.rowCount,1,"the replacement key must remain valid after old-key revocation");
+
+    // B25: verify *mounted-file* rollover against the actual restricted
+    // PostgreSQL runtime/RLS roles, not just mutated process.env strings.
+    // Both secret versions are temporary synthetic fixtures.
+    const secretDir=mkdtempSync(join(tmpdir(),"pp-b25-rotation-"));
+    try{
+      const secretPath=join(secretDir,"tenant-context-key");
+      const urlPath=join(secretDir,"db-url");
+      writeFileSync(urlPath,process.env.TEST_APP_DATABASE_URL+"\n",{mode:0o600});
+      writeFileSync(secretPath,secondarySecret+"\n",{mode:0o600});
+      const protectedEnv={...process.env,
+        NODE_ENV:"production",PROFITPILOT_PROFILE:"protected",
+        DATABASE_SSL:"true",MALWARE_SCAN_MODE:"clamav",AUTH_MFA_ACR:"ci-verified-mfa",
+        DATABASE_URL_FILE:urlPath,TENANT_CONTEXT_HMAC_SECRET_FILE:secretPath,
+        TENANT_CONTEXT_HMAC_KEY_ID:"rotation-next"};
+      delete protectedEnv.DATABASE_URL;
+      delete protectedEnv.TENANT_CONTEXT_HMAC_SECRET;
+      const fromMountedSecret=()=>withTenantUsingPool(appPool,tenantA,"ci-api-analyst",
+        client=>client.query("SELECT id FROM contracts"),{env:protectedEnv});
+      assert.equal((await fromMountedSecret()).rowCount,1,
+        "active rotated signing key must authorise tenant rows when file-mounted");
+      const replacement=join(secretDir,"replacement");
+      writeFileSync(replacement,primarySecret+"\n",{mode:0o600});
+      renameSync(replacement,secretPath);
+      assert.equal((await fromMountedSecret()).rowCount,0,
+        "revoked original key must fail after atomic replacement of a protected mount");
+      writeFileSync(replacement,secondarySecret+"\n",{mode:0o600});
+      renameSync(replacement,secretPath);
+      assert.equal((await fromMountedSecret()).rowCount,1,
+        "valid replacement key must restore tenant access without leaking cross-tenant rows");
+      assert.equal((await withTenantUsingPool(appPool,tenantB,"ci-api-analyst",
+        client=>client.query("SELECT id FROM contracts"),{env:protectedEnv})).rowCount,0,
+        "rotated file-mounted key must not bypass active tenant membership");
+    }finally{rmSync(secretDir,{recursive:true,force:true});}
+
     const afterCommit=await appPool.query("SELECT current_setting('app.tenant_id',true) AS tenant_id");
     assert.ok(afterCommit.rows[0].tenant_id===null||afterCommit.rows[0].tenant_id==="","tenant context must not leak after a transaction returns its pooled connection");
     await assert.rejects(()=>withTenant(tenantA,"ci-api-analyst",client=>client.query("INSERT INTO import_batches(tenant_id,source_type,permission_ref,status,file_sha256,file_name,created_by) VALUES ($1,'payroll','CI probe','uploaded',$2,'probe.csv',$3)",[tenantB,"f".repeat(64),userC])),/row-level security/i,"RLS WITH CHECK must reject cross-tenant writes on an insert-enabled table");
