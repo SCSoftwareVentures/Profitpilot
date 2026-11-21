@@ -59,7 +59,7 @@ export function releaseReviewBytes(q){
   reviewEvidence.some(k=>!digest(q.evidenceDigests[k])))
   throw Error("Invalid or incomplete release review request");
  return Buffer.from(JSON.stringify(["ProfitPilot/B13/release-review/v1",
-  ...requestKeys.slice(0,-2).map(k=>q[k]),
+  ...requestKeys.slice(0,-3).map(k=>q[k]),
   q.purpose,reviewEvidence.map(k=>q.evidenceDigests[k]),q.noDeployment]),"utf8");
 }
 export function verifyReleaseReview(bundle,policy,expected,now=Date.now()){
