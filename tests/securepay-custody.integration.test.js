@@ -5,7 +5,7 @@ import {createHash,generateKeyPairSync,randomUUID} from "node:crypto";
 import {SignJWT,exportJWK} from "jose";
 import pg from "pg";
 const enabled=Boolean(process.env.TEST_ADMIN_DATABASE_URL&&process.env.TEST_APP_DATABASE_URL);
-test("S9 sealed original bytes: scanner-required, immutable, tenant isolated",{skip:!enabled},async()=>{
+test("S10 encrypted synthetic custody: scanner-required, sealed and tenant isolated",{skip:!enabled},async()=>{
  const a="abababab-abab-4bab-8bab-abababababab",b="cdcdcdcd-cdcd-4dcd-8dcd-cdcdcdcdcdcd";
  const owner="efefefef-efef-4fef-8fef-efefefefefef",reader="89898989-8989-4989-8989-898989898989",foreign="78787878-7878-4787-8787-787878787878";
  const issuer="https://securepay-s9-ci.invalid/",audience="securepay-s9-api";
@@ -17,6 +17,9 @@ test("S9 sealed original bytes: scanner-required, immutable, tenant isolated",{s
  process.env.AUTH_ISSUER=issuer;process.env.AUTH_AUDIENCE=audience;
  process.env.AUTH_JWKS_URL="http://127.0.0.1:"+jwks.address().port+"/jwks";
  process.env.MALWARE_SCAN_MODE="";
+ process.env.SECUREPAY_CUSTODY_ENCRYPTION_KEY="1".repeat(64);
+ process.env.SECUREPAY_CUSTODY_ATTESTATION_KEY="2".repeat(64);
+ process.env.SECUREPAY_CUSTODY_KEY_ID="s10-ci-key-01";
  const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL});
  let api,scannedApi,pool;
  try{
@@ -72,6 +75,11 @@ test("S9 sealed original bytes: scanner-required, immutable, tenant isolated",{s
   assert.equal(written.status,201,JSON.stringify(written));
   assert.equal(written.body.item.sha256,hash);
   assert.equal(written.body.item.origin_verified,false);
+  assert.equal(written.body.encryptedAtApplicationLayer,true);
+  assert.equal(written.body.scanRecordMacVerified,true);
+  assert.equal(written.body.retentionPolicyEnforced,false);
+  assert.equal(written.body.externallySignedScannerVerdict,false);
+  assert.equal(Object.hasOwn(written.body.item,"scanner_attestation_mac"),false);
   assert.equal(written.body.independentCustodyVerified,false);
   assert.equal(Object.hasOwn(written.body.item,"original_bytes"),false);
   assert.equal((await fetchData(scannedApi,route,{reqId})).status,200);
@@ -79,17 +87,59 @@ test("S9 sealed original bytes: scanner-required, immutable, tenant isolated",{s
   assert.equal((await fetchData(scannedApi,route,{reqId,data:Buffer.from("Altered S9 bytes!")})).status,409);
   const retrieved=await fetchData(scannedApi,route,{method:"GET"});
   assert.equal(retrieved.status,200);assert.equal(retrieved.body.received,true);
+  assert.equal(retrieved.body.storageClass,"application_aead_encrypted");
+  assert.equal(retrieved.body.scanRecordMacVerified,true);
   assert.equal(Object.hasOwn(retrieved.body.item,"original_bytes"),false);
   assert.equal((await fetchData(scannedApi,route,{method:"GET",subject:"s9-reader"})).status,403);
   assert.equal((await fetchData(scannedApi,"/v1/tenants/"+a+"/prototype/securepay-cases/"+caseB+"/evidence/"+evidenceA+"/custody-file")).status,404);
   assert.equal((await fetchData(scannedApi,"/v1/tenants/"+a+"/prototype/securepay-cases/"+caseB+"/evidence/"+evidenceB+"/custody-file",{method:"GET"})).status,404);
   assert.ok(scans>=4);
-  const valid=await admin.query("SELECT sha256=encode(public.digest(original_bytes,'sha256'),'hex') AS exact FROM securepay_evidence_custody_receipts WHERE tenant_id=$1 AND evidence_id=$2",[a,evidenceA]);
-  assert.equal(valid.rows[0].exact,true);
+
+  const {custodyKeySettings,sealCustodyBytes,decryptCustodyBytes,verifyScanMac}=await import("../src/securepay-encrypted-custody.js");
+  const keySettings=custodyKeySettings();
+  const encrypted=(await admin.query("SELECT * FROM securepay_encrypted_custody_receipts WHERE tenant_id=$1 AND evidence_id=$2",[a,evidenceA])).rows[0];
+  assert.notDeepEqual(encrypted.ciphertext,bytes,"database does not store S9 plaintext");
+  assert.equal(encrypted.ciphertext_sha256,createHash("sha256").update(encrypted.ciphertext).digest("hex"));
+  assert.equal(encrypted.retention_policy_enforced,false);
+  assert.equal(verifyScanMac(encrypted,keySettings),true);
+  const decryptScope={tenantId:a,caseId:caseA,evidenceId:evidenceA,
+   clientRequestId:reqId,actorId:owner,sha256:hash,byteCount:bytes.length,
+   mediaType:"text/plain",keyId:keySettings.keyId};
+  const encryptedPacket={ciphertext:encrypted.ciphertext,nonce:encrypted.nonce,tag:encrypted.auth_tag,
+   aadSha256:encrypted.aad_sha256,ciphertextSha256:encrypted.ciphertext_sha256};
+  assert.deepEqual(decryptCustodyBytes(encryptedPacket,decryptScope,keySettings),bytes);
+  const tampered={...encryptedPacket,tag:Buffer.from(encryptedPacket.tag)};
+  tampered.tag[0]^=1;assert.throws(()=>decryptCustodyBytes(tampered,decryptScope,keySettings));
+  const tenantBBytes=Buffer.from("S10 tenant B independently sealed synthetic contents.");
+  const tenantBHash=createHash("sha256").update(tenantBBytes).digest("hex");
+  const tenantBRequest=randomUUID();
+  const tenantBScope={tenantId:b,caseId:caseB,evidenceId:evidenceB,
+   clientRequestId:tenantBRequest,actorId:foreign,sha256:tenantBHash,byteCount:tenantBBytes.length,
+   mediaType:"text/plain",keyId:keySettings.keyId};
+  const sealB=sealCustodyBytes(tenantBBytes,tenantBScope,keySettings);
+  await admin.query("INSERT INTO securepay_encrypted_custody_receipts(tenant_id,case_id,evidence_id,client_request_id,received_by,sha256,byte_count,media_type,scan_observed_at,scanner_attestation_mac,encryption_algorithm,key_id,aad_sha256,ciphertext_sha256,nonce,auth_tag,ciphertext) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)",
+   [b,caseB,evidenceB,tenantBRequest,foreign,tenantBHash,tenantBBytes.length,"text/plain",
+    sealB.observedAt,sealB.attestationMac,sealB.algorithm,sealB.keyId,
+    sealB.aadSha256,sealB.ciphertextSha256,sealB.nonce,sealB.tag,sealB.ciphertext]);
+  const invisible=await d.withTenant(a,"s9-owner",c=>c.query("SELECT count(*)::int AS n FROM securepay_encrypted_custody_receipts WHERE tenant_id=$1",[b]));
+  assert.equal(invisible.rows[0].n,0);
+  const legacyEvidence=(await admin.query("INSERT INTO securepay_evidence_rehearsals(tenant_id,case_id,client_request_id,recorded_by,evidence_type,evidence_reference) VALUES($1,$2,gen_random_uuid(),$3,'operator_review_note','legacy.s9.ci') RETURNING id",[a,caseA,owner])).rows[0].id;
+  const legacyBytes=Buffer.from("Legacy synthetic plaintext S9 case.");
+  const legacyHash=createHash("sha256").update(legacyBytes).digest("hex");
+  await admin.query("INSERT INTO securepay_evidence_custody_receipts(tenant_id,case_id,evidence_id,client_request_id,received_by,sha256,byte_count,media_type,original_bytes) VALUES($1,$2,$3,gen_random_uuid(),$4,$5,$6,'text/plain',$7)",[a,caseA,legacyEvidence,owner,legacyHash,legacyBytes.length,legacyBytes]);
+  const legacyRoute="/v1/tenants/"+a+"/prototype/securepay-cases/"+caseA+"/evidence/"+legacyEvidence+"/custody-file";
+  const legacyGet=await fetchData(scannedApi,legacyRoute,{method:"GET"});
+  assert.equal(legacyGet.status,200);assert.equal(legacyGet.body.storageClass,"legacy_plaintext_requires_review");
+  assert.equal(legacyGet.body.encryptedAtApplicationLayer,false);
+  assert.equal(legacyGet.body.legacyMigrationRequired,true);
+  assert.equal((await fetchData(scannedApi,legacyRoute)).status,409);
+
   await assert.rejects(()=>d.withTenant(a,"s9-owner",c=>c.query("SELECT original_bytes FROM securepay_evidence_custody_receipts")),/permission denied/i);
-  await assert.rejects(()=>d.withTenant(a,"s9-owner",c=>c.query("DELETE FROM securepay_evidence_custody_receipts WHERE id=$1",[written.body.item.id])),/permission denied|append-only/i);
-  await assert.rejects(()=>d.withTenant(a,"s9-owner",c=>c.query("UPDATE securepay_evidence_custody_receipts SET sha256=$1 WHERE id=$2",["a".repeat(64),written.body.item.id])),/permission denied|append-only/i);
+  await assert.rejects(()=>d.withTenant(a,"s9-owner",c=>c.query("SELECT ciphertext FROM securepay_encrypted_custody_receipts")),/permission denied/i);
+  await assert.rejects(()=>d.withTenant(a,"s9-owner",c=>c.query("DELETE FROM securepay_encrypted_custody_receipts WHERE id=$1",[written.body.item.id])),/permission denied|append-only/i);
+  await assert.rejects(()=>d.withTenant(a,"s9-owner",c=>c.query("UPDATE securepay_encrypted_custody_receipts SET sha256=$1 WHERE id=$2",["a".repeat(64),written.body.item.id])),/permission denied|append-only/i);
   await assert.rejects(()=>d.withTenant(a,"s9-owner",c=>c.query("INSERT INTO securepay_evidence_custody_receipts(tenant_id,case_id,evidence_id,client_request_id,received_by,sha256,byte_count,media_type,original_bytes) VALUES($1,$2,$3,gen_random_uuid(),private.actor_id(),$4,$5,'text/plain',$6)",[a,caseA,evidenceB,hash,bytes.length,bytes])),/foreign key|row-level security|permission denied/i);
+  await assert.rejects(()=>d.withTenant(a,"s9-owner",c=>c.query("INSERT INTO securepay_encrypted_custody_receipts(tenant_id,case_id,evidence_id,client_request_id,received_by,sha256,byte_count,media_type,scan_observed_at,scanner_attestation_mac,encryption_algorithm,key_id,aad_sha256,ciphertext_sha256,nonce,auth_tag,ciphertext) VALUES($1,$2,$3,gen_random_uuid(),private.actor_id(),$4,$5,'text/plain',now(),$6,'aes-256-gcm','s10-ci-key-01',$6,$6,$7,$8,$9)",[a,caseA,evidenceB,hash,bytes.length,"a".repeat(64),encrypted.nonce,encrypted.auth_tag,encrypted.ciphertext])),/foreign key|row-level security|permission denied/i);
  }finally{
   if(scannedApi)await new Promise(resolve=>scannedApi.close(resolve));
   if(api)await new Promise(resolve=>api.close(resolve));
