@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {generateKeyPairSync,randomBytes,sign} from "node:crypto";
+import {createHash,generateKeyPairSync,randomBytes,sign} from "node:crypto";
 import {mkdtempSync,writeFileSync,symlinkSync,rmSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join,resolve} from "node:path";
@@ -122,13 +122,19 @@ test("B13 offline verifier requires trusted external files and rejects symlink s
   const file1=join(dir,"reviewer-policy.json"),file2=join(dir,"signed-bundle.json");
   writeFileSync(file1,JSON.stringify(policyJson),{mode:0o600});
   writeFileSync(file2,JSON.stringify(signedRequest()),{mode:0o600});
+  const pin=createHash("sha256").update(JSON.stringify(policyJson)).digest("hex");
   const env={PROFITPILOT_RELEASE_REVIEW_POLICY_FILE:file1,
-   PROFITPILOT_RELEASE_REVIEW_BUNDLE_FILE:file2};
+   PROFITPILOT_RELEASE_REVIEW_BUNDLE_FILE:file2,
+   PROFITPILOT_RELEASE_REVIEW_POLICY_SHA256:pin};
   const good=verifyReleaseReviewFiles(expected,env);
   assert.equal(good.cryptographicSignaturesVerified,true);
   assert.equal(good.deploymentAuthorized,false);
   assert.throws(()=>verifyReleaseReviewFiles(expected,{}),/separate out-of-repository/);
   assert.throws(()=>verifyReleaseReviewFiles(expected,{...env,PROFITPILOT_RELEASE_REVIEW_BUNDLE_FILE:file1}),/separate out-of-repository/);
+  assert.throws(()=>verifyReleaseReviewFiles(expected,{...env,
+   PROFITPILOT_RELEASE_REVIEW_POLICY_SHA256:"f".repeat(64)}),/fingerprint mismatch/);
+  assert.throws(()=>verifyReleaseReviewFiles(expected,{...env,
+   PROFITPILOT_RELEASE_REVIEW_POLICY_SHA256:undefined}),/independently pinned/);
   const link=join(dir,"link.json");symlinkSync(file1,link);
   assert.throws(()=>verifyReleaseReviewFiles(expected,{...env,PROFITPILOT_RELEASE_REVIEW_POLICY_FILE:link}));
   assert.throws(()=>verifyReleaseReviewFiles(expected,{...env,PROFITPILOT_RELEASE_REVIEW_POLICY_FILE:
