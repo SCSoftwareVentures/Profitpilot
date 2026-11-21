@@ -22,6 +22,8 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   await admin.query("INSERT INTO tenants(id,legal_name) VALUES($1,'SP A'),($2,'SP B') ON CONFLICT(id) DO NOTHING",[a,b]);
   await admin.query("INSERT INTO users(id,auth_subject,email) VALUES($1,'sp-s2-owner','owner@sp.invalid'),($2,'sp-s2-reader','reader@sp.invalid'),($3,'sp-s2-foreign','foreign@sp.invalid') ON CONFLICT(auth_subject) DO NOTHING",[owner,reader,foreign]);
   await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'owner','active'),($1,$3,'read_only','active'),($4,$5,'owner','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status=EXCLUDED.status",[a,owner,reader,b,foreign]);
+  await admin.query("INSERT INTO users(id,auth_subject,email) VALUES($1,'sp-s3-reviewer','s3reviewer@sp.invalid') ON CONFLICT(auth_subject) DO NOTHING",["dddddddd-dddd-4ddd-8ddd-dddddddddddd"]);
+  await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'reviewer','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status=EXCLUDED.status",[a,"dddddddd-dddd-4ddd-8ddd-dddddddddddd"]);
   const [{default:app},{pool,withTenant}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);appPool=pool;
   api=createServer(app);await new Promise(resolve=>api.listen(0,"127.0.0.1",resolve));
   async function request(path,{subject,method="GET",body}={}){
@@ -118,6 +120,31 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
    "UPDATE securepay_case_rehearsals SET status='evidence_pending' WHERE tenant_id=$1 AND id=$2",[a,caseId])),/permission denied|append-only/i);
   await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query(
    "INSERT INTO securepay_evidence_rehearsals(tenant_id,case_id,client_request_id,recorded_by,evidence_type,evidence_reference) VALUES($1,$2,$3,$4,'operator_review_note','forged.actor')",[a,caseId,randomUUID(),reader])),/row-level security|permission denied/i);
+  const reviewPath=rootA+"/"+caseId+"/reviewer-assessments";
+  const reviewPayload={clientRequestId:randomUUID(),reviewReference:"review.snapshot.s3"};
+  const missingCase=await request(rootA,{subject:"sp-s2-owner",method:"POST",body:{synthetic:true,clientRequestId:randomUUID(),jobReference:"job.s3-missing",claimReference:"claim.s3-missing"}});
+  assert.equal(missingCase.status,201,JSON.stringify(missingCase));
+  const missingReview=await request(rootA+"/"+missingCase.body.item.id+"/reviewer-assessments",{subject:"sp-s3-reviewer",method:"POST",body:reviewPayload});
+  assert.equal(missingReview.status,409,JSON.stringify(missingReview));
+  assert.ok(missingReview.body.blockingGates.includes("matching_claim_report_missing"));
+  assert.equal((await request(reviewPath,{subject:"sp-s2-owner",method:"POST",body:reviewPayload})).status,403);
+  assert.equal((await request(reviewPath,{subject:"sp-s2-reader",method:"POST",body:reviewPayload})).status,403);
+  assert.equal((await request(reviewPath,{subject:"sp-s3-reviewer",method:"POST",body:{...reviewPayload,paymentApproved:true}})).status,400);
+  const r=await request(reviewPath,{subject:"sp-s3-reviewer",method:"POST",body:reviewPayload});
+  assert.equal(r.status,201,JSON.stringify(r));assert.equal(r.body.item.reviewer_id,"dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+  assert.equal(r.body.item.evidence_count,4);assert.match(r.body.item.evidence_snapshot_sha256,/^[a-f0-9]{64}$/);
+  assert.equal(r.body.paymentAuthority,false);assert.equal(r.body.decisionAuthority,false);
+  const replay=await request(reviewPath,{subject:"sp-s3-reviewer",method:"POST",body:reviewPayload});
+  assert.equal(replay.status,200);assert.equal(replay.body.item.id,r.body.item.id);
+  assert.equal((await request(reviewPath,{subject:"sp-s3-reviewer",method:"POST",body:{...reviewPayload,reviewReference:"altered.ref"}})).status,409);
+  assert.equal((await request(reviewPath,{subject:"sp-s3-reviewer"})).body.items.length,1);
+  assert.equal((await request(rootA+"/"+openedB.body.item.id+"/reviewer-assessments",{subject:"sp-s3-reviewer"})).status,404);
+  assert.equal((await request(rootA+"/"+openedB.body.item.id+"/reviewer-assessments",{subject:"sp-s3-reviewer",method:"POST",body:{clientRequestId:randomUUID(),reviewReference:"foreign.ref"}})).status,404);
+  await assert.rejects(()=>withTenant(a,"sp-s3-reviewer",c=>c.query("UPDATE securepay_reviewer_assessments SET review_reference='changed.ref' WHERE id=$1",[r.body.item.id])),/permission denied|append-only/i);
+  const other=await request(rootA,{subject:"sp-s3-reviewer",method:"POST",body:{synthetic:true,clientRequestId:randomUUID(),jobReference:"job.self",claimReference:"claim.self"}});
+  assert.equal(other.status,201);
+  const ownReview=await request(rootA+"/"+other.body.item.id+"/reviewer-assessments",{subject:"sp-s3-reviewer",method:"POST",body:{clientRequestId:randomUUID(),reviewReference:"self.ref"}});
+  assert.equal(ownReview.status,409);assert.ok(ownReview.body.blockingGates.includes("reviewer_opened_case"));
   const hidden=await withTenant(a,"sp-s2-owner",c=>c.query("SELECT count(*)::int AS n FROM securepay_case_rehearsals WHERE tenant_id=$1",[b]));
   assert.equal(hidden.rows[0].n,0);
   const denied=await withTenant(a,"sp-s2-reader",c=>c.query("SELECT count(*)::int AS n FROM securepay_case_rehearsals WHERE tenant_id=$1",[a]));
