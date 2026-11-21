@@ -86,21 +86,12 @@ test("S11.2 rejected offline attempt writes private audit metadata, not secrets 
   const actor=randomUUID();
   const args=["rehearse",tenant,dbFile,auditDir,actor,"ci.restore.rehearsal"];
   const env={PROFITPILOT_PROFILE:"prototype",SECUREPAY_OFFLINE_RECOVERY_MODE:"synthetic-rehearsal",NODE_ENV:"test"};
-  await assert.rejects(()=>runSyntheticRehearsal(args,env),/Offline synthetic recovery rejected/);
-  const files=readdirSync(auditDir);
-  assert.equal(files.length,1);
-  const contents=readFileSync(join(auditDir,files[0]),"utf8");
-  const attempt=JSON.parse(contents);
-  assert.equal(attempt.outcome,"rejected");
-  assert.equal(attempt.operatorIdentityIndependentlyVerified,false);
-  assert.equal(attempt.plaintextExported,false);
-  assert.equal(attempt.primaryDbMutated,false);
-  assert.equal(attempt.reason,"offline_rehearsal_denied");
-  assert.equal(contents.includes("remote.invalid"),false);
-  assert.equal(contents.includes(bytes.toString()),false);
-  assert.equal(contents.includes("cipherKey"),false);
+  await assert.rejects(()=>runSyntheticRehearsal(args,env),/Mounted private file required/);
+  // Without trusted audit and approval keys, even an attempted rehearsal fails closed.
+  // There is no false unsigned "success" and no unsigned audit file.
+  assert.equal(readdirSync(auditDir).length,0);
   await assert.rejects(()=>runSyntheticRehearsal(args,{...env,PROFITPILOT_PROFILE:"protected"}),/synthetic-only/);
-  assert.equal(readdirSync(auditDir).length,1);
+  assert.equal(readdirSync(auditDir).length,0);
   const symbolic=join(dir,"audit-link");symlinkSync(auditDir,symbolic);
   await assert.rejects(()=>runSyntheticRehearsal(
    ["rehearse",tenant,dbFile,symbolic,actor,"ci.restore.rehearsal"],env),/directory/);

@@ -184,23 +184,47 @@ jobs:
           }
           NODE
           export NODE_ENV=test PROFITPILOT_PROFILE=prototype SECUREPAY_OFFLINE_RECOVERY_MODE=synthetic-rehearsal
+          NODE_ENV=test node tests/fixtures/generate-synthetic-recovery-approvals.mjs "$BACKUP_DIR"
+          export SECUREPAY_RECOVERY_APPROVERS_FILE="$BACKUP_DIR/recovery-approvers.json"
+          export SECUREPAY_RECOVERY_AUDIT_PRIVATE_KEY_FILE="$BACKUP_DIR/recovery-audit-private.pem"
+          export SECUREPAY_RECOVERY_AUDIT_PUBLIC_KEY_FILE="$BACKUP_DIR/recovery-audit-public.pem"
+          export SECUREPAY_RECOVERY_APPROVAL_FILE="$BACKUP_DIR/recovery-approval-good.json"
           export SECUREPAY_CUSTODY_KEYRING_FILE="$BACKUP_DIR/custody-keyring.json"
           node scripts/securepay-restore-rehearsal.mjs rehearse \
             abababab-abab-4bab-8bab-abababababab \
             "$BACKUP_DIR/restore-db-url" "$BACKUP_DIR/custody-audit" \
             efefefef-efef-4fef-8fef-efefefefefef ci.s11-2.restored
           export SECUREPAY_CUSTODY_KEYRING_FILE="$BACKUP_DIR/custody-wrong-keyring.json"
+          export SECUREPAY_RECOVERY_APPROVAL_FILE="$BACKUP_DIR/recovery-approval-wrongkey.json"
           if node scripts/securepay-restore-rehearsal.mjs rehearse \
             abababab-abab-4bab-8bab-abababababab \
             "$BACKUP_DIR/restore-db-url" "$BACKUP_DIR/custody-audit" \
             efefefef-efef-4fef-8fef-efefefefefef ci.s11-2.wrongkey; then
             echo 'Wrong recovery key unexpectedly passed'; exit 1
           fi
-          test "$(find "$BACKUP_DIR/custody-audit" -maxdepth 1 -name 's11-2-*.json' -type f | wc -l)" -eq 2
-          grep -l '"outcome": "verified_synthetic_recovery"' "$BACKUP_DIR/custody-audit"/s11-2-*.json > /dev/null
-          grep -l '"outcome": "rejected"' "$BACKUP_DIR/custody-audit"/s11-2-*.json > /dev/null
-          unset SECUREPAY_CUSTODY_KEYRING_FILE SECUREPAY_OFFLINE_RECOVERY_MODE PROFITPILOT_PROFILE NODE_ENV
-          echo 'S11.2 restored encrypted custody AEAD, historical MAC, wrong-key refusal and private audit checks passed'
+          test "$(find "$BACKUP_DIR/custody-audit" -maxdepth 1 -name 's11-3-*.json' -type f | wc -l)" -eq 2
+          grep -l '"outcome": "verified_synthetic_recovery"' "$BACKUP_DIR/custody-audit"/s11-3-*.json > /dev/null
+          grep -l '"outcome": "rejected"' "$BACKUP_DIR/custody-audit"/s11-3-*.json > /dev/null
+          node --input-type=module - "$BACKUP_DIR/custody-audit" "$BACKUP_DIR/recovery-audit-public.pem" <<'NODE'
+          import {readFileSync} from "node:fs";
+          import {join} from "node:path";
+          import {verifyRecoveryAudit} from "./src/securepay-recovery-controls.js";
+          import {runAuditVerification} from "./scripts/securepay-restore-rehearsal.mjs";
+          const auditDir=process.argv[2],publicPath=process.argv[3];
+          const pub=readFileSync(publicPath,"utf8");
+          const first=JSON.parse(readFileSync(join(auditDir,"s11-3-000001.json"),"utf8"));
+          const second=JSON.parse(readFileSync(join(auditDir,"s11-3-000002.json"),"utf8"));
+          const prev=verifyRecoveryAudit(first,pub,null);
+          const head=verifyRecoveryAudit(second,pub,prev);
+          if(first.event.outcome!=="verified_synthetic_recovery"||first.event.approvalKeyIds.length!==2||
+             second.event.outcome!=="rejected"||first.event.approvalRequestId===second.event.approvalRequestId)
+            throw Error("Signed approval or audit outcome mismatch");
+          const verified=runAuditVerification(["verify-audit",auditDir,publicPath,head]);
+          if(verified.verifiedSignedRecords!==2)throw Error("Missing signed audit chain records");
+          console.log("S11.3 externally provided expected audit head matches all signed entries");
+          NODE
+          unset SECUREPAY_CUSTODY_KEYRING_FILE SECUREPAY_OFFLINE_RECOVERY_MODE PROFITPILOT_PROFILE NODE_ENV SECUREPAY_RECOVERY_APPROVAL_FILE SECUREPAY_RECOVERY_APPROVERS_FILE SECUREPAY_RECOVERY_AUDIT_PRIVATE_KEY_FILE SECUREPAY_RECOVERY_AUDIT_PUBLIC_KEY_FILE
+          echo 'S11.3 restored evidence verifies only with dual signatures; wrong key refused; signed audit chain verified'
           echo 'Encrypted synthetic database restored; wrong-key rejection, counts, receipt hashes and deny-by-default RLS checked'
           dropdb -h localhost -U profitpilot_admin profitpilot_restore
 
