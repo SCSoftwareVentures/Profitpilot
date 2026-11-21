@@ -161,8 +161,10 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const signatureB=sign(null,signedPartyStatement(signedScopeB),signerPrivateB).toString("base64url");
     const statementHashB=createHash("sha256").update(signedPartyStatement(signedScopeB)).digest("hex");
     const keyHashB=createHash("sha256").update(signerPublicB.export({format:"der",type:"spki"})).digest("hex");
-    await insertB("INSERT INTO securepay_signed_party_claims(tenant_id,case_id,evidence_id,provenance_receipt_id,client_request_id,recorded_by,claimed_party_role,key_spki,claim_nonce,claimed_content_sha256,signature,statement_sha256,key_spki_sha256) VALUES($1,$2,$3,$4,gen_random_uuid(),$5,'customer',$6,$7,$8,$9,$10,$11)",
+    const signedClaimB=await insertB("INSERT INTO securepay_signed_party_claims(tenant_id,case_id,evidence_id,provenance_receipt_id,client_request_id,recorded_by,claimed_party_role,key_spki,claim_nonce,claimed_content_sha256,signature,statement_sha256,key_spki_sha256) VALUES($1,$2,$3,$4,gen_random_uuid(),$5,'customer',$6,$7,$8,$9,$10,$11)",
       [tenantB,securepayCaseB,provenanceEvidenceB.id,signedClaimProvenanceB,userC,signerKeyB,signerNonceB,contentHashB,signatureB,statementHashB,keyHashB]);
+    await insertB("INSERT INTO securepay_signed_claim_revocations(tenant_id,case_id,evidence_id,claim_id,client_request_id,revoked_by,reason_code,revocation_reference) VALUES($1,$2,$3,$4,gen_random_uuid(),$5,'administrative_hold','s7.ci-tenantB')",
+      [tenantB,securepayCaseB,provenanceEvidenceB.id,signedClaimB,userC]);
 
     const snapshotB=checkOperatorReviewer(securepayCaseRowB,securepayEvidenceB,independentB);
     assert.equal(snapshotB.eligibleForNonbindingOperatorReview,true,"tenant B review fixture must satisfy internal actor separation");

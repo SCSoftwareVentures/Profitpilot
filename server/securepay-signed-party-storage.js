@@ -1,4 +1,5 @@
 import {validSignedPartyClaim,signedPartyStatement,checkSignedPartyClaim,sameSignedClaim} from "../src/securepay-signed-party.js";
+import {claimTrustStatus} from "../src/securepay-claim-revocation.js";
 const uuid=s=>typeof s==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
 const cols="id,case_id,evidence_id,provenance_receipt_id,client_request_id,recorded_by,claimed_party_role,key_spki,claim_nonce,claimed_content_sha256,signature,statement_sha256,key_spki_sha256,issuer_trusted,party_identity_verified,job_authority_verified,content_verified,decision_authority,payment_authority,recorded_at";
 const flags={synthetic:true,cryptographicProofOnly:true,trustedIssuerVerified:false,
@@ -61,7 +62,12 @@ export function installSecurepaySignedPartyRoutes(app,{membership,requireRole,wi
     if(!a.rowCount)return {status:404,error:"Signed-claim cursor unavailable"};
    }
    const r=await c.query("SELECT "+cols+" FROM securepay_signed_party_claims WHERE tenant_id=$1 AND case_id=$2 AND evidence_id=$3 AND ($4::uuid IS NULL OR (recorded_at,id)<(SELECT recorded_at,id FROM securepay_signed_party_claims WHERE tenant_id=$1 AND case_id=$2 AND evidence_id=$3 AND id=$4)) ORDER BY recorded_at DESC,id DESC LIMIT 101",[t,id,eid,cursor]);
-   const items=r.rows.slice(0,100);return {status:200,items,hasMore:r.rowCount>100,nextCursor:r.rowCount>100?items.at(-1).id:null};
+   const items=r.rows.slice(0,100);
+   const revokeIds=items.map(x=>x.id);
+   const revoked=revokeIds.length?(await c.query("SELECT claim_id FROM securepay_signed_claim_revocations WHERE tenant_id=$1 AND case_id=$2 AND evidence_id=$3 AND claim_id=ANY($4::uuid[])",[t,id,eid,revokeIds])).rows:[];
+   const revokedSet=new Set(revoked.map(x=>x.claim_id));
+   return {status:200,items:items.map(x=>({...x,revoked:revokedSet.has(x.id),operationallyUsable:false})),
+    hasMore:r.rowCount>100,nextCursor:r.rowCount>100?items.at(-1).id:null};
   },{repeatableRead:true});
   const {status,...data}=output;res.status(status).json({...data,...flags,signaturesNotReverifiedInList:true});
  }catch(e){next(e);}});
@@ -80,8 +86,11 @@ export function installSecurepaySignedPartyRoutes(app,{membership,requireRole,wi
    try{proof=checkSignedPartyClaim(statementFromDb(t,id,eid,input,scope.rows[0]),claim.key_spki,claim.signature);}
    catch{return {status:409,error:"Stored signature cannot be verified"};}
    const match=proof.signatureValid&&proof.statementSha256===claim.statement_sha256&&proof.keySpkiSha256===claim.key_spki_sha256;
-   return {status:200,claimId,cryptographicSignatureValid:match,trustVerified:false,
-    trustBlockingGates:["signer_key_not_anchored_to_verified_identity","party_job_authority_unverified","content_bytes_unverified","independent_custody_unverified"]};
+   const revocation=await c.query("SELECT id,recorded_at FROM securepay_signed_claim_revocations WHERE tenant_id=$1 AND case_id=$2 AND evidence_id=$3 AND claim_id=$4",[t,id,eid,claimId]);
+   const state=claimTrustStatus({revoked:revocation.rowCount>0,signatureValid:match});
+   const {status:claimStatus,...trustState}=state;
+   return {status:200,claimId,claimStatus,...trustState,revokedAt:revocation.rows[0]?.recorded_at??null,
+    trustVerified:false,trustBlockingGates:state.blockingGates};
   },{repeatableRead:true});
   const {status,...data}=output;res.status(status).json({...data,...flags});
  }catch(e){next(e);}});
