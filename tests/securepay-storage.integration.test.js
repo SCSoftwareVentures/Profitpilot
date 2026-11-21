@@ -122,14 +122,14 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
    "INSERT INTO securepay_evidence_rehearsals(tenant_id,case_id,client_request_id,recorded_by,evidence_type,evidence_reference) VALUES($1,$2,$3,$4,'operator_review_note','forged.actor')",[a,caseId,randomUUID(),reader])),/row-level security|permission denied/i);
   const reviewPath=rootA+"/"+caseId+"/reviewer-assessments";
   const reviewPayload={clientRequestId:randomUUID(),reviewReference:"review.snapshot.s3"};
-  assert.equal((await request(reviewPath,{subject:"sp-s3-reviewer",method:"POST",body:reviewPayload})).status,409);
+  const missingCase=await request(rootA,{subject:"sp-s2-owner",method:"POST",body:{synthetic:true,clientRequestId:randomUUID(),jobReference:"job.s3-missing",claimReference:"claim.s3-missing"}});
+  assert.equal(missingCase.status,201,JSON.stringify(missingCase));
+  const missingReview=await request(rootA+"/"+missingCase.body.item.id+"/reviewer-assessments",{subject:"sp-s3-reviewer",method:"POST",body:reviewPayload});
+  assert.equal(missingReview.status,409,JSON.stringify(missingReview));
+  assert.ok(missingReview.body.blockingGates.includes("matching_claim_report_missing"));
   assert.equal((await request(reviewPath,{subject:"sp-s2-owner",method:"POST",body:reviewPayload})).status,403);
   assert.equal((await request(reviewPath,{subject:"sp-s2-reader",method:"POST",body:reviewPayload})).status,403);
   assert.equal((await request(reviewPath,{subject:"sp-s3-reviewer",method:"POST",body:{...reviewPayload,paymentApproved:true}})).status,400);
-  for(const [evidenceType,evidenceReference] of [["claim_reported",payload.claimReference],["business_response_reported","business.s3"],["operator_review_note","note.s3"]]){
-   const recorded=await request(ep,{subject:"sp-s2-owner",method:"POST",body:{clientRequestId:randomUUID(),evidenceType,evidenceReference}});
-   assert.equal(recorded.status,201,JSON.stringify(recorded));
-  }
   const r=await request(reviewPath,{subject:"sp-s3-reviewer",method:"POST",body:reviewPayload});
   assert.equal(r.status,201,JSON.stringify(r));assert.equal(r.body.item.reviewer_id,"dddddddd-dddd-4ddd-8ddd-dddddddddddd");
   assert.equal(r.body.item.evidence_count,4);assert.match(r.body.item.evidence_snapshot_sha256,/^[a-f0-9]{64}$/);
