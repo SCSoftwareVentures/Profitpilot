@@ -122,3 +122,7 @@ The [B6 buyer source and dependency audit](docs/BUYER_ACQUISITION_B6.md) explain
 ## B9 buyer-verifiable source dossier (draft)
 
 The [B9 acquisition dossier specification](docs/CANDIDATE_HANDOVER_B9.md) describes a CI-gated draft buyer handover containing the full source archive, npm CycloneDX SBOM, B6 source and dependency inventory, truthful rights/demand warnings and SHA-256 checksums. Its separate GitHub provenance attestation verifies workflow provenance, **not intellectual-property ownership**. Physical iPhone testing, real demand, licensing/transfer rights and production readiness remain unverified; no merge, deployment, live sale or publisher certification is implied.
+
+## B10 source-file and SBOM reconciliation (draft)
+
+[B10 source evidence integrity gates](docs/SOURCE_INTEGRITY_B10.md) require the full Git archive to match every file path, byte count and SHA-256 in the B6 inventory, and every CycloneDX dependency to match the locked npm path/version. They reject tampered and inconsistent source packages, but do not certify ownership, legal transfer, actual demand, iPhone compatibility or production readiness.

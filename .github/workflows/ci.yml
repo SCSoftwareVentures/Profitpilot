@@ -478,7 +478,7 @@ jobs:
   buyer_candidate:
     name: Draft source-acquisition candidate and verified provenance
     needs: [verify, database, static_analysis, container_security, compose_rehearsal]
-    if: github.ref == 'refs/heads/feature/release-b9-buyer-source-dossier' && github.event_name == 'push'
+    if: (github.ref == 'refs/heads/feature/release-b9-buyer-source-dossier' || github.ref == 'refs/heads/feature/release-b10-source-integrity') && github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 12
     permissions:
