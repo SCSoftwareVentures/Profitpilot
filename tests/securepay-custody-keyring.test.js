@@ -83,7 +83,7 @@ test("S11.1 malformed, duplicate, reused, or ambiguously configured secrets fail
   assert.throws(()=>custodyKeyringSettings({...env,SECUREPAY_CUSTODY_ENCRYPTION_KEY:"f".repeat(64)}),/ambiguous/);
   assert.throws(()=>custodyKeyringSettings({...env,SECUREPAY_CUSTODY_KEYRING:"{}"}),/ambiguous/);
   const {SECUREPAY_CUSTODY_KEYRING_FILE,...withoutFile}=env;
-  assert.throws(()=>custodyKeyringSettings({...withoutFile,SECUREPAY_CUSTODY_KEYRING:"{}"}),/mounted/);
+  assert.throws(()=>custodyKeyringSettings({...withoutFile,SECUREPAY_CUSTODY_KEYRING:"{}"}),/[Mm]ounted/);
  });
 });
 
