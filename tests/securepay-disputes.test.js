@@ -71,3 +71,38 @@ test('partial deductions are proposals only, using whole cents',()=>{
  customerEvidenceReference:'claim.001',businessEvidenceReference:'business.001'});
  assert.equal(s.decision.adjustmentCents,2500);assert.equal(s.fundsMoved,false);
 });
+
+test('calendar-invalid UTC timestamps are rejected before SLA or case creation',()=>{
+ const input={id:I.case,tenantId:I.tenant,jobId:I.job,customerId:I.customer,
+  businessId:I.business,claimReference:'claim.001',clientRequestId:id()};
+ for(const submittedAt of ['2026-02-30T05:00:00Z','2026-11-31T05:00:00Z',
+  '2026-02-29T05:00:00Z','2026-11-20T24:00:00Z']){
+  assert.throws(()=>openDispute({...input,submittedAt},C),/invalid opening actor or scope/);
+  assert.throws(()=>responseTarget({receivedAt:submittedAt,severity:'high',calendar:cal}),/invalid receipt or severity/);
+ }
+});
+
+test('historical exact retries remain idempotent after later events',()=>{
+ const first=triaged(),later=step(first,'business_response',B,{evidenceReference:'business.001'});
+ const e=first.events.at(-1);
+ const replay={type:e.type,actor:R,at:e.at,clientRequestId:e.clientRequestId,...e.details};
+ assert.equal(advanceDispute(later,replay,cal),later);
+ assert.throws(()=>advanceDispute(later,{...replay,evidenceReference:'other.001'},cal),
+  /conflicting idempotency key/);
+ assert.throws(()=>advanceDispute(later,{...replay,clientRequestId:id()},cal),/backdated event/);
+});
+
+test('completed rectification cannot be misreported as overdue',()=>{
+ const offer=step(responded(),'offer_rectification',B,
+  {proposedDueDate:'2026-12-02',evidenceReference:'offer.001'});
+ const agreed=step(offer,'agree_rectification',C,{evidenceReference:'agree.001'});
+ const activeEscalation=step(agreed,'escalate',R,
+  {reason:'rectification_overdue',evidenceReference:'late.001'},'2026-12-05T00:00:00Z');
+ assert.equal(activeEscalation.status,'rectification');
+ assert.equal(activeEscalation.fundsMoved,false);
+ const completed=step(agreed,'rectification_result',C,
+  {outcome:'satisfactory',evidenceReference:'result.001'});
+ assert.throws(()=>step(completed,'escalate',R,
+  {reason:'rectification_overdue',evidenceReference:'late.001'},'2026-12-05T00:00:00Z'),
+  /rectification not overdue/);
+});
