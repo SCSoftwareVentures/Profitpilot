@@ -98,3 +98,7 @@ The reviewed B3 branch packages the **fictional, standalone** walkthrough as a s
 A reviewer needs no working server, domain or customer account to inspect the artifact. On iPhone, whether a downloaded local HTML file can run inside Safari depends on the device and opening workflow; this has **not** been tested on a physical iPhone. The file can alternatively be inspected as source; that does not constitute a UI test. There is no public hosting or deploy action. CI artifacts expire after seven days, whereas the source HTML remains in the repository.
 
 The checksums detect modifications relative to the package manifest but are **not** a trusted-publisher signature. Actual buyer validation, licence/ownership audit, independent legal/security review and customer willingness-to-pay evidence remain mandatory before any honest market-sale valuation.
+
+## B4 aggregate G0 feasibility evaluator
+
+The [B4 G0 feasibility engine](src/g0-feasibility.js) computes explicit pass/fail/exclusion outcomes for pseudonymous aggregate export-set records, with [adversarial regression tests](tests/g0-feasibility.test.js) and [evidence limitations](docs/G0_FEASIBILITY_ENGINE_B4.md). This is not a validated pilot, actual demand, verified independent-source permission or authorisation to build the SaaS. G0 remains externally blocked even if declared numeric thresholds are met.
