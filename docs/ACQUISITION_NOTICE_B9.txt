@@ -1,0 +1,48 @@
+PROFITPILOT — BUYER SOURCE-ACQUISITION EVIDENCE PACK (B9)
+FICTIONAL demonstration only | DRAFT source asset | No active customers asserted
+
+READ BEFORE EXTRACTING
+This archive is a candidate source-code due-diligence package, NOT a production release,
+NOT an IP ownership certificate, NOT proof of customer demand or revenue, and
+NOT an offer that any buyer can lawfully deploy or resell the system without review.
+
+Contents:
+  ProfitPilot_Source.tar.gz   Exact proposed Git commit source archive
+  dependencies.cdx.json      npm CycloneDX dependency metadata (not a licence opinion)
+  acquisition-inventory.json Tracked source hashes and declared dependency licences
+  README.txt                 This buyer warning and review guide
+  MANIFEST.json              Source SHA, file digests, bounded legal/commercial claims
+  SHA256SUMS                  Integrity hashes for the other five files
+
+The CI artifact may also include separately:
+  ProfitPilot_RC_Source_Dossier.tar.gz  Archived, fixed-content dossier for attestation
+  PROVENANCE.jsonl                      GitHub Actions attestation (when created and verified)
+
+HOW TO EVALUATE
+1. Compare the exact 40-character source commit in MANIFEST.json with the
+   GitHub Actions run and the intended purchase agreement.
+2. Verify checksums: sha256sum -c SHA256SUMS (on a trusted computer).
+3. Review source, scripts, migrations, test reports, architecture and all security caveats.
+4. Review independently the producer identity and source attestation. Where available:
+   gh attestation verify ProfitPilot_RC_Source_Dossier.tar.gz \
+     --repo SCSoftwareVentures/Profitpilot --bundle PROVENANCE.jsonl
+5. Independently review every original contributor's assignments and rights, third-party
+   source and software licence terms, notices, dependencies, brand clearance and
+   repository transfer permissions. A GitHub provenance attestation only links
+   workflow identity and artifact to CI; it does not certify copyright ownership.
+6. Request real customer interviews, verified willingness to pay, independent legal
+   and security advice, real iPhone Safari/VoiceOver acceptance and production
+   operations evidence. None is inferred from the fictional buyer tour or CI.
+
+CONDITIONS
+No known live payment processing, real customer files, hosted product or buyer commitments
+are represented by this source dossier. SecurePay is a synthetic-only controlled
+technical rehearsal, not a payment processor or regulated settlement service.
+CI checks reflect the configured automated tests; remaining G0–G5 approval gates are open.
+The full-source archive may be extracted by an appropriate buyer-controlled workflow;
+the ChatGPT iPhone document preview may not execute software or open tarballs.
+
+The dossier is generated only on an explicitly named release-candidate draft branch.
+It is not merged into main by its creation. No secret values are intentionally
+included. Filename checks and CI scans are not independent source-content or legal audits.
+All financial and acquisition representations require separate evidence and approval.

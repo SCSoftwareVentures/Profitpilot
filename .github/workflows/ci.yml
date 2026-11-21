@@ -474,3 +474,61 @@ jobs:
           path: buyer-handoff/
           if-no-files-found: error
           retention-days: 7
+
+  buyer_candidate:
+    name: Draft source-acquisition candidate and verified provenance
+    needs: [verify, database, static_analysis, container_security, compose_rehearsal]
+    if: github.ref == 'refs/heads/feature/release-b9-buyer-source-dossier' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Checkout immutable candidate source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Generate source, software bill of materials and acquisition evidence
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          npm ci --ignore-scripts --no-audit --no-fund
+          mkdir -m 700 candidate-staging
+          git archive --format=tar.gz --prefix=profitpilot/ "$GITHUB_SHA" > candidate-staging/ProfitPilot_Source.tar.gz
+          npm sbom --sbom-format=cyclonedx --omit=dev > candidate-staging/dependencies.cdx.json
+          node scripts/build-buyer-acquisition-audit.mjs --json > candidate-staging/acquisition-inventory.json
+          node scripts/package-acquisition-candidate.mjs build candidate-staging candidate-files "$GITHUB_SHA"
+          node scripts/package-acquisition-candidate.mjs verify candidate-staging candidate-files "$GITHUB_SHA"
+          (cd candidate-files && sha256sum -c SHA256SUMS)
+          tar --sort=name --mtime='@0' --owner=0 --group=0 --numeric-owner -czf ProfitPilot_RC_Source_Dossier.tar.gz -C candidate-files .
+          test -s ProfitPilot_RC_Source_Dossier.tar.gz
+      - name: Attest provenance of draft evidence dossier
+        id: attest
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: ProfitPilot_RC_Source_Dossier.tar.gz
+      - name: Verify signed candidate provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
+        run: |
+          set -euo pipefail
+          gh attestation verify ProfitPilot_RC_Source_Dossier.tar.gz --repo "$GITHUB_REPOSITORY" --bundle "$BUNDLE_PATH"
+          cp "$BUNDLE_PATH" PROVENANCE.jsonl
+          test -s PROVENANCE.jsonl
+      - name: Retain draft buyer source evidence (not a release)
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: profitpilot-draft-source-dossier-${{ github.sha }}
+          path: |
+            candidate-files/
+            ProfitPilot_RC_Source_Dossier.tar.gz
+            PROVENANCE.jsonl
+          if-no-files-found: error
+          retention-days: 7

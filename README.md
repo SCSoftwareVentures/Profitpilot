@@ -118,3 +118,7 @@ The [B6 buyer source and dependency audit](docs/BUYER_ACQUISITION_B6.md) explain
 ## B8 synthetic Compose boot and existing-volume migration rehearsal
 
 [CI-only B8 recovery test](docs/COMPOSE_RECOVERY_REHEARSAL_B8.md) exercises a disposable, fresh local Compose database and a synthetic pre-B7 database upgrade, with encrypted backup, wrong-key rejection, restored baseline and RLS/data-integrity checks. It is strictly non-production, uses no customer records and gives no permission to upgrade or deploy a real environment.
+
+## B9 buyer-verifiable source dossier (draft)
+
+The [B9 acquisition dossier specification](docs/CANDIDATE_HANDOVER_B9.md) describes a CI-gated draft buyer handover containing the full source archive, npm CycloneDX SBOM, B6 source and dependency inventory, truthful rights/demand warnings and SHA-256 checksums. Its separate GitHub provenance attestation verifies workflow provenance, **not intellectual-property ownership**. Physical iPhone testing, real demand, licensing/transfer rights and production readiness remain unverified; no merge, deployment, live sale or publisher certification is implied.
