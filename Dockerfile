@@ -5,12 +5,15 @@ COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
 
 # Assemble a genuine minimal package-managed root filesystem for the prototype.
+# Keep optional system OpenSSL libraries out of the basic API root unless required;
+# the protected ClamAV stage resolves its necessary vendor-supplied libraries.
+# CI verifies API crypto/TLS operations and both complete image vulnerability scans.
 # The signed APK inventory is retained; no package record is removed or fabricated.
 FROM node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS prototype-root
 RUN mkdir -p /rootfs/etc/apk/keys /rootfs/usr/local/bin /rootfs/app /rootfs/home/node /rootfs/tmp /rootfs/var/tmp && \
     cp /etc/apk/keys/* /rootfs/etc/apk/keys/ && \
     cp /etc/apk/repositories /rootfs/etc/apk/repositories && \
-    apk --root /rootfs --initdb --no-scripts --no-cache add musl libgcc libstdc++ ca-certificates-bundle libcrypto3 libssl3 zlib && \
+    apk --root /rootfs --initdb --no-scripts --no-cache add musl libgcc libstdc++ ca-certificates-bundle zlib && \
     ! apk --root /rootfs info -e busybox && ! apk --root /rootfs info -e busybox-binsh && ! apk --root /rootfs info -e ssl_client && \
     cp -L /etc/os-release /rootfs/etc/os-release && cp /etc/alpine-release /rootfs/etc/alpine-release && \
     printf '%s\n' 'root:x:0:0:root:/root:/sbin/nologin' 'node:x:1000:1000:node:/home/node:/sbin/nologin' > /rootfs/etc/passwd && \
