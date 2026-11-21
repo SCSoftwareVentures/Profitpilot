@@ -68,7 +68,24 @@ const money=cents=>cents===null?"Unavailable":new Intl.NumberFormat("en-AU",
  {style:"currency",currency:"AUD",minimumFractionDigits:2,maximumFractionDigits:2}).format(cents/100);
 let state=createBuyerDemoState();
 function el(tag,cls,text){
- const node=document.createElement(tag);
+ // Closed tag allowlist: no user-derived element names or executable/embedded nodes.
+ let node;
+ switch(tag){
+  case "a":node=document.createElement("a");break;
+  case "article":node=document.createElement("article");break;
+  case "button":node=document.createElement("button");break;
+  case "details":node=document.createElement("details");break;
+  case "div":node=document.createElement("div");break;
+  case "h3":node=document.createElement("h3");break;
+  case "p":node=document.createElement("p");break;
+  case "span":node=document.createElement("span");break;
+  case "strong":node=document.createElement("strong");break;
+  case "summary":node=document.createElement("summary");break;
+  case "td":node=document.createElement("td");break;
+  case "th":node=document.createElement("th");break;
+  case "tr":node=document.createElement("tr");break;
+  default:throw new Error("Unsupported presentation element");
+ }
  if(cls)node.className=cls;
  if(text!==undefined)node.textContent=String(text);
  return node;
