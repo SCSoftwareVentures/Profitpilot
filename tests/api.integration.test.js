@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createServer} from "node:http";
-import {createHash,createHmac,randomBytes,generateKeyPairSync} from "node:crypto";
+import {createHash,createHmac,randomBytes,generateKeyPairSync,sign} from "node:crypto";
 import {generateKeyPair,exportJWK,SignJWT} from "jose";
 import pg from "pg";
 
@@ -146,8 +146,24 @@ test("authenticated API enforces tenant membership, role permissions and import 
       actorId:userC,jobReference:'job.ci-tenantB',evidenceType:provenanceEvidenceB.evidence_type,
       evidenceReference:provenanceEvidenceB.evidence_reference,reportedOrigin:'reported_customer',
       acquisitionMethod:'document_reference_only',sourceReference:'source.ci-tenantB'};
-    await insertB("INSERT INTO securepay_evidence_provenance_receipts(tenant_id,case_id,evidence_id,client_request_id,recorded_by,reported_origin,acquisition_method,source_reference,metadata_sha256) VALUES($1,$2,$3,gen_random_uuid(),$4,$5,$6,$7,$8)",
+    const signedClaimProvenanceB=await insertB("INSERT INTO securepay_evidence_provenance_receipts(tenant_id,case_id,evidence_id,client_request_id,recorded_by,reported_origin,acquisition_method,source_reference,metadata_sha256) VALUES($1,$2,$3,gen_random_uuid(),$4,$5,$6,$7,$8)",
       [tenantB,securepayCaseB,provenanceEvidenceB.id,userC,metadataB.reportedOrigin,metadataB.acquisitionMethod,metadataB.sourceReference,reportedMetadataDigest(metadataB)]);
+    const {signedPartyStatement}=await import("../src/securepay-signed-party.js");
+    const {publicKey:signerPublicB,privateKey:signerPrivateB}=generateKeyPairSync("ed25519");
+    const signerKeyB=signerPublicB.export({format:"der",type:"spki"}).toString("base64url");
+    const signerNonceB="ab123456-ab12-4b12-8b12-123456789abc";
+    const contentHashB="b".repeat(64);
+    const signedScopeB={tenantId:tenantB,caseId:securepayCaseB,evidenceId:provenanceEvidenceB.id,
+      provenanceReceiptId:signedClaimProvenanceB,provenanceMetadataSha256:reportedMetadataDigest(metadataB),
+      jobReference:"job.ci-tenantB",evidenceType:provenanceEvidenceB.evidence_type,
+      evidenceReference:provenanceEvidenceB.evidence_reference,
+      claimedPartyRole:"customer",claimedContentSha256:contentHashB,nonce:signerNonceB};
+    const signatureB=sign(null,signedPartyStatement(signedScopeB),signerPrivateB).toString("base64url");
+    const statementHashB=createHash("sha256").update(signedPartyStatement(signedScopeB)).digest("hex");
+    const keyHashB=createHash("sha256").update(signerPublicB.export({format:"der",type:"spki"})).digest("hex");
+    await insertB("INSERT INTO securepay_signed_party_claims(tenant_id,case_id,evidence_id,provenance_receipt_id,client_request_id,recorded_by,claimed_party_role,key_spki,claim_nonce,claimed_content_sha256,signature,statement_sha256,key_spki_sha256) VALUES($1,$2,$3,$4,gen_random_uuid(),$5,'customer',$6,$7,$8,$9,$10,$11)",
+      [tenantB,securepayCaseB,provenanceEvidenceB.id,signedClaimProvenanceB,userC,signerKeyB,signerNonceB,contentHashB,signatureB,statementHashB,keyHashB]);
+
     const snapshotB=checkOperatorReviewer(securepayCaseRowB,securepayEvidenceB,independentB);
     assert.equal(snapshotB.eligibleForNonbindingOperatorReview,true,"tenant B review fixture must satisfy internal actor separation");
     await admin.query("UPDATE tenant_memberships SET role='reviewer' WHERE tenant_id=$1 AND user_id=$2",[tenantB,independentB]);
