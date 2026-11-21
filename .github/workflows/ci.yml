@@ -412,3 +412,35 @@ jobs:
             profitpilot-attestation.jsonl
           if-no-files-found: error
           retention-days: 30
+
+  buyer_demo:
+    name: CI-gated fictional buyer demo package
+    needs: [verify, database, static_analysis, container_security]
+    if: startsWith(github.ref, 'refs/heads/feature/buyer-') && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout reviewed source commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Build and verify synthetic-only handoff
+        run: |
+          set -euo pipefail
+          node scripts/package-buyer-demo.mjs build buyer-handoff "$GITHUB_SHA"
+          node scripts/package-buyer-demo.mjs verify buyer-handoff "$GITHUB_SHA"
+          test "$(find buyer-handoff -maxdepth 1 -type f | wc -l)" -eq 4
+          echo 'Fictional demo package verified; NOT a release, a production build or iPhone certification'
+      - name: Retain CI-tested portable buyer package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: profitpilot-fictional-buyer-demo-${{ github.sha }}
+          path: buyer-handoff/
+          if-no-files-found: error
+          retention-days: 7
