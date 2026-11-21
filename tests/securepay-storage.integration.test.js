@@ -139,7 +139,7 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   const verifiedProof=await request(partyRoute+"/"+claimCreated.body.item.id+"/verify-signature",{subject:"sp-s2-owner"});
   assert.equal(verifiedProof.status,200,JSON.stringify(verifiedProof));
   assert.equal(verifiedProof.body.cryptographicSignatureValid,true);assert.equal(verifiedProof.body.trustVerified,false);
-  assert.equal(verifiedProof.body.status,"untrusted_unverified");assert.equal(verifiedProof.body.revoked,false);
+  assert.equal(verifiedProof.body.claimStatus,"untrusted_unverified");assert.equal(verifiedProof.body.revoked,false);
   assert.equal(verifiedProof.body.operationallyUsable,false);
   const trustPreflight=rootA+"/"+caseId+"/party-job-trust-preflight";
   const beforeRevoke=await request(trustPreflight,{subject:"sp-s2-owner"});
@@ -164,7 +164,7 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   assert.equal(revokedRead.status,200);assert.equal(revokedRead.body.revoked,true);
   const reverified=await request(partyRoute+"/"+claimCreated.body.item.id+"/verify-signature",{subject:"sp-s2-owner"});
   assert.equal(reverified.status,200);assert.equal(reverified.body.cryptographicSignatureValid,true);
-  assert.equal(reverified.body.revoked,true);assert.equal(reverified.body.status,"revoked");
+  assert.equal(reverified.body.revoked,true);assert.equal(reverified.body.claimStatus,"revoked");
   assert.ok(reverified.body.blockingGates.includes("synthetic_claim_revoked"));
   assert.equal(reverified.body.operationallyUsable,false);
   const afterList=await request(partyRoute,{subject:"sp-s2-owner"});

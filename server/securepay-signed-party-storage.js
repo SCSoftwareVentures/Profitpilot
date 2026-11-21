@@ -88,7 +88,8 @@ export function installSecurepaySignedPartyRoutes(app,{membership,requireRole,wi
    const match=proof.signatureValid&&proof.statementSha256===claim.statement_sha256&&proof.keySpkiSha256===claim.key_spki_sha256;
    const revocation=await c.query("SELECT id,recorded_at FROM securepay_signed_claim_revocations WHERE tenant_id=$1 AND case_id=$2 AND evidence_id=$3 AND claim_id=$4",[t,id,eid,claimId]);
    const state=claimTrustStatus({revoked:revocation.rowCount>0,signatureValid:match});
-   return {status:200,claimId,...state,revokedAt:revocation.rows[0]?.recorded_at??null,
+   const {status:claimStatus,...trustState}=state;
+   return {status:200,claimId,claimStatus,...trustState,revokedAt:revocation.rows[0]?.recorded_at??null,
     trustVerified:false,trustBlockingGates:state.blockingGates};
   },{repeatableRead:true});
   const {status,...data}=output;res.status(status).json({...data,...flags});
