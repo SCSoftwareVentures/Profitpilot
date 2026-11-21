@@ -28,6 +28,10 @@ export function deploymentProfile(env=process.env){
  const protectedMode=mode==="protected";
  if(protectedMode&&env.NODE_ENV!=="production")
   throw Error("Protected profile requires NODE_ENV=production");
+ // Node's global override can disable HTTPS certificate verification,
+ // including remote identity JWKS. Fail before any network or secret access.
+ if(protectedMode&&env.NODE_TLS_REJECT_UNAUTHORIZED==="0")
+  throw Error("Protected profile forbids disabling TLS certificate verification");
  const corsOrigins=protectedMode?protectedCorsOrigins(env.CORS_ORIGIN):
   (env.CORS_ORIGIN||"").split(",").map(x=>x.trim()).filter(Boolean);
  const scannerEnabled=env.MALWARE_SCAN_MODE==="clamav";
