@@ -33,7 +33,7 @@ if(profile.protectedMode)accessSync(SCANNER_PATH,fsConstants.X_OK);
 const app=express();
 app.disable("x-powered-by");
 app.use(helmet());
-app.use(cors({origin:(process.env.CORS_ORIGIN||"").split(",").map(x=>x.trim()).filter(Boolean),credentials:false,methods:["GET","POST"]}));
+app.use(cors({origin:profile.corsOrigins,credentials:false,methods:["GET","POST"]}));
 app.use("/v1",(_req,res,next)=>{res.set("Cache-Control","no-store");res.set("Pragma","no-cache");next();});
 export const requestLimiter=rateLimit({windowMs:60_000,limit:100,standardHeaders:true,legacyHeaders:false});
 app.use(requestLimiter);
