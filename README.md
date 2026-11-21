@@ -78,3 +78,11 @@ These prototypes are for design review only. They are not a deployed product or 
 
 ## Security and privacy handover
 [Protected deployment requirements, privacy lifecycle and independent review gates](docs/SECURITY_PRIVACY_HANDOVER.md). Main-branch CI includes encrypted synthetic recovery, native scanner fixture testing, dependency inventory and source package provenance. Review corresponding run before relying on any claimed result.
+
+## Evidence-first buyer walkthrough (synthetic B1 draft)
+
+- [Standalone buyer walkthrough](demo/buyer-walkthrough.html) — dependency-free HTML with fictional figures, visible source references, source completeness gates and simulated human-review choices. This file is not a deployed SaaS or proof of customer demand.
+- [Buyer B1 operating and due-diligence notes](docs/BUYER_WALKTHROUGH_B1.md) — initial vs completed arithmetic, verification scope and unverified acquisition conditions.
+- [Auditable demo calculation logic](src/buyer-walkthrough-core.js) — deterministic cents-based contract economics scenario, with tests and a reproducible standalone build.
+
+To verify the packaged demo in a Node.js 22 source review environment: `npm test` and `npm run check`. Production security, real customer identity, legal/payment clearances and independent iPhone browser tests remain outstanding.
