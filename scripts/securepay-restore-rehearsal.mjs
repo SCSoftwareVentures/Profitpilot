@@ -38,7 +38,7 @@ function writeAttempt(auditDir,attempt){
  writeFileSync(file,bytes,{encoding:"utf8",mode:0o600,flag:"wx"});
  return {file,hash:sha(bytes)};
 }
-async function cryptographicRehearsal(tenantId,dbFile){
+async function cryptographicRehearsal(tenantId,dbFile,env){
  const connectionString=privateSecretFile(dbFile);
  let url;
  try{url=new URL(connectionString);}catch{throw Error("Invalid restored database URL");}
@@ -48,9 +48,9 @@ async function cryptographicRehearsal(tenantId,dbFile){
  // Never access a live production database through this command.
  const loopback=["127.0.0.1","localhost","[::1]"].includes(url.hostname);
  if(!loopback)throw new Error("Offline restore must be reachable on loopback only");
- const ring=custodyKeyringSettings(process.env);
+ const ring=custodyKeyringSettings(env);
  if(ring.mode!=="mounted-keyring")throw new Error("Offline restore requires a separately mounted keyring");
- const client=new pg.Client({connectionString,ssl:process.env.NODE_ENV==="test"?false:{rejectUnauthorized:true},
+ const client=new pg.Client({connectionString,ssl:env.NODE_ENV==="test"?false:{rejectUnauthorized:true},
   connectionTimeoutMillis:5000,query_timeout:30000});
  await client.connect();
  try{
@@ -86,7 +86,7 @@ export async function runSyntheticRehearsal(argv,env=process.env){
  let failure;
  try{
   // No exception detail reaches stdout/audit: DB URLs or server error strings may contain secrets.
-  const verified=await cryptographicRehearsal(tenantId,dbFile);
+  const verified=await cryptographicRehearsal(tenantId,dbFile,env);
   event.outcome="verified_synthetic_recovery";
   event.recovery=verified;
  }catch(e){failure=e;event.reason="offline_rehearsal_denied";}
