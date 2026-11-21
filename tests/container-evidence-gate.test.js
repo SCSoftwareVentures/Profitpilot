@@ -33,7 +33,9 @@ function check(mutator=()=>{}){
   writeFileSync(join(dir,"prototype-vulnerabilities.json"),JSON.stringify(a));
   writeFileSync(join(dir,"protected-vulnerabilities.json"),JSON.stringify(b));
   return spawnSync(process.execPath,[script,"prototype-vulnerabilities.json","protected-vulnerabilities.json"],{
-   cwd:dir,encoding:"utf8",timeout:5000
+   cwd:dir,encoding:"utf8",timeout:5000,
+   env:{...process.env,PROFITPILOT_EXPECTED_API_IMAGE_ID:digest("a"),
+    PROFITPILOT_EXPECTED_PROTECTED_IMAGE_ID:digest("b")}
   });
  }finally{rmSync(dir,{recursive:true,force:true});}
 }
@@ -53,6 +55,7 @@ test("B12 fails closed when reports are swapped, repeated, stale, filtered or su
  const cases=[
   ["swapped image identity",(a,b)=>{b.source.target.userInput=images[0];}],
   ["duplicate image",(a,b)=>{b.source.target.imageID=a.source.target.imageID;}],
+  ["forged image ID",(a)=>{a.source.target.imageID=digest("e");}],
   ["missing image digest",(a)=>{delete a.source.target.manifestDigest;}],
   ["stale scanner result",(a)=>{a.descriptor.timestamp="2026-01-01T00:00:00Z";}],
   ["stale vulnerability database",(a)=>{a.descriptor.db.status.built="2026-01-01T00:00:00Z";}],
