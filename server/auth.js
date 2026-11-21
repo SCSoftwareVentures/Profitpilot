@@ -1,13 +1,29 @@
 import {createRemoteJWKSet,jwtVerify} from "jose";
+import {isIP} from "node:net";
 import {deploymentProfile,validMfa} from "./deployment.js";
 let jwks,jwksUrl;
 export function identityConfig(env=process.env){
  const {AUTH_ISSUER,AUTH_AUDIENCE,AUTH_JWKS_URL}=env;
- if(!AUTH_ISSUER||!AUTH_AUDIENCE||!AUTH_JWKS_URL)throw new Error("Authentication is not configured");
+ if(typeof AUTH_ISSUER!=="string"||typeof AUTH_JWKS_URL!=="string"||
+   typeof AUTH_AUDIENCE!=="string"||AUTH_AUDIENCE.length<1||AUTH_AUDIENCE.length>256||
+   AUTH_AUDIENCE!==AUTH_AUDIENCE.trim()||/[\x00-\x1f\x7f]/.test(AUTH_AUDIENCE)||
+   AUTH_ISSUER.length>2048||AUTH_JWKS_URL.length>2048)
+  throw new Error("Authentication is not configured");
  const url=new URL(AUTH_JWKS_URL),issuer=new URL(AUTH_ISSUER);
- const localTest=env.NODE_ENV==="test"&&env.PROFITPILOT_PROFILE!=="protected"&&url.protocol==="http:"&&["127.0.0.1","[::1]","localhost"].includes(url.hostname);
+ const protectedMode=env.PROFITPILOT_PROFILE==="protected";
+ const localTest=env.NODE_ENV==="test"&&!protectedMode&&url.protocol==="http:"&&["127.0.0.1","[::1]","localhost"].includes(url.hostname);
  if((url.protocol!=="https:"&&!localTest)||url.username||url.password||url.hash||
- issuer.protocol!=="https:"||issuer.username||issuer.password||issuer.hash)throw new Error("Invalid authentication configuration");
+ issuer.protocol!=="https:"||issuer.username||issuer.password||issuer.hash)
+  throw new Error("Invalid authentication configuration");
+ // Refuse explicitly local/IP literal identity endpoints in protected mode.
+ // Hostname checks do NOT substitute for an outbound egress policy or DNS pinning.
+ const internalHost=h=>{
+  const n=h.replace(/^\[|\]$/g,"").toLowerCase();
+  return isIP(n)!==0||n==="localhost"||n.endsWith(".localhost")||
+   n.endsWith(".local")||n==="0.0.0.0";
+ };
+ if(protectedMode&&(internalHost(url.hostname)||internalHost(issuer.hostname)))
+  throw new Error("Protected identity endpoints require trusted nonlocal DNS hosts");
  return {issuer:AUTH_ISSUER,audience:AUTH_AUDIENCE,url};
 }
 export const validSubject=value=>typeof value==="string"&&value.length>0&&value.length<=255&&value===value.trim()&&!/[\x00-\x1f\x7f-\x9f]/u.test(value);

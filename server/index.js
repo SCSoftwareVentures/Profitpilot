@@ -10,7 +10,7 @@ import {allowedImportRows} from "./privacy.js";
 import {deploymentProfile,readSecret} from "./deployment.js";
 import {scanSource,SCANNER_PATH} from "./malware.js";
 import {accessSync,constants as fsConstants} from "node:fs";
-import {authRequired,requireRole} from "./auth.js";
+import {authRequired,requireRole,identityConfig} from "./auth.js";
 import {installSecurepayStorageRoutes} from "./securepay-storage.js";
 import {installSecurepayReviewerRoutes} from "./securepay-review-storage.js";
 import {installSecurepayConflictDeclarationRoutes} from "./securepay-conflict-storage.js";
@@ -28,6 +28,9 @@ const MAX_IMPORT_ROWS=2000;
 const isUuid=value=>typeof value==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 
 const profile=deploymentProfile();
+// Reject malformed protected identity configuration before binding any API listener.
+// Real provider availability/revocation remains a separate operational gate.
+if(profile.protectedMode)identityConfig();
 if(profile.protectedMode&&!/^(?:[a-f0-9]{2}){32,}$/i.test(readSecret("TENANT_CONTEXT_HMAC_SECRET")))throw new Error("Invalid mounted signing key");
 if(profile.protectedMode)accessSync(SCANNER_PATH,fsConstants.X_OK);
 const app=express();
