@@ -60,3 +60,18 @@ test("B3 rejects substituted symlinks and directories during verification",()=>{
   assert.throws(()=>runPackaging("verify",out,sourceSha),/altered/);
  }finally{rmSync(root,{recursive:true,force:true});}
 });
+
+test("B3 rejects oversized and truncated files without loading unbounded contents",()=>{
+ const root=mkdtempSync(join(tmpdir(),"pp-buyer-bounded-")),out=join(root,"share");
+ try{
+  runPackaging("build",out,sourceSha);
+  const guide=join(out,"README.txt");
+  const expected=readFileSync(guide);
+  writeFileSync(guide,Buffer.concat([expected,Buffer.from("unexpected appended bytes")]));
+  assert.throws(()=>runPackaging("verify",out,sourceSha),/altered/);
+  writeFileSync(guide,expected.subarray(0,expected.length-1));
+  assert.throws(()=>runPackaging("verify",out,sourceSha),/altered/);
+  writeFileSync(guide,expected);
+  assert.equal(runPackaging("verify",out,sourceSha).sourceCommitSha,sourceSha);
+ }finally{rmSync(root,{recursive:true,force:true});}
+});
