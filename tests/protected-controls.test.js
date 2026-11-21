@@ -1,9 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {mkdtempSync,writeFileSync,rmSync,chmodSync,symlinkSync} from "node:fs";
+import {mkdtempSync,mkdirSync,writeFileSync,rmSync,chmodSync,symlinkSync,linkSync,unlinkSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {deploymentProfile,databaseConfig,readSecret,validMfa,protectedCorsOrigins} from "../server/deployment.js";
+import {deploymentProfile,databaseConfig,readSecret,validMfa,protectedCorsOrigins,protectedStartupPreflight} from "../server/deployment.js";
 test("protected profile rejects missing prerequisites and TLS overrides",()=>{
  const dir=mkdtempSync(join(tmpdir(),"pp-config-"));
  try{
@@ -38,6 +38,8 @@ test("mounted secret input is bounded and must be a nonempty regular UTF-8 file"
   }
   writeFileSync(path,"x".repeat(8192));
   assert.equal(readSecret("TEST_SECRET",env).length,8192);
+  assert.equal(readSecret("TEST_SECRET",{...env,TEST_SECRET:""}).length,8192);
+  assert.throws(()=>readSecret("TEST_SECRET",{...env,TEST_SECRET:"conflict"}),/Ambiguous secret configuration/);
   assert.throws(()=>readSecret("TEST_SECRET",{TEST_SECRET_FILE:dir}));
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
@@ -67,4 +69,112 @@ test("B14 protected browser origins are exact HTTPS origins or empty-deny",()=>{
   "https://localhost","https://127.0.0.1","https://internal.localhost",
   "https://app.example.com,"+"https://a.example.com,".repeat(9)+"https://z.example.com"
  ])assert.throws(()=>protectedCorsOrigins(bad),bad);
+});
+
+
+function protectedSecretFixture(){
+ const dir=mkdtempSync(join(tmpdir(),"pp-b22-mount-"));
+ const db=join(dir,"database-url");
+ const key=join(dir,"signing-key");
+ writeFileSync(db,"postgres://app@db.invalid/profitpilot\n",{mode:0o600});
+ writeFileSync(key,"a".repeat(64)+"\n",{mode:0o600});
+ const env={NODE_ENV:"production",PROFITPILOT_PROFILE:"protected",DATABASE_SSL:"true",
+  DATABASE_URL_FILE:db,TENANT_CONTEXT_HMAC_SECRET_FILE:key,
+  MALWARE_SCAN_MODE:"clamav",AUTH_MFA_ACR:"trusted-mfa"};
+ return {dir,db,key,env,cleanup:()=>rmSync(dir,{recursive:true,force:true})};
+}
+
+test("B22 protected preflight verifies mounted DB and signing-key files before startup",()=>{
+ const h=protectedSecretFixture();
+ try{
+  const verified=protectedStartupPreflight(h.env);
+  assert.equal(verified.mountedSecretsVerified,true);
+  assert.equal(verified.productionReleaseApproved,false);
+  assert.equal(verified.liveInfrastructureVerified,false);
+  assert.equal(readSecret("TENANT_CONTEXT_HMAC_SECRET",h.env),"a".repeat(64));
+  assert.equal(readSecret("DATABASE_URL",h.env),"postgres://app@db.invalid/profitpilot");
+  assert.throws(()=>protectedStartupPreflight({
+   ...h.env,DATABASE_URL_FILE:join(h.dir,"missing-db-secret")
+  }),error=>error.message.includes("DATABASE_URL")&&!error.message.includes(h.dir));
+  chmodSync(h.key,0o400);
+  assert.equal(protectedStartupPreflight(h.env).mountedSecretsVerified,true);
+  chmodSync(h.key,0o600);
+  for(const invalid of [
+   {...h.env,DATABASE_URL_FILE:join(h.dir,"missing")},
+   {...h.env,TENANT_CONTEXT_HMAC_SECRET_FILE:join(h.dir,"missing")},
+   {...h.env,DATABASE_URL:""},
+   {...h.env,TENANT_CONTEXT_HMAC_SECRET:""},
+   {...h.env,DATABASE_URL_FILE:"relative/secret"},
+   {...h.env,TENANT_CONTEXT_HMAC_SECRET_FILE:h.key+"/../bad"},
+  ])assert.throws(()=>protectedStartupPreflight(invalid));
+  writeFileSync(h.key,"weak",{mode:0o600});
+  assert.throws(()=>protectedStartupPreflight(h.env),/Invalid mounted tenant-context signing key/);
+ }finally{h.cleanup();}
+});
+
+test("B22 protected secret path rejects symlinked parents, writable parents and aliasing hardlinks",()=>{
+ const h=protectedSecretFixture();
+ try{
+  const safe=join(h.dir,"safe");
+  mkdirSync(safe,{mode:0o700});
+  const nested=join(safe,"key");
+  writeFileSync(nested,"b".repeat(64),{mode:0o600});
+  assert.equal(readSecret("TENANT_CONTEXT_HMAC_SECRET",
+   {...h.env,TENANT_CONTEXT_HMAC_SECRET_FILE:nested}),"b".repeat(64));
+  const alias=join(h.dir,"parent-link");
+  symlinkSync(safe,alias);
+  assert.throws(()=>readSecret("TENANT_CONTEXT_HMAC_SECRET",
+   {...h.env,TENANT_CONTEXT_HMAC_SECRET_FILE:join(alias,"key")}),
+   /Untrusted protected secret directory or symlink/);
+  chmodSync(safe,0o770);
+  assert.throws(()=>readSecret("TENANT_CONTEXT_HMAC_SECRET",
+   {...h.env,TENANT_CONTEXT_HMAC_SECRET_FILE:nested}),
+   /Writable protected secret ancestor/);
+  chmodSync(safe,0o700);
+  const hardlink=join(safe,"hardlink");
+  linkSync(nested,hardlink);
+  assert.throws(()=>readSecret("TENANT_CONTEXT_HMAC_SECRET",
+   {...h.env,TENANT_CONTEXT_HMAC_SECRET_FILE:nested}),
+   /ownership or hardlink count/);
+  unlinkSync(hardlink);
+  assert.equal(readSecret("TENANT_CONTEXT_HMAC_SECRET",
+   {...h.env,TENANT_CONTEXT_HMAC_SECRET_FILE:nested}),"b".repeat(64));
+ }finally{h.cleanup();}
+});
+
+test("B22 protected secrets require owner-only nonexecutable permissions and unmodified text",()=>{
+ const h=protectedSecretFixture();
+ try{
+  for(const mode of [0o640,0o644,0o700,0o711]){
+   chmodSync(h.key,mode);
+   assert.throws(()=>readSecret("TENANT_CONTEXT_HMAC_SECRET",h.env),
+    /owner-only permissions/);
+  }
+  chmodSync(h.key,0o600);
+  for(const invalidText of [" b","b ","b\nc","b\rc","b\0c","b\tc","\n"]){
+   writeFileSync(h.key,invalidText,{mode:0o600});
+   assert.throws(()=>readSecret("TENANT_CONTEXT_HMAC_SECRET",h.env));
+  }
+  for(const valid of ["b","b\n","b\r\n"]){
+   writeFileSync(h.key,valid,{mode:0o600});
+   assert.equal(readSecret("TENANT_CONTEXT_HMAC_SECRET",h.env),"b");
+  }
+  writeFileSync(h.key,"b".repeat(8193),{mode:0o600});
+  assert.throws(()=>readSecret("TENANT_CONTEXT_HMAC_SECRET",h.env),
+   /Invalid mounted secret/);
+ }finally{h.cleanup();}
+});
+
+test("B22 protected startup rejects a symlinked signing-key mount even with apparently valid contents",()=>{
+ const h=protectedSecretFixture();
+ try{
+  const link=join(h.dir,"link-to-key");
+  symlinkSync(h.key,link);
+  assert.throws(()=>protectedStartupPreflight({
+   ...h.env,TENANT_CONTEXT_HMAC_SECRET_FILE:link
+  }),/owner-only permissions/);
+  assert.throws(()=>protectedStartupPreflight({
+   ...h.env,TENANT_CONTEXT_HMAC_SECRET_FILE:h.key,DATABASE_URL_FILE:link
+  }),/owner-only permissions/);
+ }finally{h.cleanup();}
 });

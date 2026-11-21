@@ -7,7 +7,7 @@ import {randomUUID} from "node:crypto";
 import {withTenant,health} from "./db.js";
 import {parseSourceFile,MAX_SOURCE_BYTES} from "./source-file.js";
 import {allowedImportRows} from "./privacy.js";
-import {deploymentProfile,readSecret} from "./deployment.js";
+import {deploymentProfile,protectedStartupPreflight} from "./deployment.js";
 import {scanSource,SCANNER_PATH} from "./malware.js";
 import {accessSync,constants as fsConstants} from "node:fs";
 import {authRequired,requireRole,identityConfig} from "./auth.js";
@@ -31,7 +31,8 @@ const profile=deploymentProfile();
 // Reject malformed protected identity configuration before binding any API listener.
 // Real provider availability/revocation remains a separate operational gate.
 if(profile.protectedMode)identityConfig();
-if(profile.protectedMode&&!/^(?:[a-f0-9]{2}){32,}$/i.test(readSecret("TENANT_CONTEXT_HMAC_SECRET")))throw new Error("Invalid mounted signing key");
+// Validate BOTH trusted mounted secrets and the signing key before app creation.
+if(profile.protectedMode)protectedStartupPreflight();
 if(profile.protectedMode)accessSync(SCANNER_PATH,fsConstants.X_OK);
 const app=express();
 app.disable("x-powered-by");
