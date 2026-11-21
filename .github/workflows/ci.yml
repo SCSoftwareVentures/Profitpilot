@@ -337,7 +337,11 @@ jobs:
             protected-vulnerabilities.json
           if-no-files-found: warn
       - name: Enforce container vulnerability severity policy
-        run: node scripts/check-container-vulnerabilities.mjs prototype-vulnerabilities.json protected-vulnerabilities.json
+        run: |
+          set -euo pipefail
+          export PROFITPILOT_EXPECTED_API_IMAGE_ID="$(docker image inspect --format '{{.Id}}' profitpilot-api:security)"
+          export PROFITPILOT_EXPECTED_PROTECTED_IMAGE_ID="$(docker image inspect --format '{{.Id}}' profitpilot-protected:security)"
+          node scripts/check-container-vulnerabilities.mjs prototype-vulnerabilities.json protected-vulnerabilities.json
 
   static_analysis:
     name: CodeQL JavaScript static security analysis
