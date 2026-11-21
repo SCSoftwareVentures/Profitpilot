@@ -5,7 +5,12 @@ import {createHash} from 'node:crypto';
 export const RESPONSE_DAYS=Object.freeze({low:2,medium:3,high:1});
 const uuid=s=>typeof s==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
 const reference=s=>typeof s==='string'&&/^[A-Za-z0-9][A-Za-z0-9._:-]{2,119}$/.test(s);
-const instant=s=>typeof s==='string'&&/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?Z$/.test(s)&&Number.isFinite(Date.parse(s));
+// Date.parse normalises impossible calendar dates (e.g. 30 February); reject them.
+const instant=s=>{
+ if(typeof s!=='string'||!/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?Z$/.test(s))return false;
+ const millis=Date.parse(s);
+ return Number.isFinite(millis)&&new Date(millis).toISOString().slice(0,19)===s.slice(0,19);
+};
 const date=s=>typeof s==='string'&&/^\d{4}-\d\d-\d\d$/.test(s)&&Number.isFinite(Date.parse(s+'T12:00:00Z'))&&new Date(s+'T12:00:00Z').toISOString().slice(0,10)===s;
 const sha=o=>createHash('sha256').update(JSON.stringify(o)).digest('hex');
 const reject=s=>{throw new Error('SecurePay: '+s);};
@@ -45,7 +50,7 @@ export function verifyDispute(s){
  s.customerId===s.businessId||!Array.isArray(s.events)||!s.events.length)return false;
  let prev=null;
  for(let i=0;i<s.events.length;i++){
-  const e=s.events[i];if(!e||e.sequence!==i+1||e.previousHash!==prev||
+  const e=s.events[i];if(!e||!instant(e.at)||e.sequence!==i+1||e.previousHash!==prev||
   typeof e.hash!=='string'||!/^[a-f0-9]{64}$/.test(e.hash)||
   typeof e.stateHash!=='string'||!/^[a-f0-9]{64}$/.test(e.stateHash)||
   (i&&Date.parse(e.at)<Date.parse(s.events[i-1].at)))return false;
@@ -70,7 +75,6 @@ export function advanceDispute(s,{type,actor,at,clientRequestId,...input},calend
  if(!validActor(actor)||!instant(at)||!uuid(clientRequestId)||!Object.hasOwn(fields,type)||
  Object.keys(input).some(k=>!fields[type].includes(k))||
  Object.values(input).some(v=>v===undefined||v===null||typeof v==='object'))reject('invalid actor or action fields');
- if(Date.parse(at)<Date.parse(s.events.at(-1).at))reject('backdated event');
  const details=Object.fromEntries(Object.keys(input).sort().map(k=>[k,input[k]]));
  const replay=s.events.find(e=>e.clientRequestId===clientRequestId);
  if(replay){
@@ -78,6 +82,8 @@ export function advanceDispute(s,{type,actor,at,clientRequestId,...input},calend
   JSON.stringify(replay.details)===JSON.stringify(details))return s;
   reject('conflicting idempotency key');
  }
+ // Retries of an identical earlier event remain idempotent after later events.
+ if(Date.parse(at)<Date.parse(s.events.at(-1).at))reject('backdated event');
  if(s.status==='closed')reject('closed case');
  const party=(role,id)=>actor.role===role&&actor.id===id;
  const reviewer=['reviewer','admin'].includes(actor.role)&&actor.id!==s.customerId&&actor.id!==s.businessId;
@@ -141,7 +147,7 @@ export function advanceDispute(s,{type,actor,at,clientRequestId,...input},calend
   if(!reviewer||!evidence||!['response_sla_missed','rectification_overdue','safety_risk','procedural_issue'].includes(input.reason))reject('manual escalation required');
   if(input.reason==='response_sla_missed'&&(!s.responseTarget?.calendarVerified||
   !s.responseTarget.dueLocalDate||localDate(at)<=s.responseTarget.dueLocalDate||s.businessResponseReference))reject('SLA not overdue');
-  if(input.reason==='rectification_overdue'&&(!s.rectification||s.rectification.source==='proposed'||
+  if(input.reason==='rectification_overdue'&&(s.status!=='rectification'||!s.rectification||s.rectification.source==='proposed'||
   localDate(at)<=s.rectification.deadline))reject('rectification not overdue');
   break; // never authorises funds
  case 'close':
