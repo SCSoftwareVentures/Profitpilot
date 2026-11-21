@@ -179,8 +179,10 @@ function outer(){
    "-days","1","-out",join(root,"server.crt"),"-extfile",join(root,"server.ext")]);
   const postgresUid=Number(run("docker",["run","--rm","--entrypoint","id","postgres:16-alpine","-u","postgres"]));
   assert.ok(Number.isSafeInteger(postgresUid)&&postgresUid>0);
-  run("sudo",["chown",String(postgresUid)+":"+String(postgresUid),join(root,"server.key")]);
+  // Set restrictive mode while still owned by the unprivileged runner.
+  // Chowning first would make a subsequent chmod fail with EPERM.
   chmodSync(join(root,"server.key"),0o600);
+  run("sudo",["chown",String(postgresUid)+":"+String(postgresUid),join(root,"server.key")]);
   writeFileSync(join(root,"pg_hba.conf"),[
    "local all all trust",
    "hostnossl all all 0.0.0.0/0 reject",
