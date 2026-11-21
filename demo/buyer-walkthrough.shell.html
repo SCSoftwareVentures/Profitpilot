@@ -65,7 +65,7 @@ details{margin-top:7px}summary{cursor:pointer;color:var(--teal);font-size:12px;f
 "use strict";
 /*__BUYER_DEMO_CORE__*/
 const money=cents=>cents===null?"Unavailable":new Intl.NumberFormat("en-AU",
- {style:"currency",currency:"AUD",minimumFractionDigits:0,maximumFractionDigits:0}).format(cents/100);
+ {style:"currency",currency:"AUD",minimumFractionDigits:2,maximumFractionDigits:2}).format(cents/100);
 let state=createBuyerDemoState();
 function el(tag,cls,text){
  const node=document.createElement(tag);
