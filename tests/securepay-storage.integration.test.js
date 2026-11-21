@@ -27,7 +27,7 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'owner','active'),($1,$3,'read_only','active'),($4,$5,'owner','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status=EXCLUDED.status",[a,owner,reader,b,foreign]);
   await admin.query("INSERT INTO users(id,auth_subject,email) VALUES($1,'sp-s3-reviewer','s3reviewer@sp.invalid') ON CONFLICT(auth_subject) DO NOTHING",["dddddddd-dddd-4ddd-8ddd-dddddddddddd"]);
   await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'reviewer','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status=EXCLUDED.status",[a,"dddddddd-dddd-4ddd-8ddd-dddddddddddd"]);
-  const [{default:app},{pool,withTenant}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);appPool=pool;
+  const [{default:app,requestLimiter},{pool,withTenant}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);appPool=pool;
   api=createServer(app);await new Promise(resolve=>api.listen(0,"127.0.0.1",resolve));
   async function request(path,{subject,method="GET",body}={}){
    const headers={};if(subject){
@@ -184,6 +184,8 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   assert.equal(failedIssuerList.body.items[0].usableForJobAuthorization,false);
   assert.equal((await request(rootA+"/"+openedB.body.item.id+"/evidence/"+created.body.item.id+"/signed-party-claims/"+claimCreated.body.item.id+"/issuer-attestations",{subject:"sp-s2-owner"})).status,404);
   if(originalAuthority!==undefined)process.env.SECUREPAY_AUTHORITY_JWKS_URL=originalAuthority;
+  // Isolate the large synthetic S2-S8 integration phases; API throttling remains 100/min in production and is separately asserted in api.integration.test.js.
+  await requestLimiter.resetKey("127.0.0.1");
 
   const trustPreflight="/v1/tenants/"+a+"/prototype/securepay-party-job-trust/"+caseId;
   const beforeRevoke=await request(trustPreflight,{subject:"sp-s2-owner"});
