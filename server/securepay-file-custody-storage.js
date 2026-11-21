@@ -3,8 +3,8 @@ import {scanSource} from "./malware.js";
 import {MAX_CUSTODY_BYTES,validCustodyHeaders,verifyCustodyBytes,sameCustodyReceipt} from "../src/securepay-file-custody.js";
 const uuid=s=>typeof s==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
 const cols="id,case_id,evidence_id,client_request_id,received_by,sha256,byte_count,media_type,scan_status,origin_verified,source_identity_verified,independent_custody_verified,decision_authority,payment_authority,recorded_at";
-const flags={synthetic:true,originalBytesStored:true,originalBytesDownloadAvailable:false,
- receivedByteIntegrityVerified:true,sourceAuthenticityVerified:false,realPartyIdentityVerified:false,
+const flags={synthetic:true,originalBytesDownloadAvailable:false,
+ sourceAuthenticityVerified:false,realPartyIdentityVerified:false,
  independentCustodyVerified:false,decisionAuthority:false,paymentAuthority:false};
 export function installSecurepayFileCustodyRoutes(app,{membership,requireRole,withTenant,scannerEnabled=false,scan=scanSource}){
  const path="/v1/tenants/:tenantId/prototype/securepay-cases/:caseId/evidence/:evidenceId/custody-file";
@@ -46,7 +46,9 @@ export function installSecurepayFileCustodyRoutes(app,{membership,requireRole,wi
     {status:200,item:race.rows[0],idempotent:true}:{status:409,error:"Evidence already sealed with different bytes, request or actor"};
   });
   const {status,...rest}=result;
-  res.status(status).json({...rest,...flags,scannerReportedClean:status===200||status===201});
+  res.status(status).json({...rest,...flags,originalBytesStored:status===200||status===201,
+   receivedByteIntegrityVerified:status===200||status===201,
+   scannerReportedClean:status===200||status===201});
  }catch(e){next(e);}});
  app.get(path,...guard,async(req,res,next)=>{try{
   const tenant=req.membership.tenantId,{caseId,evidenceId}=req.params;
@@ -57,6 +59,7 @@ export function installSecurepayFileCustodyRoutes(app,{membership,requireRole,wi
    const item=await c.query("SELECT "+cols+" FROM securepay_evidence_custody_receipts WHERE tenant_id=$1 AND case_id=$2 AND evidence_id=$3",[tenant,caseId,evidenceId]);
    return {status:200,received:item.rowCount===1,item:item.rows[0]??null};
   },{repeatableRead:true});
-  const {status,...rest}=result;res.status(status).json({...rest,...flags});
+  const {status,...rest}=result;res.status(status).json({...rest,...flags,originalBytesStored:rest.received===true,
+   receivedByteIntegrityVerified:rest.received===true});
  }catch(e){next(e);}});
 }
