@@ -1,5 +1,5 @@
 import {validClaimRevocation,sameClaimRevocation} from "../src/securepay-claim-revocation.js";
-const uuid=s=>typeof s==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{12}$/i.test(s);
+const uuid=s=>typeof s==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
 const fields="id,case_id,evidence_id,claim_id,client_request_id,revoked_by,reason_code,revocation_reference,recorded_at";
 const flags={synthetic:true,revocationOfOperatorRecordedClaim:true,
  identityVerified:false,jobAuthorityVerified:false,decisionAuthority:false,paymentAuthority:false};
@@ -45,7 +45,7 @@ export function installSecurepayClaimRevocationRoutes(app,{membership,requireRol
  const preflight="/v1/tenants/:tenantId/prototype/securepay-party-job-trust/:caseId";
  app.get(preflight,...guard,async(req,res,next)=>{try{
   const t=req.membership.tenantId,id=req.params.caseId;
-  if(!uuid(id))return res.status(400).json({error:"Invalid case ID",debug:{type:typeof id,length:typeof id==="string"?id.length:null,groups:typeof id==="string"?id.split("-").map(x=>x.length):[],hexGroups:typeof id==="string"?id.split("-").map(x=>/^[a-f0-9]+$/i.test(x)):[],separatorCodes:typeof id==="string"?[8,13,18,23].map(i=>id.charCodeAt(i)):[],version:typeof id==="string"?id[14]:null,variant:typeof id==="string"?id[19]:null,params:Object.keys(req.params),pathSegmentCount:req.path.split("/").length}});
+  if(!uuid(id))return res.status(400).json({error:"Invalid case ID"});
   const result=await withTenant(t,req.identity.subject,async c=>{
    const found=await c.query("SELECT id FROM securepay_case_rehearsals WHERE tenant_id=$1 AND id=$2",[t,id]);
    if(!found.rowCount)return {status:404,error:"Synthetic case unavailable"};
