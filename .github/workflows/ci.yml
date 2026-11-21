@@ -327,10 +327,10 @@ jobs:
               const names=["libcrypto3","libssl3","clamav-libs","clamav-libunrar"];
               const installed=readFileSync("/lib/apk/db/installed","utf8");
               const found=new Map();
-              for(const record of installed.split(/\\r?\\n\\r?\\n/)){
-                const name=/^P:([^\\r\\n]+)$/m.exec(record)?.[1];
+              for(const record of installed.split(/\r?\n\r?\n/)){
+                const name=/^P:([^\r\n]+)$/m.exec(record)?.[1];
                 if(!names.includes(name))continue;
-                const version=/^V:([^\\r\\n]+)$/m.exec(record)?.[1];
+                const version=/^V:([^\r\n]+)$/m.exec(record)?.[1];
                 assert.ok(version&&!found.has(name),"Missing or duplicate package version: "+name);
                 found.set(name,version);
               }
