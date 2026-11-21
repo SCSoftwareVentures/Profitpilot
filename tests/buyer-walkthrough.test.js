@@ -25,6 +25,7 @@ test("B1 starts as genuinely incomplete: do not present portfolio totals as veri
  assert.equal(s.totals.unallocatedPayrollCents,60_000);
  assert.equal(s.totals.payrollPoolCents,2_680_000);
  assert.equal(s.totals.allocatedPayrollCents,2_620_000);
+ assert.equal(findContract(s,"CN-102").payrollReady,false);
  assert.equal(findContract(s,"CN-103").contributionCents,620_000);
  assert.equal(findContract(s,"CN-103").variationCandidateCents,200_000);
  assert.equal(s.exceptions.length,3);
@@ -53,6 +54,7 @@ test("B1 allocating payroll never loses residual or releases unsupported invoice
  assert.equal(snap.totals.contributionCents,null);
  assert.equal(snap.totals.payrollPoolCents,snap.totals.allocatedPayrollCents);
  assert.equal(snap.totals.unallocatedPayrollCents,0);
+ assert.equal(findContract(snap,"CN-102").payrollReady,true);
  assert.equal(findContract(snap,"CN-102").allocatedPayrollCents,760_000);
  assert.equal(snap.exceptions.some(x=>x.id==="EX-PAYROLL-1"),false);
 });
@@ -111,6 +113,8 @@ test("B1 standalone page is deterministic, dependency-free and prohibits network
  assert.doesNotMatch(html,/\blocalStorage\b|\bsessionStorage\b/);
  assert.doesNotMatch(html,/^\s*import\s/m);
  assert.doesNotMatch(html,/document\.write\s*\(/);
+ assert.doesNotMatch(html,/document\.createElement\s*\(\s*tag\s*\)/);
+ assert.match(html,/Unsupported presentation element/);
 });
 class FakeElement{
  constructor(tag){this.tag=tag;this.children=[];this._text="";this.listeners={};this.className="";}
