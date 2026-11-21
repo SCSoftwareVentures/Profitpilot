@@ -93,6 +93,9 @@ test("B22 protected preflight verifies mounted DB and signing-key files before s
   assert.equal(verified.liveInfrastructureVerified,false);
   assert.equal(readSecret("TENANT_CONTEXT_HMAC_SECRET",h.env),"a".repeat(64));
   assert.equal(readSecret("DATABASE_URL",h.env),"postgres://app@db.invalid/profitpilot");
+  assert.throws(()=>protectedStartupPreflight({
+   ...h.env,DATABASE_URL_FILE:join(h.dir,"missing-db-secret")
+  }),error=>error.message.includes("DATABASE_URL")&&!error.message.includes(h.dir));
   chmodSync(h.key,0o400);
   assert.equal(protectedStartupPreflight(h.env).mountedSecretsVerified,true);
   chmodSync(h.key,0o600);
