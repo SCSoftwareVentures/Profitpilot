@@ -97,16 +97,22 @@ async function exercise(){
    assert.ok(tlsInfo.rows[0].cipher,"TLS cipher must be negotiated");
    console.log("B25 PASS: real PostgreSQL TLS handshake with verified CA and active TLS session");
   }finally{await pool.end();}
-  async function rejectDb(ssl,label){
-   const c=new pg.Client({connectionString:dbUrl,ssl,connectionTimeoutMillis:2000});
+  async function rejectDb({url=dbUrl,ssl},label){
+   const c=new pg.Client({connectionString:url,ssl,connectionTimeoutMillis:2000});
    try{
     await assert.rejects(c.connect(),undefined,label);
    }finally{await c.end().catch(()=>{});}
    console.log("B25 correctly denied PostgreSQL connection: "+label);
   }
-  await rejectDb(false,"plaintext TCP prohibited by hostnossl HBA");
-  await rejectDb({rejectUnauthorized:true,servername:"wrong-host.invalid"},
-    "mismatched TLS certificate hostname");
+  await rejectDb({ssl:false},"plaintext TCP prohibited by hostnossl HBA");
+  // Deliberately change the client *connection hostname* to a separate
+  // loopback alias omitted from the certificate SAN. Supplying only an
+  // ssl.servername option is not a reliable hostname test in node-postgres:
+  // the connection host may take precedence over that field.
+  await rejectDb({
+    url:dbUrl.replace("@localhost:","@invalid-db-host-ci.invalid:"),
+    ssl:{rejectUnauthorized:true}
+   },"mismatched TLS certificate hostname");
 
   const app=express();
   app.get("/read",authRequired(),(req,res)=>res.json({ok:true,sub:req.identity.subject}));
@@ -201,7 +207,7 @@ function outer(){
    ""
   ].join("\n"),{mode:0o644});
   run("sudo",["tee","-a","/etc/hosts"],{
-   input:"127.0.0.1 issuer-ci.invalid # PROFITPILOT_B25_SYNTHETIC\n"
+   input:"127.0.0.1 issuer-ci.invalid invalid-db-host-ci.invalid # PROFITPILOT_B25_SYNTHETIC\n"
   });
   run("docker",["run","--detach","--rm","--name",container,
    "--publish","127.0.0.1::5432",
