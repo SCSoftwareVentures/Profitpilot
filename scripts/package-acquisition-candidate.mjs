@@ -4,6 +4,7 @@ import {createHash} from "node:crypto";
 import {readFileSync,openSync,readSync,fstatSync,closeSync,writeFileSync,mkdirSync,readdirSync,constants} from "node:fs";
 import {dirname,join,resolve} from "node:path";
 import {fileURLToPath} from "node:url";
+import {verifyArchiveInventory,verifySbomInventory} from "../src/source-handoff-integrity.js";
 
 const ROOT=resolve(dirname(fileURLToPath(import.meta.url)),"..");
 const INPUTS=["ProfitPilot_Source.tar.gz","dependencies.cdx.json","acquisition-inventory.json"];
@@ -42,8 +43,6 @@ function inputs(dir,sha){
  if(readdirSync(dir).sort().join("\n")!==[...INPUTS].sort().join("\n"))
   reject("input staging directory contains unexpected files");
  const archive=files.get(INPUTS[0]);
- if(archive.length<128||archive[0]!==0x1f||archive[1]!==0x8b)
-  reject("source archive must be a nonempty gzip archive");
  const sbom=parsedJson(files.get(INPUTS[1]),"SBOM");
  if(sbom.bomFormat!=="CycloneDX"||!Array.isArray(sbom.components)||sbom.components.length===0)
   reject("CycloneDX dependency evidence missing");
@@ -55,6 +54,8 @@ function inputs(dir,sha){
   inventory.productionReleaseApproved!==false||inventory.realCustomerDemandVerified!==false||
   inventory.saleReadiness!=="PENDING_INDEPENDENT_DUE_DILIGENCE")
    reject("stale or incorrectly qualified acquisition inventory");
+ verifyArchiveInventory(archive,inventory,sha);
+ verifySbomInventory(sbom,inventory);
  const notice=boundedRead(join(ROOT,"docs/ACQUISITION_NOTICE_B9.txt"),MAX["README.txt"]);
  const t=notice.toString("utf8");
  for(const phrase of ["FICTIONAL","NOT a production release","NOT an IP ownership certificate","NOT proof of customer demand"])
@@ -77,6 +78,8 @@ function packet(stage,sha){
   independentSecurityPenetrationTested:false,
   provenanceAttestationContainedInThisManifest:false,
   attestationScope:"GitHub Actions workflow provenance, if separately verified; NOT legal ownership",
+  archivedSourceFilesVerified:parsedJson(files.get("acquisition-inventory.json"),"inventory").source.fileCount,
+  lockedSbomDependenciesVerified:parsedJson(files.get("acquisition-inventory.json"),"inventory").npm.resolvedThirdPartyPackageCount,
   files:Object.fromEntries([...files].map(([name,bytes])=>[name,{bytes:bytes.length,sha256:SHA(bytes)}]))
  };
  const manifestBytes=Buffer.from(JSON.stringify(manifest,null,2)+"\n");
