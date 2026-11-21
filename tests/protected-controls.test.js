@@ -38,6 +38,8 @@ test("mounted secret input is bounded and must be a nonempty regular UTF-8 file"
   }
   writeFileSync(path,"x".repeat(8192));
   assert.equal(readSecret("TEST_SECRET",env).length,8192);
+  assert.equal(readSecret("TEST_SECRET",{...env,TEST_SECRET:""}).length,8192);
+  assert.throws(()=>readSecret("TEST_SECRET",{...env,TEST_SECRET:"conflict"}),/Ambiguous secret configuration/);
   assert.throws(()=>readSecret("TEST_SECRET",{TEST_SECRET_FILE:dir}));
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
