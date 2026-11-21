@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createServer} from "node:http";
-import {createHash,generateKeyPairSync,randomUUID} from "node:crypto";
+import {createHash,generateKeyPairSync,randomUUID,randomBytes} from "node:crypto";
+import {mkdtempSync,writeFileSync,rmSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join} from "node:path";
 import {SignJWT,exportJWK} from "jose";
 import pg from "pg";
 const enabled=Boolean(process.env.TEST_ADMIN_DATABASE_URL&&process.env.TEST_APP_DATABASE_URL);
@@ -90,6 +93,42 @@ test("S10 encrypted synthetic custody: scanner-required, sealed and tenant isola
   assert.equal(retrieved.body.storageClass,"application_aead_encrypted");
   assert.equal(retrieved.body.scanRecordMacVerified,true);
   assert.equal(Object.hasOwn(retrieved.body.item,"original_bytes"),false);
+
+  // S11.1: rotate the active write key without changing the old sealed record.
+  // Validate historical MAC retrieval, exact replay and missing-old-key fail closed.
+  const oldSecrets={enc:process.env.SECUREPAY_CUSTODY_ENCRYPTION_KEY,
+   mac:process.env.SECUREPAY_CUSTODY_ATTESTATION_KEY,id:process.env.SECUREPAY_CUSTODY_KEY_ID};
+  const keyringDir=mkdtempSync(join(tmpdir(),"securepay-s11-ci-"));
+  const keyringFile=join(keyringDir,"mounted-keyring.json");
+  const newEntry={keyId:"s11-ci-key-02",encryptionKey:randomBytes(32).toString("hex"),
+   attestationKey:randomBytes(32).toString("hex"),status:"active"};
+  const oldEntry={keyId:oldSecrets.id,encryptionKey:oldSecrets.enc,
+   attestationKey:oldSecrets.mac,status:"recovery-only"};
+  try{
+   writeFileSync(keyringFile,JSON.stringify({activeKeyId:newEntry.keyId,keys:[oldEntry,newEntry]}),{mode:0o600});
+   delete process.env.SECUREPAY_CUSTODY_ENCRYPTION_KEY;
+   delete process.env.SECUREPAY_CUSTODY_ATTESTATION_KEY;
+   delete process.env.SECUREPAY_CUSTODY_KEY_ID;
+   process.env.SECUREPAY_CUSTODY_KEYRING_FILE=keyringFile;
+   const rotatedGet=await fetchData(scannedApi,route,{method:"GET"});
+   assert.equal(rotatedGet.status,200);
+   assert.equal(rotatedGet.body.item.key_id,oldSecrets.id);
+   assert.equal(rotatedGet.body.scanRecordMacVerified,true);
+   assert.equal(rotatedGet.body.keyRecoveryRequired,false);
+   assert.equal((await fetchData(scannedApi,route,{reqId})).status,200,"old receipt exact replay still works after key rotation");
+   writeFileSync(keyringFile,JSON.stringify({activeKeyId:newEntry.keyId,keys:[newEntry]}));
+   const lostKeyGet=await fetchData(scannedApi,route,{method:"GET"});
+   assert.equal(lostKeyGet.status,200);
+   assert.equal(lostKeyGet.body.scanRecordMacVerified,false);
+   assert.equal(lostKeyGet.body.keyRecoveryRequired,true);
+   assert.equal((await fetchData(scannedApi,route,{reqId})).status,409,"missing old attestation key blocks replay");
+  }finally{
+   delete process.env.SECUREPAY_CUSTODY_KEYRING_FILE;
+   process.env.SECUREPAY_CUSTODY_ENCRYPTION_KEY=oldSecrets.enc;
+   process.env.SECUREPAY_CUSTODY_ATTESTATION_KEY=oldSecrets.mac;
+   process.env.SECUREPAY_CUSTODY_KEY_ID=oldSecrets.id;
+   rmSync(keyringDir,{recursive:true,force:true});
+  }
   assert.equal((await fetchData(scannedApi,route,{method:"GET",subject:"s9-reader"})).status,403);
   assert.equal((await fetchData(scannedApi,"/v1/tenants/"+a+"/prototype/securepay-cases/"+caseB+"/evidence/"+evidenceA+"/custody-file")).status,404);
   assert.equal((await fetchData(scannedApi,"/v1/tenants/"+a+"/prototype/securepay-cases/"+caseB+"/evidence/"+evidenceB+"/custody-file",{method:"GET"})).status,404);

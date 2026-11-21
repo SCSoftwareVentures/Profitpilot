@@ -61,3 +61,52 @@ export function verifyScanMac(row,keys){
   .update(scanPayload(context,observedAt,row.ciphertext_sha256)).digest();
  return timingSafeEqual(expected,Buffer.from(row.scanner_attestation_mac,"hex"));
 }
+
+
+// S11.1: Mount a bounded multi-key manifest for rotation. The S10 single-key
+// configuration remains supported for existing synthetic-only deployments.
+// Historical keys are verification/recovery-only; only active may seal bytes.
+// No key material, manifest contents or decrypted evidence is returned by an API.
+const exactShape=(obj,fields)=>obj!==null&&typeof obj==="object"&&!Array.isArray(obj)&&
+ Object.keys(obj).length===fields.length&&fields.every(field=>Object.hasOwn(obj,field));
+
+export function custodyKeyringSettings(env=process.env){
+ const file=env.SECUREPAY_CUSTODY_KEYRING_FILE;
+ const inline=env.SECUREPAY_CUSTODY_KEYRING;
+ if(!file&&!inline){
+  const active=custodyKeySettings(env);
+  return {active,byId:new Map([[active.keyId,active]]),mode:"single-key-compatibility"};
+ }
+ if(!file||inline||[
+  "SECUREPAY_CUSTODY_ENCRYPTION_KEY","SECUREPAY_CUSTODY_ENCRYPTION_KEY_FILE",
+  "SECUREPAY_CUSTODY_ATTESTATION_KEY","SECUREPAY_CUSTODY_ATTESTATION_KEY_FILE",
+  "SECUREPAY_CUSTODY_KEY_ID"
+ ].some(name=>env[name]))
+  throw new Error("Mounted custody keyring required; ambiguous legacy/inline secrets prohibited");
+ let manifest;
+ try{manifest=JSON.parse(readSecret("SECUREPAY_CUSTODY_KEYRING",env));}
+ catch{throw new Error("Invalid mounted custody keyring");}
+ if(!exactShape(manifest,["activeKeyId","keys"])||!validId(manifest.activeKeyId)||
+  !Array.isArray(manifest.keys)||manifest.keys.length<1||manifest.keys.length>16)
+  throw new Error("Invalid custody keyring manifest");
+ const byId=new Map(),seenSecrets=new Set();
+ for(const entry of manifest.keys){
+  if(!exactShape(entry,["keyId","encryptionKey","attestationKey","status"])||
+   !validId(entry.keyId)||!hex64(entry.encryptionKey)||!hex64(entry.attestationKey)||
+   !["active","recovery-only"].includes(entry.status)||byId.has(entry.keyId)||
+   seenSecrets.has(entry.encryptionKey)||seenSecrets.has(entry.attestationKey)||
+   entry.encryptionKey===entry.attestationKey)
+   throw new Error("Invalid or reused custody keyring entry");
+  if((entry.keyId===manifest.activeKeyId)!==(entry.status==="active"))
+   throw new Error("Custody active-key status mismatch");
+  seenSecrets.add(entry.encryptionKey);seenSecrets.add(entry.attestationKey);
+  byId.set(entry.keyId,{keyId:entry.keyId,cipherKey:Buffer.from(entry.encryptionKey,"hex"),
+   macKey:Buffer.from(entry.attestationKey,"hex")});
+ }
+ const active=byId.get(manifest.activeKeyId);
+ if(!active)throw new Error("Custody active key is not present");
+ return {active,byId,mode:"mounted-keyring"};
+}
+export function resolveCustodyReceiptKey(ring,keyId){
+ return validId(keyId)?ring?.byId?.get(keyId)??null:null;
+}
