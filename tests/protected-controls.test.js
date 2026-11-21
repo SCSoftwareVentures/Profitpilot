@@ -178,3 +178,13 @@ test("B22 protected startup rejects a symlinked signing-key mount even with appa
   }),/owner-only permissions/);
  }finally{h.cleanup();}
 });
+
+test("B25 protected profile refuses process-wide TLS verification disablement",()=>{
+ const env={NODE_ENV:"production",PROFITPILOT_PROFILE:"protected",DATABASE_SSL:"true",
+  DATABASE_URL_FILE:"/run/secrets/db",TENANT_CONTEXT_HMAC_SECRET_FILE:"/run/secrets/key",
+  MALWARE_SCAN_MODE:"clamav",AUTH_MFA_ACR:"verified-mfa"};
+ assert.equal(deploymentProfile(env).protectedMode,true);
+ assert.equal(deploymentProfile({...env,NODE_TLS_REJECT_UNAUTHORIZED:"1"}).protectedMode,true);
+ assert.throws(()=>deploymentProfile({...env,NODE_TLS_REJECT_UNAUTHORIZED:"0"}),
+  /forbids disabling TLS certificate verification/);
+});
