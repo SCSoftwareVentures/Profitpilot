@@ -102,3 +102,7 @@ The checksums detect modifications relative to the package manifest but are **no
 ## B4 aggregate G0 feasibility evaluator
 
 The [B4 G0 feasibility engine](src/g0-feasibility.js) computes explicit pass/fail/exclusion outcomes for pseudonymous aggregate export-set records, with [adversarial regression tests](tests/g0-feasibility.test.js) and [evidence limitations](docs/G0_FEASIBILITY_ENGINE_B4.md). This is not a validated pilot, actual demand, verified independent-source permission or authorisation to build the SaaS. G0 remains externally blocked even if declared numeric thresholds are met.
+
+## B5 mobile buyer walkthrough overflow correction
+
+The [B5 layout investigation and test boundary](docs/BUYER_MOBILE_LAYOUT_B5.md) documents a content-sized grid defect discovered with an actual headless Chromium interaction run, its minmax/min-width CSS correction and new regression tests. Browser-emulated widths passed locally; real iPhone/WebKit and assistive-technology QA remain unperformed.
