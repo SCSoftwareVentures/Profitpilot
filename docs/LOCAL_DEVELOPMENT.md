@@ -31,3 +31,7 @@ The Compose database initialization mounts now mirror migrations 002–033, with
 
 ## Profiles and dependency installation
 Use npm ci --ignore-scripts with the committed lock. Compose defaults to the synthetic prototype. Protected images require an explicitly selected Docker target, verified database TLS, mounted secrets, trusted MFA assurance configuration and independently maintained ClamAV definitions. See SECURITY_PRIVACY_HANDOVER.md. No actual customer data until release approval.
+
+## B8 — isolated database handover rehearsal
+
+A separate CI job now tests fresh Docker Compose PostgreSQL initialisation and a **disposable synthetic** legacy-to-current migration. It backs up the synthetic legacy database with AES-256, refuses a wrong key, restores a separate copy, confirms an existing named volume is **not** automatically migrated when Compose mounts change, applies migrations 025–033 deliberately, then checks data survival and RLS after restart. See [B8 recovery rehearsal](COMPOSE_RECOVERY_REHEARSAL_B8.md). These checks do not provide a safe automatic production upgrade tool or replace qualified operator review, key custody, maintenance windows, formal rollback plans and live backup policy. Never delete an existing real database volume to replay bootstrap scripts.
