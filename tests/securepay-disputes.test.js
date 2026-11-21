@@ -83,7 +83,7 @@ test('calendar-invalid UTC timestamps are rejected before SLA or case creation',
 });
 
 test('historical exact retries remain idempotent after later events',()=>{
- const first=triaged(),later=step(first,'business_response',B,{evidenceReference:'business.001'});
+ const first=triaged(),later=step(first,'business_response',B,{evidenceReference:'business.001'},'2026-11-22T02:00:00Z');
  const e=first.events.at(-1);
  const replay={type:e.type,actor:R,at:e.at,clientRequestId:e.clientRequestId,...e.details};
  assert.equal(advanceDispute(later,replay,cal),later);
