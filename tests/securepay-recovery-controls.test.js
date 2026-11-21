@@ -65,6 +65,12 @@ test("S11.3 approval window, declared hold, unknown hold and retention claims bl
   {issuedAt:new Date(Date.now()-60000).toISOString(),expiresAt:new Date(Date.now()-1000).toISOString()},
   {expiresAt:new Date(Date.now()+7200000).toISOString()}
  ]){
+  // Invalid schema values are refused *before signing*, while otherwise
+  // well-formed expired/held claims are refused at approval verification.
+  if(["retentionStatus","syntheticOnly","purpose"].some(field=>Object.hasOwn(changes,field))){
+   assert.throws(()=>approval(ticket,changes),/Invalid synthetic recovery request/);
+   continue;
+  }
   const b=approval(ticket,changes);
   assert.throws(()=>verifyRecoveryApproval(b,policy,scope),JSON.stringify(changes));
  }
