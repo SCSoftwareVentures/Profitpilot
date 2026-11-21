@@ -63,9 +63,9 @@ function packet(sha){
 }
 function verifyFiles(out,sha){
  const expected=packet(sha);
- const items=readdirSync(out).sort();
- if(items.join("\n")!==[...expected.files.keys()].sort().join("\n"))
-  failure("distribution has unexpected or missing files");
+ // Open each expected file first. A directory listing is not an access-authority
+ // check: checking entries and then opening by path creates a TOCTOU window.
+ // Use O_NOFOLLOW and compare via the same verified file descriptor.
  for(const [name,bytes] of expected.files){
   const p=join(out,name);
   // Hold a single no-follow file descriptor through type validation and comparison.
@@ -76,6 +76,11 @@ function verifyFiles(out,sha){
     failure("distribution file altered: "+name);
   }finally{closeSync(fd);}
  }
+ // Only after examining the expected files, reject extra and missing entries.
+ // This inventory is a consistency check, not proof of an immutable directory.
+ const items=readdirSync(out).sort();
+ if(items.join("\n")!==[...expected.files.keys()].sort().join("\n"))
+  failure("distribution has unexpected or missing files");
  return expected.manifest;
 }
 export function runPackaging(operation,out,sha){
