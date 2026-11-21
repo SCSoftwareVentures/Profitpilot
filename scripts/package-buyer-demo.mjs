@@ -2,7 +2,7 @@
 // Produce the exact, dependency-free, synthetic buyer demonstration evaluated by CI.
 // Explicitly not a signed release, a customer-data export, or a deployable SaaS.
 import {createHash} from "node:crypto";
-import {readFileSync,writeFileSync,mkdirSync,readdirSync,lstatSync} from "node:fs";
+import {readFileSync,writeFileSync,mkdirSync,readdirSync,openSync,fstatSync,closeSync,constants} from "node:fs";
 import {join,resolve,dirname} from "node:path";
 import {fileURLToPath} from "node:url";
 
@@ -67,9 +67,14 @@ function verifyFiles(out,sha){
  if(items.join("\n")!==[...expected.files.keys()].sort().join("\n"))
   failure("distribution has unexpected or missing files");
  for(const [name,bytes] of expected.files){
-  const p=join(out,name),st=lstatSync(p);
-  if(!st.isFile()||st.isSymbolicLink()||!readFileSync(p).equals(bytes))
-   failure("distribution file altered: "+name);
+  const p=join(out,name);
+  // Hold a single no-follow file descriptor through type validation and comparison.
+  // O_NONBLOCK prevents a substituted FIFO from blocking the verifier.
+  const fd=openSync(p,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
+  try{
+   if(!fstatSync(fd).isFile()||!readFileSync(fd).equals(bytes))
+    failure("distribution file altered: "+name);
+  }finally{closeSync(fd);}
  }
  return expected.manifest;
 }
