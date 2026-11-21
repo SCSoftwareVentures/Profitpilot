@@ -1,7 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createServer} from "node:http";
-import {randomUUID,generateKeyPairSync} from "node:crypto";
+import {randomUUID,generateKeyPairSync,sign} from "node:crypto";
+import {signedPartyStatement} from "../src/securepay-signed-party.js";
 import {exportJWK,SignJWT} from "jose";
 import pg from "pg";
 const enabled=Boolean(process.env.TEST_ADMIN_DATABASE_URL&&process.env.TEST_APP_DATABASE_URL);
@@ -104,6 +105,43 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   assert.equal(first.status,201,JSON.stringify(first));
   assert.equal(first.body.item.origin_verified,false);assert.equal(first.body.item.job_authority_verified,false);
   assert.equal(first.body.sourceIdentityVerified,false);assert.equal(first.body.paymentAuthority,false);
+  const {publicKey:partyPub,privateKey:partyPriv}=generateKeyPairSync("ed25519");
+  const partyKeySpki=partyPub.export({format:"der",type:"spki"}).toString("base64url");
+  const claimNonce=randomUUID();
+  const claimedHash="a".repeat(64);
+  const partyScope={tenantId:a,caseId,evidenceId:created.body.item.id,provenanceReceiptId:first.body.item.id,
+    provenanceMetadataSha256:first.body.item.metadata_sha256,jobReference:payload.jobReference,
+    evidenceType:evidence.evidenceType,evidenceReference:evidence.evidenceReference,
+    claimedPartyRole:"customer",claimedContentSha256:claimedHash,nonce:claimNonce};
+  const proofSignature=sign(null,signedPartyStatement(partyScope),partyPriv).toString("base64url");
+  const partyRequest={clientRequestId:randomUUID(),provenanceReceiptId:first.body.item.id,
+    claimedPartyRole:"customer",keySpki:partyKeySpki,nonce:claimNonce,claimedContentSha256:claimedHash,signature:proofSignature};
+  const partyRoute=ep+"/"+created.body.item.id+"/signed-party-claims";
+  assert.equal((await request(partyRoute,{method:"POST",body:partyRequest})).status,401);
+  assert.equal((await request(partyRoute,{subject:"sp-s2-reader",method:"POST",body:partyRequest})).status,403);
+  assert.equal((await request(partyRoute,{subject:"sp-s2-owner",method:"POST",body:{...partyRequest,identityVerified:true}})).status,400);
+  const claimCreated=await request(partyRoute,{subject:"sp-s2-owner",method:"POST",body:partyRequest});
+  assert.equal(claimCreated.status,201,JSON.stringify(claimCreated));
+  assert.equal(claimCreated.body.signatureValid,true);
+  assert.equal(claimCreated.body.partyIdentityVerified,false);
+  assert.equal(claimCreated.body.partyToJobVerified,false);
+  assert.equal(claimCreated.body.contentBytesVerified,false);
+  assert.equal(claimCreated.body.paymentAuthority,false);
+  assert.equal(claimCreated.body.item.issuer_trusted,false);
+  assert.equal((await request(partyRoute,{subject:"sp-s2-owner",method:"POST",body:partyRequest})).status,200);
+  assert.equal((await request(partyRoute,{subject:"sp-s2-owner",method:"POST",body:{...partyRequest,claimedContentSha256:"b".repeat(64)}})).status,409);
+  const invalidProof=await request(partyRoute,{subject:"sp-s2-owner",method:"POST",body:{...partyRequest,clientRequestId:randomUUID(),nonce:randomUUID()}});
+  assert.equal(invalidProof.status,422,JSON.stringify(invalidProof));
+  const wrongRole=await request(partyRoute,{subject:"sp-s2-owner",method:"POST",body:{...partyRequest,clientRequestId:randomUUID(),claimedPartyRole:"tradesperson"}});
+  assert.equal(wrongRole.status,409);
+  const proofList=await request(partyRoute,{subject:"sp-s2-owner"});
+  assert.equal(proofList.status,200);assert.equal(proofList.body.items.length,1);
+  const verifiedProof=await request(partyRoute+"/"+claimCreated.body.item.id+"/verify-signature",{subject:"sp-s2-owner"});
+  assert.equal(verifiedProof.status,200,JSON.stringify(verifiedProof));
+  assert.equal(verifiedProof.body.cryptographicSignatureValid,true);assert.equal(verifiedProof.body.trustVerified,false);
+  const otherTenantProof=await request(rootA+"/"+openedB.body.item.id+"/evidence/"+created.body.item.id+"/signed-party-claims",{subject:"sp-s2-owner",method:"POST",body:partyRequest});
+  assert.equal(otherTenantProof.status,404);
+
   assert.match(first.body.item.metadata_sha256,/^[a-f0-9]{64}$/);
   assert.equal((await request(provenancePath,{subject:"sp-s2-owner",method:"POST",body:provenanceBody})).status,200);
   assert.equal((await request(provenancePath,{subject:"sp-s2-owner",method:"POST",body:{...provenanceBody,reportedOrigin:"reported_business"}})).status,409);
@@ -211,6 +249,12 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
    "UPDATE securepay_evidence_provenance_receipts SET reported_origin='reported_business' WHERE id=$1",[first.body.item.id])),/permission denied|append-only/i);
   await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query(
    "INSERT INTO securepay_evidence_provenance_receipts(tenant_id,case_id,evidence_id,client_request_id,recorded_by,reported_origin,acquisition_method,source_reference,metadata_sha256) VALUES($1,$2,$3,$4,private.actor_id(),'reported_customer','unknown','wrong.case',$5)",[a,openedB.body.item.id,created.body.item.id,randomUUID(),"a".repeat(64)])),/foreign key|row-level security|permission denied/i);
+
+  await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query(
+   "UPDATE securepay_signed_party_claims SET claimed_party_role='tradesperson' WHERE id=$1",[claimCreated.body.item.id])),/permission denied|append-only/i);
+  await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query(
+   "INSERT INTO securepay_signed_party_claims(tenant_id,case_id,evidence_id,provenance_receipt_id,client_request_id,recorded_by,claimed_party_role,key_spki,claim_nonce,claimed_content_sha256,signature,statement_sha256,key_spki_sha256) VALUES($1,$2,$3,$4,$5,private.actor_id(),'customer',$6,$7,$8,$9,$10,$11)",
+   [a,openedB.body.item.id,created.body.item.id,first.body.item.id,randomUUID(),partyKeySpki,claimNonce,claimedHash,proofSignature,"a".repeat(64),"a".repeat(64)])),/foreign key|row-level security|permission denied/i);
   const hidden=await withTenant(a,"sp-s2-owner",c=>c.query("SELECT count(*)::int AS n FROM securepay_case_rehearsals WHERE tenant_id=$1",[b]));
   assert.equal(hidden.rows[0].n,0);
   const denied=await withTenant(a,"sp-s2-reader",c=>c.query("SELECT count(*)::int AS n FROM securepay_case_rehearsals WHERE tenant_id=$1",[a]));
