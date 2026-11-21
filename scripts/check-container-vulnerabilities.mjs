@@ -56,7 +56,7 @@ for(let i=0;i<paths.length;i++){
    !Array.isArray(target.tags)||!target.tags.includes(expectedImage)||
    !digest(target.imageID)||!digest(target.manifestDigest))
   throw Error("Scan target does not match image profile: "+path);
- if(target.imageID!==expectedIds[i])throw Error("Grype image ID differs from independently inspected Docker image: "+path);
+ if(target.imageID!==expectedIds[i])throw Error("Grype image ID differs from independently inspected Docker image: "+path+" inspected="+expectedIds[i]+" reported="+target.imageID);
  if(observedImages.has(target.imageID))throw Error("Repeated image identity");
  observedImages.add(target.imageID);
  if(descriptor.name!=="grype"||descriptor.version!=="0.104.1"||
