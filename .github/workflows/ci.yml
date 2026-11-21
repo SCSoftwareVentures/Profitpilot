@@ -309,10 +309,46 @@ jobs:
           tar -xzf "$WORK/grype.tar.gz" -C "$WORK" grype
           install -m 0755 "$WORK/grype" "$RUNNER_TEMP/grype"
           "$RUNNER_TEMP/grype" version
-      - name: Build both container profiles
+      - name: Rebuild both image profiles using current signed Alpine package indexes
         run: |
-          docker build --pull -t profitpilot-api:security .
-          docker build --target protected -t profitpilot-protected:security .
+          set -euo pipefail
+          # Never use cached apk layers during an independent security scan.
+          # The Dockerfile uses apk --no-cache and the signed stable repositories.
+          docker build --pull --no-cache -t profitpilot-api:security .
+          docker build --target protected --pull --no-cache -t profitpilot-protected:security .
+      - name: Record actual installed OpenSSL and ClamAV packages (not release approval)
+        run: |
+          set -euo pipefail
+          : > installed-container-packages.ndjson
+          for image in profitpilot-api:security profitpilot-protected:security; do
+            docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint node "$image" --input-type=module -e '
+              import assert from "node:assert/strict";
+              import {readFileSync} from "node:fs";
+              const names=["libcrypto3","libssl3","clamav-libs","clamav-libunrar"];
+              const installed=readFileSync("/lib/apk/db/installed","utf8");
+              const found=new Map();
+              for(const record of installed.split(/\r?\n\r?\n/)){
+                const name=/^P:([^\r\n]+)$/m.exec(record)?.[1];
+                if(!names.includes(name))continue;
+                const version=/^V:([^\r\n]+)$/m.exec(record)?.[1];
+                assert.ok(version&&!found.has(name),"Missing or duplicate package version: "+name);
+                found.set(name,version);
+              }
+              const image=process.argv[1];
+              assert.ok(["profitpilot-api:security","profitpilot-protected:security"].includes(image));
+              if(image==="profitpilot-api:security")assert.equal(found.size,0,"Unexpected OpenSSL/ClamAV runtime dependency in the basic API image");
+              else assert.equal(found.size,names.length,"Protected scanner dependencies are incomplete");
+              console.log(JSON.stringify({image,packages:Object.fromEntries(names.map(n=>[n,found.get(n)??null]))}));
+            ' "$image" >> installed-container-packages.ndjson
+          done
+          cat installed-container-packages.ndjson
+      - name: Retain actual installed package version evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: container-installed-packages
+          path: installed-container-packages.ndjson
+          if-no-files-found: warn
       - name: Verify both images omit build tooling and run non-root
         run: |
           set -euo pipefail
