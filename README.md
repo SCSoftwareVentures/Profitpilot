@@ -90,3 +90,11 @@ To verify the packaged demo in a Node.js 22 source review environment: `npm test
 ## B2 guided buyer review and mobile acceptance
 
 The [offline interactive buyer walkthrough](demo/buyer-walkthrough.html) now guides the visitor through three evidence states and offers an on-page, selectable JSON summary when a mobile browser cannot download the export. [B2 device acceptance protocol](docs/BUYER_DEVICE_ACCEPTANCE_B2.md) separates automated CI checks from **unperformed actual iPhone/WebKit tests**. Do not describe this UI as mobile-certified or customer-validated.
+
+## B3 portable buyer evaluation handoff
+
+The reviewed B3 branch packages the **fictional, standalone** walkthrough as a short-lived GitHub Actions artifact named \`profitpilot-fictional-buyer-demo-<commit-sha>\`. Its workflow only packages files **after the existing Node, PostgreSQL/recovery, CodeQL, and container-security checks pass**. The package contains exactly four files: executable local HTML, a plain-language evaluation guide, a commit-specific manifest, and SHA-256 checksums.
+
+A reviewer needs no working server, domain or customer account to inspect the artifact. On iPhone, whether a downloaded local HTML file can run inside Safari depends on the device and opening workflow; this has **not** been tested on a physical iPhone. The file can alternatively be inspected as source; that does not constitute a UI test. There is no public hosting or deploy action. CI artifacts expire after seven days, whereas the source HTML remains in the repository.
+
+The checksums detect modifications relative to the package manifest but are **not** a trusted-publisher signature. Actual buyer validation, licence/ownership audit, independent legal/security review and customer willingness-to-pay evidence remain mandatory before any honest market-sale valuation.
