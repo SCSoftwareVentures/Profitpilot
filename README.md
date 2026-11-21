@@ -106,3 +106,7 @@ The [B4 G0 feasibility engine](src/g0-feasibility.js) computes explicit pass/fai
 ## B5 mobile buyer walkthrough overflow correction
 
 The [B5 layout investigation and test boundary](docs/BUYER_MOBILE_LAYOUT_B5.md) documents a content-sized grid defect discovered with an actual headless Chromium interaction run, its minmax/min-width CSS correction and new regression tests. Browser-emulated widths passed locally; real iPhone/WebKit and assistive-technology QA remain unperformed.
+
+## B6 reproducible acquisition inventory (draft)
+
+The [B6 buyer source and dependency audit](docs/BUYER_ACQUISITION_B6.md) explains how the offline `npm run audit:buyer` command inventories tracked file hashes, npm lockfile licences and outstanding IP, customer-demand, accessibility and production clearance gates. No library metadata, CI success or fictional demonstration establishes transfer rights or a production-ready application.
