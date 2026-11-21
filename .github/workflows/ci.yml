@@ -343,6 +343,12 @@ jobs:
           export PROFITPILOT_EXPECTED_PROTECTED_IMAGE_ID="$(docker image inspect --format '{{.Id}}' profitpilot-protected:security)"
           node scripts/check-container-vulnerabilities.mjs prototype-vulnerabilities.json protected-vulnerabilities.json
 
+      - name: Verify protected OpenSSL security floor independently of vulnerability database
+        if: always()
+        run: |
+          set -euo pipefail
+          docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges --entrypoint node profitpilot-protected:security --input-type=module -e 'import {readFileSync} from "node:fs"; import {assertPatchedOpenSslInventory} from "./src/openssl-package-floor.js"; const installed=readFileSync("/lib/apk/db/installed","utf8"); const verified=assertPatchedOpenSslInventory(installed); console.log("Installed OpenSSL vendor-patched package versions",JSON.stringify(verified.packageVersions));'
+
   static_analysis:
     name: CodeQL JavaScript static security analysis
     runs-on: ubuntu-latest
