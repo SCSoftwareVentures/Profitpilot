@@ -36,16 +36,21 @@ USER 1000:1000
 EXPOSE 8080
 CMD ["/usr/local/bin/node","server/index.js"]
 
-# Compile only a bounded stdin adapter against the vendor's libclamav headers.
+# Compile only a bounded stdin adapter against vendor-patched libclamav headers.
+# Enforce 1.4.7-r0 or newer from the SAME stable, signed Alpine repositories;
+# if the security update is not available, fail the build rather than mix Edge.
 FROM node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a AS scanner-build
-RUN apk add --no-cache build-base clamav-dev
+RUN apk add --no-cache build-base 'clamav-dev>=1.4.7-r0'
 COPY native/scan-source.c /build/scan-source.c
 RUN cc -std=c11 -O2 -Wall -Wextra -Werror -fanalyzer -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro,-z,now -o /build/profitpilot-scan /build/scan-source.c -lclamav
 RUN cc -DPROFITPILOT_FIXTURE_ONLY -std=c11 -O2 -Wall -Wextra -Werror -fanalyzer -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro,-z,now -o /build/profitpilot-scan-fixture /build/scan-source.c -lclamav
 
+# Require vendor-patched ClamAV 1.4.7+ from the pinned base's stable signed repositories.
+# This intentional dependency floor fails closed when stable packages are not yet patched.
+# No edge mixing, no ClamAV uninstall, and NO OpenSSL vulnerability exemptions.
 # Install the signed runtime libraries, not freshclam, daemon or shell packages.
 FROM prototype-root AS protected-root
-RUN apk --root /rootfs --no-scripts --no-cache add clamav-libs clamav-libunrar && \
+RUN apk --root /rootfs --no-scripts --no-cache add 'clamav-libs>=1.4.7-r0' 'clamav-libunrar>=1.4.7-r0' && \
     ! apk --root /rootfs info -e busybox && ! apk --root /rootfs info -e busybox-binsh && ! apk --root /rootfs info -e ssl_client && \
     mkdir -p /rootfs/var/lib/clamav && chmod 755 /rootfs/var/lib/clamav && \
     test ! -e /rootfs/bin/sh && \

@@ -10,7 +10,7 @@ test("B11 prototype scratch root excludes explicit OpenSSL APK installs and keep
  const packages=docker.match(/apk --root \/rootfs --initdb --no-scripts --no-cache add ([^\n]+?) &&/);
  assert.ok(packages,"expected one prototype APK root");
  assert.doesNotMatch(packages[1],/\blibcrypto3\b|\blibssl3\b/);
- assert.match(docker,/apk --root \/rootfs --no-scripts --no-cache add clamav-libs clamav-libunrar/);
+ assert.match(docker,/apk --root \/rootfs --no-scripts --no-cache add 'clamav-libs>=1\.4\.7-r0' 'clamav-libunrar>=1\.4\.7-r0'/);
  assert.match(docker,/FROM scratch AS api-runtime/);
  assert.match(docker,/USER 1000:1000/);
 });
