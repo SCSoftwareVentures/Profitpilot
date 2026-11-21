@@ -7,3 +7,7 @@ POST accepts only `clientRequestId` (UUID) and `reviewReference` (opaque token).
 No reviewer conflict-of-interest clearance beyond internal actor separation, real-party verification, source provenance, binding decision, legal clearance or payment execution is established. Hashes are not externally anchored and a privileged database administrator can replace the whole register. `decision_authority=false` and `payment_authority=false` are database constraints. Protected deployment mode blocks this synthetic prototype route entirely.
 
 Next: independently validated customer and tradesperson identity/job binding, reviewer appointment and conflict declarations, provenance and custody, transactional event journal and concurrency/adversarial testing, provider and Australian legal approval, and customer-facing workflows. No real funds until independently authorised.
+
+## S4 migration note
+
+All *new* reviewer assessments require a linked same-actor no-conflict self-declaration; any recorded conflict blocks further reviews. Pre-S4 assessments remain historical records with NULL declaration links and provide no conflict clearance. See [S4 self-declaration controls](SECUREPAY_ENGINE_S4.md).

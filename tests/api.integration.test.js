@@ -143,7 +143,8 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const snapshotB=checkOperatorReviewer(securepayCaseRowB,securepayEvidenceB,independentB);
     assert.equal(snapshotB.eligibleForNonbindingOperatorReview,true,"tenant B review fixture must satisfy internal actor separation");
     await admin.query("UPDATE tenant_memberships SET role='reviewer' WHERE tenant_id=$1 AND user_id=$2",[tenantB,independentB]);
-    await insertB("INSERT INTO securepay_reviewer_assessments(tenant_id,case_id,client_request_id,reviewer_id,review_reference,evidence_count,evidence_snapshot_sha256) VALUES($1,$2,gen_random_uuid(),$3,'review.ci-tenantB',$4,$5)",[tenantB,securepayCaseB,independentB,snapshotB.evidenceCount,snapshotB.evidenceSnapshotSha256]);
+    const conflictDeclarationB=await insertB("INSERT INTO securepay_reviewer_declarations(tenant_id,case_id,client_request_id,reviewer_id,declaration_status) VALUES($1,$2,gen_random_uuid(),$3,'no_conflict_declared')",[tenantB,securepayCaseB,independentB]);
+    await insertB("INSERT INTO securepay_reviewer_assessments(tenant_id,case_id,client_request_id,reviewer_id,review_reference,evidence_count,evidence_snapshot_sha256,conflict_declaration_id) VALUES($1,$2,gen_random_uuid(),$3,'review.ci-tenantB',$4,$5,$6)",[tenantB,securepayCaseB,independentB,snapshotB.evidenceCount,snapshotB.evidenceSnapshotSha256,conflictDeclarationB]);
     // Automatically include every current public tenant-owned table (plus tenants)
     // and require its fixture, forced RLS, and both positive and negative visibility.
     const catalog=await admin.query("SELECT c.relname AS name,c.relrowsecurity AS rls,c.relforcerowsecurity AS forced FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND (c.relname='tenants' OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attname='tenant_id' AND NOT a.attisdropped)) ORDER BY c.relname");
