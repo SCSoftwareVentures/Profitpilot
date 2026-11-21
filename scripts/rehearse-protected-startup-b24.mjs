@@ -69,11 +69,24 @@ function negative(name,changes,expected){
 function positive(){
  mustRun("docker",argsFor(baseEnv,true),20_000);
  started=true;
+ // Independently inspect effective Docker runtime settings rather than
+ // trusting our own CLI flags to establish confinement.
+ const host=JSON.parse(mustRun("docker",["inspect","--format","{{json .HostConfig}}",container],10_000));
+ assert.equal(host.NetworkMode,"none","Unexpected container network access");
+ assert.equal(host.ReadonlyRootfs,true,"Protected container rootfs must be read-only");
+ assert.equal(host.Privileged,false,"Protected container must not be privileged");
+ assert.ok(Array.isArray(host.CapDrop)&&host.CapDrop.includes("ALL"),
+  "Protected container must drop all Linux capabilities");
+ assert.equal(Object.keys(host.PortBindings||{}).length,0,
+  "Protected container must not publish ports");
  const probe=[
   'import assert from "node:assert/strict";',
-  'import {statSync} from "node:fs";',
+  'import {statSync,openSync,constants} from "node:fs";',
   'assert.equal(process.getuid(),1000);',
   'assert.equal(statSync("/run/secrets/good/key").mode&0o777,0o400);',
+  // The DB secret has mode 0600 and is owned by UID 1000; denial of opening
+  // it for writing must therefore be caused by the immutable bind mount.
+  'assert.throws(()=>openSync("/run/secrets/good/db-url",constants.O_WRONLY),error=>error.code==="EROFS");',
   'let unauth;',
   'for(let i=0;i<30;i++){',
   ' try{unauth=await fetch("http://127.0.0.1:8080/v1/me",{headers:{Origin:"https://untrusted.invalid"},signal:AbortSignal.timeout(2000)});break;}',
