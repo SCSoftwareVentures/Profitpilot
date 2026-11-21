@@ -73,6 +73,18 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   assert.equal(casePage2.body.items.length,2);assert.equal(casePage2.body.hasMore,false);
   assert.equal(casePage2.body.nextCursor,null);
   assert.equal(new Set([...casePage1.body.items,...casePage2.body.items].map(x=>x.id)).size,102);
+  const preflightPath=rootA+"/"+caseId+"/decision-preflight";
+  assert.equal((await request(preflightPath)).status,401);
+  assert.equal((await request(preflightPath,{subject:"sp-s2-reader"})).status,403);
+  assert.equal((await request(preflightPath,{subject:"sp-s2-foreign"})).status,403);
+  assert.equal((await request(rootA+"/bad/decision-preflight",{subject:"sp-s2-owner"})).status,400);
+  assert.equal((await request(rootA+"/"+openedB.body.item.id+"/decision-preflight",{subject:"sp-s2-owner"})).status,404);
+  const emptyPreflight=await request(preflightPath,{subject:"sp-s2-owner"});
+  assert.equal(emptyPreflight.status,200,JSON.stringify(emptyPreflight));
+  assert.equal(emptyPreflight.body.evidence.totalOperatorReports,0);
+  assert.equal(emptyPreflight.body.decisionReadiness,"blocked");
+  assert.equal(emptyPreflight.body.requesterOpenedCase,true);
+  assert.ok(emptyPreflight.body.blockingGates.includes("requester_must_not_self_review"));
   const evidence={clientRequestId:randomUUID(),evidenceType:"claim_reported",evidenceReference:"opaque.claim.001"};
   const ep=rootA+"/"+caseId+"/evidence";
   assert.equal((await request(ep,{subject:"sp-s2-reader",method:"POST",body:evidence})).status,403);
@@ -82,6 +94,25 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   assert.equal((await request(ep,{subject:"sp-s2-owner",method:"POST",body:{...evidence,evidenceReference:"other.reference"}})).status,409);
   const listing=await request(ep,{subject:"sp-s2-owner"});assert.equal(listing.status,200);
   assert.equal(listing.body.items.length,1);assert.equal(listing.body.externalVerification,false);
+  const untrustedPreflight=await request(preflightPath,{subject:"sp-s2-owner"});
+  assert.equal(untrustedPreflight.body.evidence.matchingClaimReported,false,
+   "A different opaque claim reference must not count as the case claim");
+  const reports=[
+   {clientRequestId:randomUUID(),evidenceType:"claim_reported",evidenceReference:payload.claimReference},
+   {clientRequestId:randomUUID(),evidenceType:"business_response_reported",evidenceReference:"business.report.001"},
+   {clientRequestId:randomUUID(),evidenceType:"operator_review_note",evidenceReference:"review.note.001"}
+  ];
+  for(const report of reports)assert.equal((await request(ep,{subject:"sp-s2-owner",method:"POST",body:report})).status,201);
+  const populatedPreflight=await request(preflightPath,{subject:"sp-s2-owner"});
+  assert.equal(populatedPreflight.status,200,JSON.stringify(populatedPreflight));
+  assert.equal(populatedPreflight.body.evidence.totalOperatorReports,4);
+  assert.equal(populatedPreflight.body.evidence.matchingClaimReported,true);
+  assert.equal(populatedPreflight.body.evidence.businessResponseReported,true);
+  assert.equal(populatedPreflight.body.evidence.operatorReviewNoteReported,true);
+  assert.equal(populatedPreflight.body.decisionReadiness,"blocked");
+  assert.equal(populatedPreflight.body.paymentAuthority,false);
+  assert.equal(populatedPreflight.body.partyIdentityVerified,false);
+  assert.ok(populatedPreflight.body.blockingGates.includes("evidence_provenance_unverified"));
   assert.equal((await request(rootA+"/"+openedB.body.item.id+"/evidence",{subject:"sp-s2-owner"})).status,404);
   await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query(
    "UPDATE securepay_case_rehearsals SET status='evidence_pending' WHERE tenant_id=$1 AND id=$2",[a,caseId])),/permission denied|append-only/i);

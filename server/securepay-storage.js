@@ -1,4 +1,5 @@
 // SP-S2: synthetic-only operator register. Never accepts payment instructions.
+import {assessSecurepayDecisionPreflight} from "../src/securepay-readiness.js";
 const uuid=s=>typeof s==="string"&&/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(s);
 const ref=s=>typeof s==="string"&&/^[A-Za-z0-9][A-Za-z0-9._:-]{2,119}$/.test(s);
 const exact=(o,keys)=>o!==null&&typeof o==="object"&&!Array.isArray(o)&&Object.keys(o).length===keys.length&&Object.keys(o).every(k=>keys.includes(k));
@@ -46,6 +47,23 @@ export function installSecurepayStorageRoutes(app,{membership,withTenant,require
   const r=await withTenant(tenant,req.identity.subject,c=>c.query("SELECT "+caseCols+" FROM securepay_case_rehearsals WHERE tenant_id=$1 AND id=$2",[tenant,req.params.caseId]));
   if(!r.rowCount)return res.status(404).json({error:"Synthetic case unavailable"});
   res.json({item:r.rows[0],paymentAuthority:false,partyIdentityVerified:false});
+ }catch(e){next(e);}});
+ app.get(root+"/:caseId/decision-preflight",...guarded,async(req,res,next)=>{try{
+  const caseId=req.params.caseId;
+  if(!uuid(caseId))return res.status(400).json({error:"Invalid case ID"});
+  const tenant=req.membership.tenantId;
+  const output=await withTenant(tenant,req.identity.subject,async c=>{
+   const found=await c.query(
+    "SELECT id,status,synthetic,funds_moved,claim_reference,(opened_by=private.actor_id()) AS opened_by_requester FROM securepay_case_rehearsals WHERE tenant_id=$1 AND id=$2",
+    [tenant,caseId]);
+   if(!found.rowCount)return null;
+   const summary=await c.query(
+    "SELECT count(*)::int AS total,count(*) FILTER(WHERE evidence_type='claim_reported' AND evidence_reference=$3)::int AS claim_reports,count(*) FILTER(WHERE evidence_type='business_response_reported')::int AS business_reports,count(*) FILTER(WHERE evidence_type='operator_review_note')::int AS review_notes,count(*) FILTER(WHERE externally_verified)::int AS externally_verified FROM securepay_evidence_rehearsals WHERE tenant_id=$1 AND case_id=$2",
+    [tenant,caseId,found.rows[0].claim_reference]);
+   return assessSecurepayDecisionPreflight(found.rows[0],summary.rows[0]);
+  },{repeatableRead:true});
+  if(output===null)return res.status(404).json({error:"Synthetic case unavailable"});
+  res.json(output);
  }catch(e){next(e);}});
  app.post(root+"/:caseId/evidence",...guarded,async(req,res,next)=>{try{
   const b=req.body,caseId=req.params.caseId;

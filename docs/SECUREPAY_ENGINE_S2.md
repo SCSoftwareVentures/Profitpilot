@@ -8,6 +8,7 @@ Only active tenant owners, admins and reviewers with valid JWTs and database ten
 - POST /v1/tenants/:tenantId/prototype/securepay-cases
 - GET /v1/tenants/:tenantId/prototype/securepay-cases (optional tenant-scoped cursor, 100 cases/page)
 - GET /v1/tenants/:tenantId/prototype/securepay-cases/:caseId
+- GET /v1/tenants/:tenantId/prototype/securepay-cases/:caseId/decision-preflight (read-only, always blocked)
 - POST /v1/tenants/:tenantId/prototype/securepay-cases/:caseId/evidence
 - GET /v1/tenants/:tenantId/prototype/securepay-cases/:caseId/evidence (optional cursor, 100 items/page)
 
@@ -32,3 +33,7 @@ No real case data or payment details are authorised for this synthetic environme
 ## Next engineering gates
 
 Tie the isolated SP-S1 decision-state machine to authoritative case events only after independently verified customer/business identity, reviewer conflict checks, evidence provenance and governance, atomic concurrency, calendars, lifecycle tests, user interface and Australian regulatory/provider review. Keep real funds disabled throughout development.
+
+## SP-S2 decision preflight (safe engineering bridge)
+
+The read-only preflight uses one repeatable-read tenant transaction to inspect the recorded case and count matching operator-reported claim references, business response reports and review notes. It identifies missing operator reports and whether the requester also opened the case; this does **not** establish reviewer independence, party identity, evidence provenance, consent, legal authority or a permitted payment. An unrelated claim reference cannot satisfy the claim-match signal. Even when all three operator-report categories exist, `decisionReadiness` remains `blocked`, `decisionAuthority` and `paymentAuthority` remain false, and the unverifiable gates are explicitly returned. No SP-S1 event is advanced, no status is mutated, and no funds are moved. Complete authoritative identity and governance integration before exposing a real decision workflow.
