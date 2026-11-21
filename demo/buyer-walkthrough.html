@@ -9,7 +9,7 @@
 <title>ProfitPilot | Evidence-first buyer walkthrough</title>
 <style>
 :root{color-scheme:light;--navy:#0b1b26;--slate:#435563;--muted:#60727e;--paper:#fff;--bg:#f2f5f6;--teal:#0d635a;--border:#dae2e4;--mint:#ebf6f2;--amber:#91591d;--amber-bg:#fff4e7}
-*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--navy);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}body{margin:0;background:var(--bg);color:var(--navy);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
 button{font:inherit}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #158e7b;outline-offset:3px}
 .wrap{max-width:1130px;margin:auto;padding:0 20px}.top{background:var(--navy);color:#fff}.topin{display:flex;justify-content:space-between;gap:20px;align-items:center;padding-top:17px;padding-bottom:17px;flex-wrap:wrap}
 .brand{font-weight:800;letter-spacing:-.7px;font-size:21px;display:flex;gap:10px;align-items:center}.mark{background:#36b79b;border-radius:9px;color:var(--navy);display:grid;place-items:center;width:33px;height:33px;font-size:19px}
@@ -33,6 +33,11 @@ details{margin-top:7px}summary{cursor:pointer;color:var(--teal);font-size:12px;f
 .sources{padding:8px 0;margin:0;font-weight:400;color:var(--slate);font-size:11px;line-height:1.8}
 .logrow{border-top:1px solid var(--border);padding:12px 0}.logrow:first-child{border:0}.logrow strong{font-size:12px;display:block}.logrow span{font-size:12px;color:var(--slate)}
 .footer{background:var(--navy);color:#b9ccc9;padding:23px 0;font-size:12px}.footer strong{color:#fff}
+.tour{border:1px solid #a7cfc3;background:#eaf6f1;border-radius:16px;padding:19px 21px}
+.tourbadge{font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:800;color:var(--teal)}
+.tour h2{margin:5px 0 6px}.tour p{margin:0;font-size:13px;color:var(--slate)}
+.tourstatus{margin-top:10px!important;font-weight:720;color:var(--navy)!important}
+.evidence-preview{padding-top:10px}.evidence-preview pre{max-width:100%;max-height:320px;overflow:auto;border-radius:10px;background:#edf2f3;border:1px solid var(--border);padding:12px;font-size:11px;user-select:text;-webkit-user-select:text;white-space:pre-wrap;overflow-wrap:anywhere}
 @media(max-width:780px){.hero{padding-top:28px}.columns{grid-template-columns:1fr}.kpis{grid-template-columns:1fr}.kpi{min-height:auto}.panel{padding:16px}.toolbar .btn{width:100%}.lead{font-size:15px}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
 </style>
@@ -47,6 +52,7 @@ details{margin-top:7px}summary{cursor:pointer;color:var(--teal);font-size:12px;f
 <div class="toolbar"><button type="button" id="reset" class="btn">Reset fictional scenario</button><button type="button" id="export" class="btn primary">Export synthetic evidence summary (JSON)</button></div>
 </div>
 <div class="layout">
+<section class="tour" aria-labelledby="tour-title"><div class="tourbadge">60-second guided review · local-only</div><h2 id="tour-title">1. Spot the evidence gap</h2><p id="tour-step">Inspect withheld portfolio totals and source coverage before touching a reviewer action.</p><p class="tourstatus" id="tour-progress" aria-live="polite">Step 1 of 3 · Not a production approval</p></section>
 <section aria-labelledby="portfolio-title"><div class="sectionhead"><div><h2 id="portfolio-title">Portfolio evidence position</h2><p>October 2026 · AUD · contract × site × period</p></div><span class="chip" id="portfolio-status">Coverage incomplete</span></div>
 <div class="kpis" id="kpis" aria-live="polite"></div><div class="coverage" id="coverage"></div></section>
 <div class="columns">
@@ -57,7 +63,9 @@ details{margin-top:7px}summary{cursor:pointer;color:var(--teal);font-size:12px;f
 <section class="panel" aria-labelledby="contracts-title"><div class="sectionhead"><div><h2 id="contracts-title">Contract-by-contract reconciliation</h2><p>Open each source list to inspect the fictional evidence references.</p></div></div><div class="tablebox"><table><thead><tr><th scope="col">Contract and sources</th><th scope="col">Baseline</th><th scope="col">Confirmed billed</th><th scope="col">Payroll residual</th><th scope="col">Contribution</th><th scope="col">Status</th></tr></thead><tbody id="contract-rows"></tbody></table></div></section>
 <section class="panel" aria-labelledby="boundary-title"><h2 id="boundary-title">What this demonstration does—and does not—prove</h2>
 <p class="small">The calculation uses whole Australian dollar cents. Unmatched invoice candidates never count as confirmed billed evidence; unallocated payroll never vanishes from the payroll pool; unapproved variations are excluded from confirmed billing. Portfolio contribution is unavailable until all contracts meet the selected fictional source-coverage gates.</p>
-<p class="small"><strong>Not established:</strong> real customer demand, verified source issuer identity, payroll-law compliance, independent approvals, production authentication, data custody, regulated payment capability, legal clearance or independent security certification.</p></section>
+<p class="small"><strong>Not established:</strong> real customer demand, verified source issuer identity, payroll-law compliance, independent approvals, production authentication, data custody, regulated payment capability, legal clearance or independent security certification.</p>
+<details class="evidence-preview"><summary>View the current synthetic evidence JSON on this device</summary><p class="small">Selectable text provides a fallback when local file downloads are unsupported by your browser. This contains fictional records only.</p><pre id="evidence-json" aria-label="Synthetic evidence JSON in plain text"></pre></details>
+</section>
 </div>
 <p class="small" id="live-status" role="status" aria-live="polite" style="padding-bottom:24px">Fictional demo ready.</p>
 </main><footer class="footer"><div class="wrap"><strong>ProfitPilot — Fictional buyer scenario.</strong> All calculations are illustrative and cannot be relied upon for commercial, financial, tax, payroll or legal decisions.</div></footer>
@@ -243,6 +251,25 @@ function chip(text,complete=false){
 }
 function render(){
  const snapshot=buildBuyerDemoSnapshot(state),t=snapshot.totals,c=snapshot.coverage;
+ // Guidance follows the actual simulated decision state. There is no independent
+ // scripted success status that could contradict incomplete source coverage.
+ const tourTitle=document.querySelector("#tour-title");
+ const tourStep=document.querySelector("#tour-step");
+ const tourProgress=document.querySelector("#tour-progress");
+ if(state.invoice==="held"){
+  tourTitle.textContent="1. Spot the evidence gap";
+  tourStep.textContent="Invoice matching is incomplete. Find Riverside's held $500 candidate and inspect the fictional source reference.";
+  tourProgress.textContent="Step 1 of 3 · No financial authority";
+ }else if(state.payroll==="unallocated"){
+  tourTitle.textContent="2. Account for every payroll dollar";
+  tourStep.textContent="The invoice match is now simulated as confirmed, but Northside still has a $600 payroll residual. Resolve it to recalculate delivery costs.";
+  tourProgress.textContent="Step 2 of 3 · No real reviewer identity";
+ }else{
+  tourTitle.textContent="3. Review the contribution—and its limits";
+  tourStep.textContent="Portfolio contribution is now available from fictional complete source categories. Confirm Harbour's unapproved $2,000 variation remains excluded, then inspect the source references and evidence JSON.";
+  tourProgress.textContent="Step 3 of 3 · Fictional arithmetic only";
+ }
+ document.querySelector("#evidence-json").textContent=JSON.stringify(exportBuyerDemoEvidence(state),null,2);
  const metrics=document.querySelector("#kpis");clear(metrics);
  metrics.append(
   kpi("Confirmed billed · full period",money(t.billedCents),
