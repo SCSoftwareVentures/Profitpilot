@@ -140,7 +140,8 @@ test("B1 embedded DOM walkthrough actually changes displayed financial results o
  const code=html.match(/<script>([\s\S]*?)<\/script>/i)?.[1];
  assert.ok(code,"standalone inline script exists");
  const selectors=["reset","export","kpis","coverage","portfolio-status",
-  "exceptions","exception-count","decision-log","contract-rows","live-status"];
+  "exceptions","exception-count","decision-log","contract-rows","live-status",
+  "tour-title","tour-step","tour-progress","evidence-json"];
  const nodes=new Map(selectors.map(id=>["#"+id,new FakeElement("section")]));
  const document={
   createElement:tag=>new FakeElement(tag),
@@ -155,17 +156,26 @@ test("B1 embedded DOM walkthrough actually changes displayed financial results o
  runInNewContext(code,context,{timeout:2000,filename:"buyer-walkthrough.html"});
  const kpis=nodes.get("#kpis");
  assert.equal(kpis.children.length,3);
+ assert.match(nodes.get("#tour-title").textContent,/Spot the evidence gap/);
+ assert.match(nodes.get("#tour-progress").textContent,/Step 1 of 3/);
+ assert.match(nodes.get("#evidence-json").textContent,/Fictional browser-only/);
  assert.match(kpis.children[0].textContent,/Unavailable/);
  assert.match(kpis.children[2].textContent,/Unavailable/);
  let invoice=visit(nodes.get("#exceptions"),x=>x.tag==="button"&&x.textContent.includes("invoice-match"));
  assert.ok(invoice);invoice.click();
+ assert.match(nodes.get("#tour-title").textContent,/Account for every payroll dollar/);
+ assert.match(nodes.get("#tour-progress").textContent,/Step 2 of 3/);
  assert.match(kpis.children[0].textContent,/\$45,000\.00/);
  assert.match(kpis.children[2].textContent,/Unavailable/);
  let payroll=visit(nodes.get("#exceptions"),x=>x.tag==="button"&&x.textContent.includes("payroll"));
  assert.ok(payroll);payroll.click();
  assert.match(kpis.children[1].textContent,/\$31,300\.00/);
  assert.match(kpis.children[2].textContent,/\$13,700\.00/);
+ assert.match(nodes.get("#tour-title").textContent,/Review the contribution/);
+ assert.match(nodes.get("#tour-progress").textContent,/Step 3 of 3/);
+ assert.match(nodes.get("#evidence-json").textContent,/"contributionCents": 1370000/);
  assert.match(nodes.get("#decision-log").textContent,/Simulated/);
  nodes.get("#reset").click();
  assert.match(kpis.children[2].textContent,/Unavailable/);
+ assert.match(nodes.get("#tour-progress").textContent,/Step 1 of 3/);
 });
