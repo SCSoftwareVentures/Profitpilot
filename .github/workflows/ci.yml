@@ -41,7 +41,7 @@ jobs:
       - name: Syntax checks
         run: npm run check
 
-      - name: Unit tests
+      - name: Unit tests (zero skips; PostgreSQL suites run in database job)
         run: npm test
 
       - name: Validate local Compose syntax without starting services
@@ -139,15 +139,16 @@ jobs:
           psql "$APP_URL" -v ON_ERROR_STOP=1 -c "DO \$\$ BEGIN IF (SELECT count(*) FROM tenants) <> 0 THEN RAISE EXCEPTION 'RLS without tenant context did not deny rows'; END IF; END \$\$;"
           psql "$APP_URL" -v ON_ERROR_STOP=1 -c "BEGIN; SELECT set_config('app.tenant_id','11111111-1111-4111-8111-111111111111',true); DO \$\$ BEGIN IF (SELECT count(*) FROM tenants) <> 0 THEN RAISE EXCEPTION 'Raw tenant GUC must not grant access without a valid HMAC'; END IF; END \$\$; COMMIT;"
 
-      - name: Run authenticated API integration tests
+      - name: Run and attest all three PostgreSQL integration suites (zero skips)
         env:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
+          set -euo pipefail
           npm ci --ignore-scripts --no-audit --no-fund
-          # Run SecurePay before the deliberate tenant-signing-key rotation/revocation tests.
-          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/securepay-storage.integration.test.js
-          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/securepay-custody.integration.test.js
-          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/api.integration.test.js
+          export TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot"
+          # Fail closed if any required suite is missing, skipped, or fails. Run in order
+          # because the API integration suite rotates/revokes tenant signing keys.
+          npm run test:integration
 
       - name: Rehearse encrypted synthetic database backup and restore
         env:
