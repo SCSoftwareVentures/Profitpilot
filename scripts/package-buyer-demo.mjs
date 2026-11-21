@@ -2,7 +2,7 @@
 // Produce the exact, dependency-free, synthetic buyer demonstration evaluated by CI.
 // Explicitly not a signed release, a customer-data export, or a deployable SaaS.
 import {createHash} from "node:crypto";
-import {readFileSync,writeFileSync,mkdirSync,readdirSync,openSync,fstatSync,closeSync,constants} from "node:fs";
+import {readFileSync,writeFileSync,mkdirSync,readdirSync,openSync,readSync,fstatSync,closeSync,constants} from "node:fs";
 import {join,resolve,dirname} from "node:path";
 import {fileURLToPath} from "node:url";
 
@@ -72,8 +72,22 @@ function verifyFiles(out,sha){
   // O_NONBLOCK prevents a substituted FIFO from blocking the verifier.
   const fd=openSync(p,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
   try{
-   if(!fstatSync(fd).isFile()||!readFileSync(fd).equals(bytes))
-    failure("distribution file altered: "+name);
+   // Read a bounded amount from the opened no-follow descriptor, then check its type.
+   // This avoids a check-then-read race and refuses unbounded file contents.
+   const observed=Buffer.alloc(bytes.length+1);
+   let count=0;
+   while(count<observed.length){
+    let n;
+    try{n=readSync(fd,observed,count,observed.length-count,null);}
+    catch(err){
+     if(err?.code==="EISDIR")failure("distribution file altered: "+name);
+     throw err;
+    }
+    if(n===0)break;
+    count+=n;
+   }
+   if(count!==bytes.length||!observed.subarray(0,count).equals(bytes)||
+      !fstatSync(fd).isFile())failure("distribution file altered: "+name);
   }finally{closeSync(fd);}
  }
  // Only after examining the expected files, reject extra and missing entries.
