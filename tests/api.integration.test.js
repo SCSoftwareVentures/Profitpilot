@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createServer} from "node:http";
-import {createHash,createHmac,randomBytes,generateKeyPairSync,sign} from "node:crypto";
+import {createHash,createHmac,randomBytes,randomUUID,generateKeyPairSync,sign} from "node:crypto";
 import {generateKeyPair,exportJWK,SignJWT} from "jose";
 import pg from "pg";
 
