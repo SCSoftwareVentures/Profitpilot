@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createServer} from "node:http";
-import {createHash,createHmac,randomBytes,generateKeyPairSync,sign} from "node:crypto";
+import {createHash,createHmac,randomBytes,randomUUID,generateKeyPairSync,sign} from "node:crypto";
 import {generateKeyPair,exportJWK,SignJWT} from "jose";
 import pg from "pg";
 
@@ -145,6 +145,24 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const custodyEvidenceB=(await admin.query("SELECT id FROM securepay_evidence_rehearsals WHERE tenant_id=$1 AND case_id=$2 AND evidence_type='claim_reported' LIMIT 1",[tenantB,securepayCaseB])).rows[0].id;
     await insertB("INSERT INTO securepay_evidence_custody_receipts(tenant_id,case_id,evidence_id,client_request_id,received_by,sha256,byte_count,media_type,scan_status,original_bytes) VALUES($1,$2,$3,gen_random_uuid(),$4,$5,$6,'text/plain','scanner_reported_clean',$7)",
       [tenantB,securepayCaseB,custodyEvidenceB,userC,custodyHashB,custodyFixtureB.length,custodyFixtureB]);
+    // S10 must have non-vacuous tenant-B RLS visibility without uploading real files.
+    // This is an admin-only synthetic fixture, not a real independently scanner-certified upload.
+    const {sealCustodyBytes}=await import("../src/securepay-encrypted-custody.js");
+    const s10BBytes=Buffer.from("CI S10 tenant B encrypted fixture.");
+    const s10BHash=createHash("sha256").update(s10BBytes).digest("hex");
+    const s10EvidenceB=(await admin.query("SELECT id FROM securepay_evidence_rehearsals WHERE tenant_id=$1 AND case_id=$2 AND evidence_type='operator_review_note' LIMIT 1",[tenantB,securepayCaseB])).rows[0].id;
+    const s10RequestB=randomUUID();
+    const s10FixtureKeys={cipherKey:Buffer.alloc(32,49),macKey:Buffer.alloc(32,50),keyId:"s10-ci-fixture-v1"};
+    const s10ScopeB={tenantId:tenantB,caseId:securepayCaseB,evidenceId:s10EvidenceB,
+      clientRequestId:s10RequestB,actorId:userC,sha256:s10BHash,
+      byteCount:s10BBytes.length,mediaType:"text/plain",keyId:s10FixtureKeys.keyId};
+    const s10SealedB=sealCustodyBytes(s10BBytes,s10ScopeB,s10FixtureKeys);
+    await insertB("INSERT INTO securepay_encrypted_custody_receipts(tenant_id,case_id,evidence_id,client_request_id,received_by,sha256,byte_count,media_type,scan_observed_at,scanner_attestation_mac,encryption_algorithm,key_id,aad_sha256,ciphertext_sha256,nonce,auth_tag,ciphertext) VALUES($1,$2,$3,$4,$5,$6,$7,'text/plain',$8,$9,'aes-256-gcm',$10,$11,$12,$13,$14,$15)",
+      [tenantB,securepayCaseB,s10EvidenceB,s10RequestB,userC,s10BHash,s10BBytes.length,
+       s10SealedB.observedAt,s10SealedB.attestationMac,s10SealedB.keyId,
+       s10SealedB.aadSha256,s10SealedB.ciphertextSha256,
+       s10SealedB.nonce,s10SealedB.tag,s10SealedB.ciphertext]);
+
 
     const {reportedMetadataDigest}=await import("../src/securepay-provenance.js");
     const provenanceEvidenceB=securepayEvidenceB.find(e=>e.evidence_type==='claim_reported');
