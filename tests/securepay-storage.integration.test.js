@@ -161,7 +161,9 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   await assert.rejects(()=>withTenant(a,"sp-s3-reviewer",c=>c.query("UPDATE securepay_reviewer_assessments SET review_reference='changed.ref' WHERE id=$1",[r.body.item.id])),/permission denied|append-only/i);
   const other=await request(rootA,{subject:"sp-s3-reviewer",method:"POST",body:{synthetic:true,clientRequestId:randomUUID(),jobReference:"job.self",claimReference:"claim.self"}});
   assert.equal(other.status,201);
-  const ownReview=await request(rootA+"/"+other.body.item.id+"/reviewer-assessments",{subject:"sp-s3-reviewer",method:"POST",body:{clientRequestId:randomUUID(),reviewReference:"self.ref"}});
+  const selfDeclared=await request(rootA+"/"+other.body.item.id+"/reviewer-declarations",{subject:"sp-s3-reviewer",method:"POST",body:{...none,clientRequestId:randomUUID()}});
+  assert.equal(selfDeclared.status,201,JSON.stringify(selfDeclared));
+  const ownReview=await request(rootA+"/"+other.body.item.id+"/reviewer-assessments",{subject:"sp-s3-reviewer",method:"POST",body:{clientRequestId:randomUUID(),reviewReference:"self.ref",declarationId:selfDeclared.body.item.id}});
   assert.equal(ownReview.status,409);assert.ok(ownReview.body.blockingGates.includes("reviewer_opened_case"));
   const reviewer2Id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   await admin.query("INSERT INTO users(id,auth_subject,email) VALUES($1,'sp-s4-conflicted','conflicted@sp.invalid') ON CONFLICT(auth_subject) DO NOTHING",[reviewer2Id]);
