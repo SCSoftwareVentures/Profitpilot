@@ -86,3 +86,7 @@ These prototypes are for design review only. They are not a deployed product or 
 - [Auditable demo calculation logic](src/buyer-walkthrough-core.js) — deterministic cents-based contract economics scenario, with tests and a reproducible standalone build.
 
 To verify the packaged demo in a Node.js 22 source review environment: `npm test` and `npm run check`. Production security, real customer identity, legal/payment clearances and independent iPhone browser tests remain outstanding.
+
+## B2 guided buyer review and mobile acceptance
+
+The [offline interactive buyer walkthrough](demo/buyer-walkthrough.html) now guides the visitor through three evidence states and offers an on-page, selectable JSON summary when a mobile browser cannot download the export. [B2 device acceptance protocol](docs/BUYER_DEVICE_ACCEPTANCE_B2.md) separates automated CI checks from **unperformed actual iPhone/WebKit tests**. Do not describe this UI as mobile-certified or customer-validated.
