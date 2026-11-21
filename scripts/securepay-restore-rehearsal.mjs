@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Offline, privileged, READ-ONLY synthetic recovery rehearsal. No HTTP route or byte export.
 import pg from "pg";
-import {createHash,randomUUID} from "node:crypto";
+import {createHash,createPublicKey,randomUUID} from "node:crypto";
 import {openSync,fstatSync,readSync,closeSync,lstatSync,readFileSync,
  readdirSync,writeFileSync,unlinkSync,constants} from "node:fs";
 import {join,resolve} from "node:path";
@@ -35,13 +35,15 @@ function readAuditChain(auditDir,publicKey){
  const files=readdirSync(auditDir).filter(x=>x.startsWith("s11-3-"));
  if(files.length>256||files.some(x=>!/^s11-3-\d{6}\.json$/.test(x)))
   throw Error("Unrecognised or excessive signed audit records");
- files.sort();let previous=null;const records=[];
+ files.sort();let previous=null;let firstTenant=null;const records=[];
  for(let i=0;i<files.length;i++){
   const name="s11-3-"+String(i+1).padStart(6,"0")+".json";
   if(files[i]!==name)throw Error("Signed audit continuity gap");
   const record=JSON.parse(privateFile(join(auditDir,name),16384));
   const digest=verifyRecoveryAudit(record,publicKey,previous);
   if(record.event.sequence!==i+1)throw Error("Invalid signed audit sequence");
+  if(firstTenant!==null&&record.event.tenantId!==firstTenant)throw Error("Mixed tenant audit chain");
+  firstTenant??=record.event.tenantId;
   records.push({event:record.event,digest});previous=digest;
  }
  return {previous,count:records.length,records};
@@ -101,8 +103,15 @@ export async function runSyntheticRehearsal(argv,env=process.env){
   const signerPrivate=privateFile(env.SECUREPAY_RECOVERY_AUDIT_PRIVATE_KEY_FILE,4096);
   const signerPublic=privateFile(env.SECUREPAY_RECOVERY_AUDIT_PUBLIC_KEY_FILE,4096);
   const policy=loadRecoveryApproverPolicy(JSON.parse(privateFile(env.SECUREPAY_RECOVERY_APPROVERS_FILE)));
+  const auditFingerprint=sha(createPublicKey(signerPublic).export({type:"spki",format:"der"}));
+  for(const pinned of policy.values()){
+   const approverFingerprint=sha(pinned.key.export({type:"spki",format:"der"}));
+   if(approverFingerprint===auditFingerprint)
+    throw Error("Recovery audit key must differ from both approval keys");
+  }
   const prior=readAuditChain(auditDir,signerPublic);
   if(prior.count>=256)throw Error("Audit chain requires independent archival");
+  if(prior.count>0&&prior.records[0].event.tenantId!==tenantId)throw Error("Audit directory tenant mismatch");
   const event={schema:"profitpilot.s11.3.restore-audit.v1",sequence:prior.count+1,
    recordedAt:new Date().toISOString(),tenantId,operatorReportedId:operatorId,
    operatorReportedTicket:ticketRef,approvalRequestId:null,approvalProofDigest:null,
