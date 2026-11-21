@@ -167,6 +167,40 @@ jobs:
           RESTORED_APP="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot_restore"
           test "$(psql "$RESTORED_APP" -At -c 'SELECT count(*) FROM tenants;')" = "0"
           psql "$RESTORE_URL" -v ON_ERROR_STOP=1 -c "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM import_source_receipts WHERE sha256<>encode(public.digest(original_bytes,'sha256'),'hex')) THEN RAISE EXCEPTION 'Restored source receipt checksum mismatch'; END IF; END \$\$;"
+          # S11.2: inspect *restored* synthetic custody ciphertext with the application AEAD
+          # and operator MAC keys. Secrets and audit output stay in a private ephemeral CI dir.
+          printf '%s\n' "$RESTORE_URL" > "$BACKUP_DIR/restore-db-url"
+          mkdir -m 700 "$BACKUP_DIR/custody-audit"
+          node --input-type=module - "$BACKUP_DIR/custody-keyring.json" "$BACKUP_DIR/custody-wrong-keyring.json" <<'NODE'
+          import {writeFileSync} from "node:fs";
+          import {randomBytes} from "node:crypto";
+          const id="s10-ci-key-01";
+          for(const [file,encryptionKey,attestationKey] of [
+            [process.argv[2],"1".repeat(64),"2".repeat(64)],
+            [process.argv[3],randomBytes(32).toString("hex"),randomBytes(32).toString("hex")]
+          ]){
+            const manifest={activeKeyId:id,keys:[{keyId:id,encryptionKey,attestationKey,status:"active"}]};
+            writeFileSync(file,JSON.stringify(manifest),{mode:0o600});
+          }
+          NODE
+          export NODE_ENV=test PROFITPILOT_PROFILE=prototype SECUREPAY_OFFLINE_RECOVERY_MODE=synthetic-rehearsal
+          export SECUREPAY_CUSTODY_KEYRING_FILE="$BACKUP_DIR/custody-keyring.json"
+          node scripts/securepay-restore-rehearsal.mjs rehearse \
+            abababab-abab-4bab-8bab-abababababab \
+            "$BACKUP_DIR/restore-db-url" "$BACKUP_DIR/custody-audit" \
+            efefefef-efef-4fef-8fef-efefefefefef ci.s11-2.restored
+          export SECUREPAY_CUSTODY_KEYRING_FILE="$BACKUP_DIR/custody-wrong-keyring.json"
+          if node scripts/securepay-restore-rehearsal.mjs rehearse \
+            abababab-abab-4bab-8bab-abababababab \
+            "$BACKUP_DIR/restore-db-url" "$BACKUP_DIR/custody-audit" \
+            efefefef-efef-4fef-8fef-efefefefefef ci.s11-2.wrongkey; then
+            echo 'Wrong recovery key unexpectedly passed'; exit 1
+          fi
+          test "$(find "$BACKUP_DIR/custody-audit" -maxdepth 1 -name 's11-2-*.json' -type f | wc -l)" -eq 2
+          grep -l '"outcome": "verified_synthetic_recovery"' "$BACKUP_DIR/custody-audit"/s11-2-*.json > /dev/null
+          grep -l '"outcome": "rejected"' "$BACKUP_DIR/custody-audit"/s11-2-*.json > /dev/null
+          unset SECUREPAY_CUSTODY_KEYRING_FILE SECUREPAY_OFFLINE_RECOVERY_MODE PROFITPILOT_PROFILE NODE_ENV
+          echo 'S11.2 restored encrypted custody AEAD, historical MAC, wrong-key refusal and private audit checks passed'
           echo 'Encrypted synthetic database restored; wrong-key rejection, counts, receipt hashes and deny-by-default RLS checked'
           dropdb -h localhost -U profitpilot_admin profitpilot_restore
 
