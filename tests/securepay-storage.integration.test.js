@@ -157,7 +157,7 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   assert.equal((await request(reviewPath,{subject:"sp-s3-reviewer",method:"POST",body:{...reviewPayload,declarationId:missingDeclaration.body.item.id}})).status,409);
   assert.equal((await request(reviewPath,{subject:"sp-s3-reviewer"})).body.items.length,1);
   assert.equal((await request(rootA+"/"+openedB.body.item.id+"/reviewer-assessments",{subject:"sp-s3-reviewer"})).status,404);
-  assert.equal((await request(rootA+"/"+openedB.body.item.id+"/reviewer-assessments",{subject:"sp-s3-reviewer",method:"POST",body:{clientRequestId:randomUUID(),reviewReference:"foreign.ref"}})).status,404);
+  assert.equal((await request(rootA+"/"+openedB.body.item.id+"/reviewer-assessments",{subject:"sp-s3-reviewer",method:"POST",body:{clientRequestId:randomUUID(),reviewReference:"foreign.ref",declarationId:declaration.body.item.id}})).status,404);
   await assert.rejects(()=>withTenant(a,"sp-s3-reviewer",c=>c.query("UPDATE securepay_reviewer_assessments SET review_reference='changed.ref' WHERE id=$1",[r.body.item.id])),/permission denied|append-only/i);
   const other=await request(rootA,{subject:"sp-s3-reviewer",method:"POST",body:{synthetic:true,clientRequestId:randomUUID(),jobReference:"job.self",claimReference:"claim.self"}});
   assert.equal(other.status,201);
