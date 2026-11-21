@@ -81,7 +81,7 @@ export function buildBuyerDemoSnapshot(state){
   return {id:c.id,name:c.name,period:c.period,
    contractSource:c.contractSource,invoiceSource:c.invoiceSource,
    payrollSource:c.payrollSource,materialSource:c.materialSource,
-   baselineCents:c.baselineCents,billedCents,invoiceReady:invoiceComplete,
+   baselineCents:c.baselineCents,billedCents,invoiceReady:invoiceComplete,payrollReady:payrollComplete,
    outstandingInvoiceCents,payrollPoolCents:c.payrollPoolCents,
    allocatedPayrollCents,payrollResidualCents,materialsCents:c.materialsCents,
    costCents:payrollComplete?costCents:null,ready,contributionCents,
