@@ -49,8 +49,8 @@ async function exercise(){
   key.kid=kid;key.alg="RS256";key.use="sig";
  }
  const jwks=secureServer({
-  key:readFileSync(join(staging,"server.key")),
-  cert:readFileSync(join(staging,"server.crt"))
+  key:readFileSync(join(staging,"issuer.key")),
+  cert:readFileSync(join(staging,"issuer.crt"))
  },(req,res)=>{
   if(req.url!=="/jwks"){res.writeHead(404).end();return;}
   res.writeHead(200,{"content-type":"application/json","cache-control":"no-store"});
@@ -177,6 +177,15 @@ function outer(){
   run("openssl",["x509","-req","-in",join(root,"server.csr"),
    "-CA",join(root,"ca.crt"),"-CAkey",join(root,"ca.key"),"-CAcreateserial",
    "-days","1","-out",join(root,"server.crt"),"-extfile",join(root,"server.ext")]);
+  // Separate issuer certificate avoids sharing a TLS private key between
+  // PostgreSQL (owned by its container UID) and the host HTTPS test server.
+  run("openssl",["req","-newkey","rsa:2048","-nodes",
+   "-subj","/CN=issuer-ci.invalid","-keyout",join(root,"issuer.key"),
+   "-out",join(root,"issuer.csr")]);
+  run("openssl",["x509","-req","-in",join(root,"issuer.csr"),
+   "-CA",join(root,"ca.crt"),"-CAkey",join(root,"ca.key"),"-CAcreateserial",
+   "-days","1","-out",join(root,"issuer.crt"),"-extfile",join(root,"server.ext")]);
+  chmodSync(join(root,"issuer.key"),0o600);
   const postgresUid=Number(run("docker",["run","--rm","--entrypoint","id","postgres:16-alpine","-u","postgres"]));
   assert.ok(Number.isSafeInteger(postgresUid)&&postgresUid>0);
   // Set restrictive mode while still owned by the unprivileged runner.
