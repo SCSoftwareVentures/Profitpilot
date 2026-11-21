@@ -96,6 +96,28 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   assert.equal((await request(ep,{subject:"sp-s2-owner",method:"POST",body:{...evidence,evidenceReference:"other.reference"}})).status,409);
   const listing=await request(ep,{subject:"sp-s2-owner"});assert.equal(listing.status,200);
   assert.equal(listing.body.items.length,1);assert.equal(listing.body.externalVerification,false);
+  const provenancePath=ep+"/"+created.body.item.id+"/provenance";
+  const provenanceBody={clientRequestId:randomUUID(),reportedOrigin:"reported_customer",acquisitionMethod:"operator_relay",sourceReference:"reported.source.001"};
+  assert.equal((await request(provenancePath,{subject:"sp-s2-reader",method:"POST",body:provenanceBody})).status,403);
+  assert.equal((await request(provenancePath,{subject:"sp-s2-owner",method:"POST",body:{...provenanceBody,identityVerified:true}})).status,400);
+  const first=await request(provenancePath,{subject:"sp-s2-owner",method:"POST",body:provenanceBody});
+  assert.equal(first.status,201,JSON.stringify(first));
+  assert.equal(first.body.item.origin_verified,false);assert.equal(first.body.item.job_authority_verified,false);
+  assert.equal(first.body.sourceIdentityVerified,false);assert.equal(first.body.paymentAuthority,false);
+  assert.match(first.body.item.metadata_sha256,/^[a-f0-9]{64}$/);
+  assert.equal((await request(provenancePath,{subject:"sp-s2-owner",method:"POST",body:provenanceBody})).status,200);
+  assert.equal((await request(provenancePath,{subject:"sp-s2-owner",method:"POST",body:{...provenanceBody,reportedOrigin:"reported_business"}})).status,409);
+  const provenanceList=await request(provenancePath,{subject:"sp-s2-owner"});
+  assert.equal(provenanceList.status,200);assert.equal(provenanceList.body.items.length,1);
+  assert.equal((await request(provenancePath+"?cursor="+randomUUID(),{subject:"sp-s2-owner"})).status,404);
+  assert.equal((await request(rootA+"/"+openedB.body.item.id+"/evidence/"+created.body.item.id+"/provenance",{subject:"sp-s2-owner"})).status,404);
+  const missingMetadata=await request(rootA+"/"+caseId+"/provenance-preflight",{subject:"sp-s2-owner"});
+  assert.equal(missingMetadata.status,200,JSON.stringify(missingMetadata));
+  assert.equal(missingMetadata.body.metadata.evidenceCount,1);
+  assert.equal(missingMetadata.body.metadata.itemsWithReportedProvenance,1);
+  assert.equal(missingMetadata.body.decisionReadiness,"blocked");
+  assert.equal(missingMetadata.body.partyToJobVerified,false);
+
   const untrustedPreflight=await request(preflightPath,{subject:"sp-s2-owner"});
   assert.equal(untrustedPreflight.body.evidence.matchingClaimReported,false,
    "A different opaque claim reference must not count as the case claim");
@@ -108,6 +130,13 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   const populatedPreflight=await request(preflightPath,{subject:"sp-s2-owner"});
   assert.equal(populatedPreflight.status,200,JSON.stringify(populatedPreflight));
   assert.equal(populatedPreflight.body.evidence.totalOperatorReports,4);
+  const provenanceIncomplete=await request(rootA+"/"+caseId+"/provenance-preflight",{subject:"sp-s2-owner"});
+  assert.equal(provenanceIncomplete.status,200);
+  assert.equal(provenanceIncomplete.body.metadata.evidenceCount,4);
+  assert.equal(provenanceIncomplete.body.metadata.itemsWithReportedProvenance,1);
+  assert.ok(provenanceIncomplete.body.blockingGates.includes("evidence_provenance_metadata_incomplete"));
+  assert.ok(provenanceIncomplete.body.blockingGates.includes("business_origin_report_missing"));
+
   assert.equal(populatedPreflight.body.evidence.matchingClaimReported,true);
   assert.equal(populatedPreflight.body.evidence.businessResponseReported,true);
   assert.equal(populatedPreflight.body.evidence.operatorReviewNoteReported,true);
@@ -177,6 +206,11 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   assert.equal(blockedReview.status,409);assert.ok(blockedReview.body.blockingGates.includes("reviewer_conflict_declared"));
   await assert.rejects(()=>withTenant(a,"sp-s4-conflicted",c=>c.query("INSERT INTO securepay_reviewer_assessments(tenant_id,case_id,client_request_id,reviewer_id,review_reference,evidence_count,evidence_snapshot_sha256,conflict_declaration_id) VALUES($1,$2,$3,private.actor_id(),'bypass.s4',4,$4,$5)",[a,caseId,randomUUID(),"a".repeat(64),noConflictLater.body.item.id])),/row-level security|permission denied/i);
   await assert.rejects(()=>withTenant(a,"sp-s3-reviewer",c=>c.query("UPDATE securepay_reviewer_declarations SET declaration_status='potential_conflict' WHERE id=$1",[declaration.body.item.id])),/permission denied|append-only/i);
+
+  await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query(
+   "UPDATE securepay_evidence_provenance_receipts SET reported_origin='reported_business' WHERE id=$1",[first.body.item.id])),/permission denied|append-only/i);
+  await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query(
+   "INSERT INTO securepay_evidence_provenance_receipts(tenant_id,case_id,evidence_id,client_request_id,recorded_by,reported_origin,acquisition_method,source_reference,metadata_sha256) VALUES($1,$2,$3,$4,private.actor_id(),'reported_customer','unknown','wrong.case',$5)",[a,openedB.body.item.id,created.body.item.id,randomUUID(),"a".repeat(64)])),/foreign key|row-level security|permission denied/i);
   const hidden=await withTenant(a,"sp-s2-owner",c=>c.query("SELECT count(*)::int AS n FROM securepay_case_rehearsals WHERE tenant_id=$1",[b]));
   assert.equal(hidden.rows[0].n,0);
   const denied=await withTenant(a,"sp-s2-reader",c=>c.query("SELECT count(*)::int AS n FROM securepay_case_rehearsals WHERE tenant_id=$1",[a]));
