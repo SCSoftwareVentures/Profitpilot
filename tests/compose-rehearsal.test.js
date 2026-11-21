@@ -47,6 +47,14 @@ test("B8 source provenance and buyer packaging depend on the new independent rec
  const ci=read(".github/workflows/ci.yml");
  assert.match(ci,/  compose_rehearsal:\n    name: Synthetic Compose boot and legacy-volume upgrade\n    needs: \[verify\]/);
  assert.match(ci,/run: bash scripts\/rehearse-compose-b8\.sh/);
- const matches=ci.match(/needs: \[verify, database, static_analysis, container_security, compose_rehearsal\]/g)||[];
- assert.equal(matches.length,2);
+ const gate="needs: [verify, database, static_analysis, container_security, compose_rehearsal]";
+ for(const name of ["provenance","buyer_demo"]){
+  const marker="  "+name+":\n";
+  const start=ci.indexOf(marker);
+  assert.ok(start>=0,"missing gated job "+name);
+  const remaining=ci.slice(start+marker.length);
+  const next=remaining.search(/\n  [a-z_]+:\n/);
+  const block=next>=0?remaining.slice(0,next):remaining;
+  assert.ok(block.includes(gate),name+" missing recovery prerequisite");
+ }
 });
