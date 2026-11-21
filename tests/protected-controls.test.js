@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {mkdtempSync,writeFileSync,rmSync,chmodSync,symlinkSync} from "node:fs";
 import {tmpdir} from "node:os";
 import {join} from "node:path";
-import {deploymentProfile,databaseConfig,readSecret,validMfa} from "../server/deployment.js";
+import {deploymentProfile,databaseConfig,readSecret,validMfa,protectedCorsOrigins} from "../server/deployment.js";
 test("protected profile rejects missing prerequisites and TLS overrides",()=>{
  const dir=mkdtempSync(join(tmpdir(),"pp-config-"));
  try{
@@ -40,4 +40,31 @@ test("mounted secret input is bounded and must be a nonempty regular UTF-8 file"
   assert.equal(readSecret("TEST_SECRET",env).length,8192);
   assert.throws(()=>readSecret("TEST_SECRET",{TEST_SECRET_FILE:dir}));
  }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test("B14 protected runtime rejects nonproduction NODE_ENV even with all security inputs",()=>{
+ const env={NODE_ENV:"production",PROFITPILOT_PROFILE:"protected",DATABASE_SSL:"true",
+  DATABASE_URL_FILE:"/unused/mount",TENANT_CONTEXT_HMAC_SECRET_FILE:"/unused/mount2",
+  AUTH_MFA_ACR:"verified-mfa",MALWARE_SCAN_MODE:"clamav"};
+ assert.equal(deploymentProfile(env).protectedMode,true);
+ for(const mode of ["test","development","",undefined])
+  assert.throws(()=>deploymentProfile({...env,NODE_ENV:mode}),/requires NODE_ENV=production/);
+ assert.equal(deploymentProfile({...env,CORS_ORIGIN:"https://dashboard.example.com"}).corsOrigins[0],
+   "https://dashboard.example.com");
+});
+
+test("B14 protected browser origins are exact HTTPS origins or empty-deny",()=>{
+ assert.deepEqual(protectedCorsOrigins(undefined),[]);
+ assert.deepEqual(protectedCorsOrigins(""),[]);
+ assert.deepEqual(protectedCorsOrigins("https://app.example.com, https://admin.example.com"),
+  ["https://app.example.com","https://admin.example.com"]);
+ for(const bad of [
+  "*","https://*.example.com","http://app.example.com",
+  "https://app.example.com/route","https://app.example.com/",
+  "https://admin:password@app.example.com","https://app.example.com?x=1",
+  "https://app.example.com#frag","https://app.example.com,https://app.example.com",
+  "https://app.example.com,,https://other.example.com",
+  "https://localhost","https://127.0.0.1","https://internal.localhost",
+  "https://app.example.com,"+"https://a.example.com,".repeat(9)+"https://z.example.com"
+ ])assert.throws(()=>protectedCorsOrigins(bad),bad);
 });

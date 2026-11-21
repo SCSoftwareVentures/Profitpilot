@@ -8,6 +8,7 @@ test("identity configuration rejects insecure, credential-bearing and non-test J
  for(const url of ["http://issuer.invalid/jwks","http://127.0.0.1/jwks","https://user:secret@issuer.invalid/jwks","https://issuer.invalid/jwks#fragment"])assert.throws(()=>identityConfig({...env,AUTH_JWKS_URL:url}));
  assert.equal(identityConfig({...env,NODE_ENV:"test",AUTH_JWKS_URL:"http://127.0.0.1/jwks"}).url.protocol,"http:");
  assert.throws(()=>identityConfig({...env,NODE_ENV:"test",AUTH_JWKS_URL:"http://external.invalid/jwks"}));
+ assert.throws(()=>identityConfig({...env,NODE_ENV:"test",PROFITPILOT_PROFILE:"protected",AUTH_JWKS_URL:"http://127.0.0.1/jwks"}));
 });
 test("identity subject and lifetime bounds",()=>{
  assert.ok(validSubject("provider|123"));for(const s of [""," ","a\nb","a\u0000b","x".repeat(256)])assert.equal(validSubject(s),false);
