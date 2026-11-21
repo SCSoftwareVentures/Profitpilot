@@ -140,6 +140,14 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const {checkOperatorReviewer}=await import("../src/securepay-review.js");
     const securepayCaseRowB=(await admin.query("SELECT id,tenant_id,opened_by,claim_reference,synthetic,funds_moved,status FROM securepay_case_rehearsals WHERE tenant_id=$1 AND id=$2",[tenantB,securepayCaseB])).rows[0];
     const securepayEvidenceB=(await admin.query("SELECT id,client_request_id,recorded_by,evidence_type,evidence_reference,externally_verified,recorded_at FROM securepay_evidence_rehearsals WHERE tenant_id=$1 AND case_id=$2 ORDER BY recorded_at,id",[tenantB,securepayCaseB])).rows;
+    const {reportedMetadataDigest}=await import("../src/securepay-provenance.js");
+    const provenanceEvidenceB=securepayEvidenceB.find(e=>e.evidence_type==='claim_reported');
+    const metadataB={tenantId:tenantB,caseId:securepayCaseB,evidenceId:provenanceEvidenceB.id,
+      actorId:userC,jobReference:'job.ci-tenantB',evidenceType:provenanceEvidenceB.evidence_type,
+      evidenceReference:provenanceEvidenceB.evidence_reference,reportedOrigin:'reported_customer',
+      acquisitionMethod:'document_reference_only',sourceReference:'source.ci-tenantB'};
+    await insertB("INSERT INTO securepay_evidence_provenance_receipts(tenant_id,case_id,evidence_id,client_request_id,recorded_by,reported_origin,acquisition_method,source_reference,metadata_sha256) VALUES($1,$2,$3,gen_random_uuid(),$4,$5,$6,$7,$8)",
+      [tenantB,securepayCaseB,provenanceEvidenceB.id,userC,metadataB.reportedOrigin,metadataB.acquisitionMethod,metadataB.sourceReference,reportedMetadataDigest(metadataB)]);
     const snapshotB=checkOperatorReviewer(securepayCaseRowB,securepayEvidenceB,independentB);
     assert.equal(snapshotB.eligibleForNonbindingOperatorReview,true,"tenant B review fixture must satisfy internal actor separation");
     await admin.query("UPDATE tenant_memberships SET role='reviewer' WHERE tenant_id=$1 AND user_id=$2",[tenantB,independentB]);
