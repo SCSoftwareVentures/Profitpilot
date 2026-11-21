@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createHash} from "node:crypto";
-import {mkdtempSync,readFileSync,writeFileSync,rmSync,readdirSync} from "node:fs";
+import {mkdtempSync,readFileSync,writeFileSync,rmSync,readdirSync,symlinkSync,mkdirSync} from "node:fs";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
 import {runPackaging} from "../scripts/package-buyer-demo.mjs";
@@ -45,5 +45,18 @@ test("B3 refuses altered outputs, wrong commits, missing files and extra files",
   runPackaging("build",out,sourceSha);
   writeFileSync(join(out,"extra-customer-data.csv"),"NOT AN ACTUAL RECORD");
   assert.throws(()=>runPackaging("verify",out,sourceSha),/unexpected/);
+ }finally{rmSync(root,{recursive:true,force:true});}
+});
+test("B3 rejects substituted symlinks and directories during verification",()=>{
+ const root=mkdtempSync(join(tmpdir(),"pp-buyer-nofollow-")),out=join(root,"share");
+ try{
+  runPackaging("build",out,sourceSha);
+  const guide=join(out,"README.txt");
+  rmSync(guide);
+  symlinkSync(join(out,"MANIFEST.json"),guide);
+  assert.throws(()=>runPackaging("verify",out,sourceSha),/ELOOP|symbolic link/i);
+  rmSync(guide);
+  mkdirSync(guide);
+  assert.throws(()=>runPackaging("verify",out,sourceSha),/altered/);
  }finally{rmSync(root,{recursive:true,force:true});}
 });
