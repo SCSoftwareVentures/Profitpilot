@@ -45,7 +45,7 @@ export function installSecurepayClaimRevocationRoutes(app,{membership,requireRol
  const preflight="/v1/tenants/:tenantId/prototype/securepay-party-job-trust/:caseId";
  app.get(preflight,...guard,async(req,res,next)=>{try{
   const t=req.membership.tenantId,id=req.params.caseId;
-  if(!uuid(id))return res.status(400).json({error:"Invalid case ID",debug:{type:typeof id,length:typeof id==="string"?id.length:null,params:Object.keys(req.params),pathSegmentCount:req.path.split("/").length}});
+  if(!uuid(id))return res.status(400).json({error:"Invalid case ID",debug:{type:typeof id,length:typeof id==="string"?id.length:null,groups:typeof id==="string"?id.split("-").map(x=>x.length):[],version:typeof id==="string"?id[14]:null,variant:typeof id==="string"?id[19]:null,params:Object.keys(req.params),pathSegmentCount:req.path.split("/").length}});
   const result=await withTenant(t,req.identity.subject,async c=>{
    const found=await c.query("SELECT id FROM securepay_case_rehearsals WHERE tenant_id=$1 AND id=$2",[t,id]);
    if(!found.rowCount)return {status:404,error:"Synthetic case unavailable"};
