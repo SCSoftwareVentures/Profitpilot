@@ -88,9 +88,11 @@ export function readSecret(name,env=process.env){
  const profile=deploymentProfile(env);
  const path=env[name+"_FILE"];
  if(path!==undefined&&path!==null&&path!==""){
-  if(Object.hasOwn(env,name))
-   throw new Error("Ambiguous secret configuration: "+name);
   const protectedMode=profile.protectedMode;
+  // Preserve prototype legacy semantics for a blank direct setting, but
+  // protected mode refuses even an empty direct-secret environment variable.
+  if(protectedMode?Object.hasOwn(env,name):Boolean(env[name]))
+   throw new Error("Ambiguous secret configuration: "+name);
   const initial=protectedMode?inspectProtectedSecretPath(path,name):null;
   // O_NONBLOCK avoids a malicious FIFO stalling process start. O_NOFOLLOW
   // rejects final symlinks even in prototype/test profiles.
