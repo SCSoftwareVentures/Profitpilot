@@ -58,5 +58,5 @@ test("B7 migration parser rejects omissions, duplicate destination numbers and w
 test("B7 Docker volume reuse is explicitly NOT labelled an automatically migrated database",()=>{
  const guide=read("docs/LOCAL_DEVELOPMENT.md");
  assert.match(guide,/existing volumes are not automatically migrated/i);
- assert.match(guide,/do not delete a volume containing data/i);
+ assert.match(guide,/never delete a volume containing data/i);
 });
