@@ -110,6 +110,9 @@ export async function runSyntheticRehearsal(argv,env=process.env){
    approverIdentityIndependentlyVerified:false,externallyWitnessed:false,
    primaryDbMutated:false,plaintextExported:false,
    outcome:"rejected",reason:"offline_rehearsal_denied",recovery:null};
+  // Verify the audit signer matches its independently supplied public key BEFORE
+  // contacting the restored DB; a signing-key mismatch cannot cause unlogged decrypt.
+  verifyRecoveryAudit(signRecoveryAudit(event,prior.previous,signerPrivate),signerPublic,prior.previous);
   let failure=null;
   try{
    const bundle=JSON.parse(privateFile(env.SECUREPAY_RECOVERY_APPROVAL_FILE));
@@ -135,8 +138,29 @@ export async function runSyntheticRehearsal(argv,env=process.env){
   unlinkSync(lockFile);
  }
 }
+
+// Verify an independently retained audit chain head, without DB or private keys.
+// An externally preserved expected head is required to detect tail truncation.
+export function runAuditVerification(argv){
+ const [command,auditDir,publicKeyPath,expectedHead]=argv;
+ if(command!=="verify-audit"||argv.length!==4||!/^[a-f0-9]{64}$/.test(expectedHead))
+  throw Error("Usage: verify-audit PRIVATE_AUDIT_DIR PUBLIC_KEY_FILE PREVIOUSLY_RECORDED_HEAD_SHA256");
+ privateAuditDirectory(auditDir);
+ const chain=readAuditChain(auditDir,privateFile(publicKeyPath,4096));
+ if(chain.count<1||chain.previous!==expectedHead)
+  throw Error("Audit head differs from independently recorded checkpoint");
+ return {verifiedSignedRecords:chain.count,head:chain.previous};
+}
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
- runSyntheticRehearsal(process.argv.slice(2)).then(x=>{
+ if(process.argv[2]==="verify-audit"){
+  try{
+   const result=runAuditVerification(process.argv.slice(2));
+   process.stdout.write("Signed synthetic recovery audit checked: "+result.verifiedSignedRecords+
+    " records; expected head verified\n");
+  }catch{
+   process.stderr.write("Signed recovery audit verification refused\n");process.exitCode=1;
+  }
+ }else runSyntheticRehearsal(process.argv.slice(2)).then(x=>{
   process.stdout.write("Synthetic offline custody verified: "+x.verifiedEncryptedCount+
    " records; signed audit SHA-256 "+x.auditSha256+"; chain head "+x.signedChainHead+"\n");
  }).catch(()=>{
