@@ -93,6 +93,14 @@ export function verifyRecoveryApproval(bundle,policy,scope,now=Date.now()){
   [...bundle.signatures].sort((a,b)=>a.role.localeCompare(b.role))
  ]))),signerIds:signerIds.sort(),legalHoldState:q.legalHoldState};
 }
+const validSummary=x=>shape(x,["schema","tenantId","receivedEncryptedCount","verifiedCount",
+ "aggregateSha256","plaintextExposed","operatorScanIndependent","storageOriginIndependent",
+ "legalRetentionVerified","paymentAuthority","decisionAuthority"])&&
+ x.schema==="profitpilot.s11.2.synthetic.restore.v1"&&uuid(x.tenantId)&&
+ Number.isSafeInteger(x.receivedEncryptedCount)&&x.receivedEncryptedCount>=1&&
+ x.receivedEncryptedCount<=64&&x.verifiedCount===x.receivedEncryptedCount&&
+ hex64(x.aggregateSha256)&&["plaintextExposed","operatorScanIndependent","storageOriginIndependent",
+ "legalRetentionVerified","paymentAuthority","decisionAuthority"].every(field=>x[field]===false);
 const auditBody=(event,prevDigest)=>{
  if(!shape(event,expectedEvent)||event.schema!=="profitpilot.s11.3.restore-audit.v1"||
   !Number.isSafeInteger(event.sequence)||event.sequence<1||
@@ -109,7 +117,7 @@ const auditBody=(event,prevDigest)=>{
   !["offline_rehearsal_denied",null].includes(event.reason)||
   (event.outcome==="rejected"&&(event.reason===null||event.recovery!==null))||
   (event.outcome==="verified_synthetic_recovery"&&(
-   event.reason!==null||!event.recovery||event.recovery.verifiedCount<1||
+   event.reason!==null||!validSummary(event.recovery)||event.recovery.tenantId!==event.tenantId||
    event.approvalKeyIds.length!==2||event.legalHoldState!=="no_declared_hold"||
    !hex64(event.approvalProofDigest)||!uuid(event.approvalRequestId)))||
   (prevDigest!==null&&!hex64(prevDigest)))
