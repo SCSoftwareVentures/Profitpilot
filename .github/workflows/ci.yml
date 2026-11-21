@@ -372,9 +372,28 @@ jobs:
           path: codeql-results
           if-no-files-found: warn
 
+  compose_rehearsal:
+    name: Synthetic Compose boot and legacy-volume upgrade
+    needs: [verify]
+    runs-on: ubuntu-latest
+    timeout-minutes: 18
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Rehearse fresh Compose bootstrap, synthetic old-volume upgrade and restore
+        run: bash scripts/rehearse-compose-b8.sh
+
   provenance:
     name: Source package, SBOM and signed provenance
-    needs: [verify, database, static_analysis, container_security]
+    needs: [verify, database, static_analysis, container_security, compose_rehearsal]
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -426,7 +445,7 @@ jobs:
 
   buyer_demo:
     name: CI-gated fictional buyer demo package
-    needs: [verify, database, static_analysis, container_security]
+    needs: [verify, database, static_analysis, container_security, compose_rehearsal]
     if: startsWith(github.ref, 'refs/heads/feature/buyer-') && github.event_name == 'push'
     runs-on: ubuntu-latest
     timeout-minutes: 5

@@ -114,3 +114,7 @@ The [B6 buyer source and dependency audit](docs/BUYER_ACQUISITION_B6.md) explain
 ## B7 Compose schema-parity correction (draft)
 
 [Clean Compose schema parity and consolidation note](docs/COMPOSE_SCHEMA_PARITY_B7.md) covers nine SecurePay SQL migrations previously absent from fresh Docker Compose initialisation. Automated checks compare all numbered migration files against both Compose mounts and CI application order. **Existing database volumes do not automatically migrate**; a live upgrade path and fresh Compose start are not claimed as tested.
+
+## B8 synthetic Compose boot and existing-volume migration rehearsal
+
+[CI-only B8 recovery test](docs/COMPOSE_RECOVERY_REHEARSAL_B8.md) exercises a disposable, fresh local Compose database and a synthetic pre-B7 database upgrade, with encrypted backup, wrong-key rejection, restored baseline and RLS/data-integrity checks. It is strictly non-production, uses no customer records and gives no permission to upgrade or deploy a real environment.
