@@ -13,7 +13,7 @@ POST requires exactly:
 
 The S6 GET `verify-signature` endpoint now reports two separate realities: `cryptographicSignatureValid` (may remain true after withdrawal), and `revoked`, `status` and `operationallyUsable=false`. The S6 list endpoint includes revocation state for each returned claim. Revocation never alters the historical Ed25519 signature, whose original statement is still auditable.
 
-GET `/v1/tenants/:tenantId/prototype/securepay-cases/:caseId/party-job-trust-preflight` counts customer/tradesperson claims and revoked claims. Every result **always** blocks production authorization; a count of signatures is never a verified identity. This is a fail-closed integration boundary, not an identity provider integration.
+GET `/v1/tenants/:tenantId/prototype/securepay-party-job-trust/:caseId` counts customer/tradesperson claims and revoked claims. Every result **always** blocks production authorization; a count of signatures is never a verified identity. This is a fail-closed integration boundary, not an identity provider integration.
 
 ## Limitations and remaining next priority
 

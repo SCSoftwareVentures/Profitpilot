@@ -42,7 +42,7 @@ export function installSecurepayClaimRevocationRoutes(app,{membership,requireRol
   },{repeatableRead:true});
   const {status,...rest}=result;res.status(status).json({...rest,...flags});
  }catch(e){next(e);}});
- const preflight="/v1/tenants/:tenantId/prototype/securepay-cases/:caseId/party-job-trust-preflight";
+ const preflight="/v1/tenants/:tenantId/prototype/securepay-party-job-trust/:caseId";
  app.get(preflight,...guard,async(req,res,next)=>{try{
   const t=req.membership.tenantId,id=req.params.caseId;
   if(!uuid(id))return res.status(400).json({error:"Invalid case ID"});

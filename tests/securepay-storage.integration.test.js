@@ -141,7 +141,7 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   assert.equal(verifiedProof.body.cryptographicSignatureValid,true);assert.equal(verifiedProof.body.trustVerified,false);
   assert.equal(verifiedProof.body.claimStatus,"untrusted_unverified");assert.equal(verifiedProof.body.revoked,false);
   assert.equal(verifiedProof.body.operationallyUsable,false);
-  const trustPreflight=rootA+"/"+caseId+"/party-job-trust-preflight";
+  const trustPreflight="/v1/tenants/"+a+"/prototype/securepay-party-job-trust/"+caseId;
   const beforeRevoke=await request(trustPreflight,{subject:"sp-s2-owner"});
   assert.equal(beforeRevoke.status,200,JSON.stringify(beforeRevoke));
   assert.equal(beforeRevoke.body.claims.total,1);assert.equal(beforeRevoke.body.claims.revoked,0);
@@ -173,7 +173,7 @@ test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only eviden
   const afterPreflight=await request(trustPreflight,{subject:"sp-s2-owner"});
   assert.equal(afterPreflight.status,200);assert.equal(afterPreflight.body.claims.revoked,1);
   assert.equal(afterPreflight.body.partyIdentityVerified,false);
-  assert.equal((await request(rootA+"/"+openedB.body.item.id+"/party-job-trust-preflight",{subject:"sp-s2-owner"})).status,404);
+  assert.equal((await request("/v1/tenants/"+a+"/prototype/securepay-party-job-trust/"+openedB.body.item.id,{subject:"sp-s2-owner"})).status,404);
   assert.equal((await request(rootA+"/"+openedB.body.item.id+"/evidence/"+created.body.item.id+"/signed-party-claims/"+claimCreated.body.item.id+"/revoke",{subject:"sp-s2-owner",method:"POST",body:{...revokePayload,clientRequestId:randomUUID()}})).status,404);
   await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query("DELETE FROM securepay_signed_claim_revocations WHERE id=$1",[revoked.body.item.id])),/permission denied|append-only/i);
   await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query("INSERT INTO securepay_signed_claim_revocations(tenant_id,case_id,evidence_id,claim_id,client_request_id,revoked_by,reason_code,revocation_reference) VALUES($1,$2,$3,$4,gen_random_uuid(),private.actor_id(),'operator_withdrawal','direct.bad')",[a,openedB.body.item.id,created.body.item.id,claimCreated.body.item.id])),/foreign key|row-level security|permission denied/i);
