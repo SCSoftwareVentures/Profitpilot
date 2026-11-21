@@ -70,8 +70,8 @@ function inspectProtectedSecretPath(path,name){
    throw Error("Writable protected secret ancestor directory: "+name);
  }
  const leaf=lstatSync(path);
- if(!leaf.isFile()||leaf.isSymbolicLink()||
-   (leaf.mode&0o777)!==0o400&&(leaf.mode&0o777)!==0o600)
+ if(!leaf.isFile()||leaf.isSymbolicLink()||(leaf.mode&0o7000)!==0||
+   ((leaf.mode&0o777)!==0o400&&(leaf.mode&0o777)!==0o600))
   throw Error("Protected mounted secret must have owner-only permissions and regular file type: "+name);
  if(leaf.uid!==effectiveUid||leaf.nlink!==1)
   throw Error("Protected mounted secret ownership or hardlink count is unsafe: "+name);
@@ -93,11 +93,12 @@ export function readSecret(name,env=process.env){
   // protected mode refuses even an empty direct-secret environment variable.
   if(protectedMode?Object.hasOwn(env,name):Boolean(env[name]))
    throw new Error("Ambiguous secret configuration: "+name);
-  const initial=protectedMode?inspectProtectedSecretPath(path,name):null;
-  // O_NONBLOCK avoids a malicious FIFO stalling process start. O_NOFOLLOW
-  // rejects final symlinks even in prototype/test profiles.
-  const fd=openSync(path,constants.O_RDONLY|constants.O_NONBLOCK|constants.O_NOFOLLOW);
+  let fd;
   try{
+   const initial=protectedMode?inspectProtectedSecretPath(path,name):null;
+   // O_NONBLOCK avoids a malicious FIFO stalling process start. O_NOFOLLOW
+   // rejects final symlinks even in prototype/test profiles.
+   fd=openSync(path,constants.O_RDONLY|constants.O_NONBLOCK|constants.O_NOFOLLOW);
    const before=fstatSync(fd);
    if(!before.isFile()||before.size<1||before.size>8192)
     throw new Error("Invalid mounted secret: "+name);
@@ -122,7 +123,14 @@ export function readSecret(name,env=process.env){
     throw Error("Protected mounted secret contains unsafe whitespace or controls: "+name);
    if(!value)throw new Error("Empty mounted secret: "+name);
    return value;
-  }finally{closeSync(fd);}
+  }catch(error){
+   // Native fs errors include full mount paths in their message. Expose only
+   // the safe logical secret name when protected startup fails.
+   if(protectedMode&&typeof error?.code==="string"&&
+      /^E(?:ACCES|NOENT|LOOP|NOTDIR|PERM|ISDIR|AGAIN|NAMETOOLONG|BADF)$/.test(error.code))
+    throw Error("Protected mounted secret filesystem access denied: "+name);
+   throw error;
+  }finally{if(fd!==undefined)closeSync(fd);}
  }
  if(profile.protectedMode)
   throw Error("Protected secret must be supplied through mounted file: "+name);
