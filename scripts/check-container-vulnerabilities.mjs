@@ -56,7 +56,14 @@ for(let i=0;i<paths.length;i++){
    !Array.isArray(target.tags)||!target.tags.includes(expectedImage)||
    !digest(target.imageID)||!digest(target.manifestDigest))
   throw Error("Scan target does not match image profile: "+path);
- if(target.imageID!==expectedIds[i])throw Error("Grype image ID differs from independently inspected Docker image: "+path+" inspected="+expectedIds[i]+" reported="+target.imageID);
+ // BuildKit with attestations uses an index digest for docker inspect .Id.
+ // Grype imageID is instead the platform-specific config digest. Match the
+ // independently inspected index digest to its exact repository digest.
+ const repositoryName=expectedImage.slice(0,expectedImage.lastIndexOf(":"));
+ const expectedRepoDigest=repositoryName+"@"+expectedIds[i];
+ if(!Array.isArray(target.repoDigests)||!target.repoDigests.includes(expectedRepoDigest))
+  throw Error("Grype repository digest differs from independently inspected Docker image: "+path+
+   " inspected="+expectedRepoDigest);
  if(observedImages.has(target.imageID))throw Error("Repeated image identity");
  observedImages.add(target.imageID);
  if(descriptor.name!=="grype"||descriptor.version!=="0.104.1"||
