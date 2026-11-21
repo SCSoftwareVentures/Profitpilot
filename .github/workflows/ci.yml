@@ -272,6 +272,16 @@ jobs:
       - name: Build isolated CI-only scanner fixture image
         run: docker build --target scanner-fixture -t profitpilot-scanner-fixture:ci .
 
+      - name: B24 rehearse protected listener and 16 fail-closed secret/auth startup cases
+        run: |
+          set -euo pipefail
+          # Real protected image, synthetic UID-owned read-only secret mounts, no
+          # external network and no exposed ports. Does not need a patched OpenSSL
+          # library to test strict startup guards; release scanner gate unchanged.
+          node --check scripts/rehearse-protected-startup-b24.mjs
+          CI=true PROFITPILOT_B24_IMAGE=profitpilot-protected:ci node scripts/rehearse-protected-startup-b24.mjs
+
+
       - name: Verify native scanner with isolated harmless test signature
         run: |
           set -euo pipefail
