@@ -18,6 +18,7 @@ import {installSecurepayProvenanceRoutes} from "./securepay-provenance-storage.j
 import {installSecurepaySignedPartyRoutes} from "./securepay-signed-party-storage.js";
 import {installSecurepayClaimRevocationRoutes} from "./securepay-claim-revocation-storage.js";
 import {installSecurepayIssuerRoutes} from "./securepay-issuer-storage.js";
+import {installSecurepayFileCustodyRoutes} from "./securepay-file-custody-storage.js";
 import {validateInvoiceRows,validatePayrollRows,reconcilePayroll,isIsoDate} from "../src/engine.js";
 
 import {classifyInvoiceIdentity} from "../src/invoice-identity.js";
@@ -563,6 +564,7 @@ installSecurepayProvenanceRoutes(app,{membership,withTenant,requireRole});
 installSecurepaySignedPartyRoutes(app,{membership,withTenant,requireRole});
 installSecurepayClaimRevocationRoutes(app,{membership,withTenant,requireRole});
 installSecurepayIssuerRoutes(app,{membership,withTenant,requireRole});
+installSecurepayFileCustodyRoutes(app,{membership,withTenant,requireRole,scannerEnabled:profile.scannerEnabled});
 
 app.use((err,req,res,next)=>{const id=randomUUID();process.stderr.write(JSON.stringify({event:"request_error",id,code:typeof err.code==="string"&&/^[A-Z0-9_]{1,30}$/.test(err.code)?err.code:"REQUEST_ERROR"})+"\n");const status=["23505","40001","40P01"].includes(err.code)?409:(Number.isInteger(err.status)&&err.status>=400&&err.status<500?err.status:500);res.status(status).json({error:status===409?"Conflicting record; refresh and review the current state":status===413?"Request body exceeds size limit":status===415?"Unsupported request encoding or media type":status<500?"Request rejected":"Internal server error",reference:id});});
 const port=Number(process.env.PORT||8080);

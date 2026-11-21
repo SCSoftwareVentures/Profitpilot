@@ -140,6 +140,12 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const {checkOperatorReviewer}=await import("../src/securepay-review.js");
     const securepayCaseRowB=(await admin.query("SELECT id,tenant_id,opened_by,claim_reference,synthetic,funds_moved,status FROM securepay_case_rehearsals WHERE tenant_id=$1 AND id=$2",[tenantB,securepayCaseB])).rows[0];
     const securepayEvidenceB=(await admin.query("SELECT id,client_request_id,recorded_by,evidence_type,evidence_reference,externally_verified,recorded_at FROM securepay_evidence_rehearsals WHERE tenant_id=$1 AND case_id=$2 ORDER BY recorded_at,id",[tenantB,securepayCaseB])).rows;
+    const custodyFixtureB=Buffer.from("CI S9 synthetic tenant-B custody.\\n");
+    const custodyHashB=createHash("sha256").update(custodyFixtureB).digest("hex");
+    const custodyEvidenceB=(await admin.query("SELECT id FROM securepay_evidence_rehearsals WHERE tenant_id=$1 AND case_id=$2 AND evidence_type='claim_reported' LIMIT 1",[tenantB,securepayCaseB])).rows[0].id;
+    await insertB("INSERT INTO securepay_evidence_custody_receipts(tenant_id,case_id,evidence_id,client_request_id,received_by,sha256,byte_count,media_type,scan_status,original_bytes) VALUES($1,$2,$3,gen_random_uuid(),$4,$5,$6,'text/plain','scanner_reported_clean',$7)",
+      [tenantB,securepayCaseB,custodyEvidenceB,userC,custodyHashB,custodyFixtureB.length,custodyFixtureB]);
+
     const {reportedMetadataDigest}=await import("../src/securepay-provenance.js");
     const provenanceEvidenceB=securepayEvidenceB.find(e=>e.evidence_type==='claim_reported');
     const metadataB={tenantId:tenantB,caseId:securepayCaseB,evidenceId:provenanceEvidenceB.id,
