@@ -5,7 +5,7 @@ export function identityConfig(env=process.env){
  const {AUTH_ISSUER,AUTH_AUDIENCE,AUTH_JWKS_URL}=env;
  if(!AUTH_ISSUER||!AUTH_AUDIENCE||!AUTH_JWKS_URL)throw new Error("Authentication is not configured");
  const url=new URL(AUTH_JWKS_URL),issuer=new URL(AUTH_ISSUER);
- const localTest=env.NODE_ENV==="test"&&url.protocol==="http:"&&["127.0.0.1","[::1]","localhost"].includes(url.hostname);
+ const localTest=env.NODE_ENV==="test"&&env.PROFITPILOT_PROFILE!=="protected"&&url.protocol==="http:"&&["127.0.0.1","[::1]","localhost"].includes(url.hostname);
  if((url.protocol!=="https:"&&!localTest)||url.username||url.password||url.hash||
  issuer.protocol!=="https:"||issuer.username||issuer.password||issuer.hash)throw new Error("Invalid authentication configuration");
  return {issuer:AUTH_ISSUER,audience:AUTH_AUDIENCE,url};
