@@ -110,3 +110,7 @@ The [B5 layout investigation and test boundary](docs/BUYER_MOBILE_LAYOUT_B5.md) 
 ## B6 reproducible acquisition inventory (draft)
 
 The [B6 buyer source and dependency audit](docs/BUYER_ACQUISITION_B6.md) explains how the offline `npm run audit:buyer` command inventories tracked file hashes, npm lockfile licences and outstanding IP, customer-demand, accessibility and production clearance gates. No library metadata, CI success or fictional demonstration establishes transfer rights or a production-ready application.
+
+## B7 Compose schema-parity correction (draft)
+
+[Clean Compose schema parity and consolidation note](docs/COMPOSE_SCHEMA_PARITY_B7.md) covers nine SecurePay SQL migrations previously absent from fresh Docker Compose initialisation. Automated checks compare all numbered migration files against both Compose mounts and CI application order. **Existing database volumes do not automatically migrate**; a live upgrade path and fresh Compose start are not claimed as tested.
