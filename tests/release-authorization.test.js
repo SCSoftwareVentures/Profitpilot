@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {createHash,generateKeyPairSync,randomBytes,sign} from "node:crypto";
+import {generateKeyPairSync,randomBytes,sign} from "node:crypto";
+import {mkdtempSync,writeFileSync,symlinkSync,rmSync} from "node:fs";
+import {tmpdir} from "node:os";
+import {join,resolve} from "node:path";
+import {verifyReleaseReviewFiles} from "../scripts/verify-release-review.mjs";
 import {loadReleaseReviewPolicy,releaseReviewBytes,verifyReleaseReview} from "../src/release-authorization.js";
 
 const person=()=>generateKeyPairSync("ed25519");
@@ -110,4 +114,24 @@ test("B13 rejects malformed request shape, duplicate or missing evidence, noncan
   assert.throws(()=>releaseReviewBytes({...b.request,...changes}),/Invalid or incomplete/);
  const changed={...b,request:{...b.request,nonce:"X".repeat(32)}};
  assert.throws(()=>verifyReleaseReview(changed,policy,expected));
+});
+
+test("B13 offline verifier requires trusted external files and rejects symlink substitution",()=>{
+ const dir=mkdtempSync(join(tmpdir(),"profitpilot-b13-"));
+ try{
+  const file1=join(dir,"reviewer-policy.json"),file2=join(dir,"signed-bundle.json");
+  writeFileSync(file1,JSON.stringify(policyJson),{mode:0o600});
+  writeFileSync(file2,JSON.stringify(signedRequest()),{mode:0o600});
+  const env={PROFITPILOT_RELEASE_REVIEW_POLICY_FILE:file1,
+   PROFITPILOT_RELEASE_REVIEW_BUNDLE_FILE:file2};
+  const good=verifyReleaseReviewFiles(expected,env);
+  assert.equal(good.cryptographicSignaturesVerified,true);
+  assert.equal(good.deploymentAuthorized,false);
+  assert.throws(()=>verifyReleaseReviewFiles(expected,{}),/separate out-of-repository/);
+  assert.throws(()=>verifyReleaseReviewFiles(expected,{...env,PROFITPILOT_RELEASE_REVIEW_BUNDLE_FILE:file1}),/separate out-of-repository/);
+  const link=join(dir,"link.json");symlinkSync(file1,link);
+  assert.throws(()=>verifyReleaseReviewFiles(expected,{...env,PROFITPILOT_RELEASE_REVIEW_POLICY_FILE:link}));
+  assert.throws(()=>verifyReleaseReviewFiles(expected,{...env,PROFITPILOT_RELEASE_REVIEW_POLICY_FILE:
+   resolve("src/release-authorization.js")}),/inside editable source tree/);
+ }finally{rmSync(dir,{force:true,recursive:true});}
 });
