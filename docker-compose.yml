@@ -37,6 +37,15 @@ services:
       - ./database/migrations/022_privacy_case_evidence_gate.sql:/docker-entrypoint-initdb.d/024-privacy-evidence-gate.sql:ro
       - ./database/migrations/023_calculation_restatement.sql:/docker-entrypoint-initdb.d/025-calculation-restatement.sql:ro
       - ./database/migrations/024_unified_report_snapshots.sql:/docker-entrypoint-initdb.d/026-unified-reports.sql:ro
+      - ./database/migrations/025_securepay_evidence_register.sql:/docker-entrypoint-initdb.d/027-securepay-evidence-register.sql:ro
+      - ./database/migrations/026_securepay_reviewer_assessments.sql:/docker-entrypoint-initdb.d/028-securepay-reviewer-assessments.sql:ro
+      - ./database/migrations/027_securepay_conflict_declarations.sql:/docker-entrypoint-initdb.d/029-securepay-conflict-declarations.sql:ro
+      - ./database/migrations/028_securepay_reported_provenance.sql:/docker-entrypoint-initdb.d/030-securepay-reported-provenance.sql:ro
+      - ./database/migrations/029_securepay_signed_party_claims.sql:/docker-entrypoint-initdb.d/031-securepay-signed-party-claims.sql:ro
+      - ./database/migrations/030_securepay_signed_claim_revocations.sql:/docker-entrypoint-initdb.d/032-securepay-signed-claim-revocations.sql:ro
+      - ./database/migrations/031_securepay_job_issuer_attestations.sql:/docker-entrypoint-initdb.d/033-securepay-job-issuer-attestations.sql:ro
+      - ./database/migrations/032_securepay_evidence_custody.sql:/docker-entrypoint-initdb.d/034-securepay-evidence-custody.sql:ro
+      - ./database/migrations/033_securepay_encrypted_custody.sql:/docker-entrypoint-initdb.d/035-securepay-encrypted-custody.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U profitpilot_admin -d profitpilot"]
       interval: 5s

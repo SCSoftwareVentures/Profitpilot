@@ -44,6 +44,17 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Validate local Compose syntax without starting services
+        env:
+          POSTGRES_ADMIN_PASSWORD: ci-placeholder-admin
+          POSTGRES_APP_PASSWORD: ci-placeholder-runtime
+          TENANT_CONTEXT_HMAC_SECRET: ci-placeholder-tenant-signing-key
+          CORS_ORIGIN: http://localhost:8080
+          AUTH_ISSUER: https://example.invalid/
+          AUTH_AUDIENCE: profitpilot-api
+          AUTH_JWKS_URL: https://example.invalid/keys
+        run: docker compose -f docker-compose.yml config --quiet
+
   database:
     name: PostgreSQL migrations and tenant RLS
     runs-on: ubuntu-latest
