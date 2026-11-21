@@ -158,7 +158,10 @@ try{
   {MALWARE_SCAN_MODE:"disabled"},/Protected profile requires database TLS/);
  negative("untrusted JWKS host",
   {AUTH_JWKS_URL:"https://127.0.0.1/jwks"},/Protected identity endpoints require trusted nonlocal DNS hosts/);
- console.log("B24 PASS: protected offline startup and 16 distinct startup denials; zero external network");
+ negative("global TLS verification disabled",
+  {NODE_TLS_REJECT_UNAUTHORIZED:"0"},
+  /Protected profile forbids disabling TLS certificate verification/);
+ console.log("B24+B25 PASS: protected offline startup and 17 distinct startup denials; zero external network");
 }catch(error){
  console.error("B24 FAIL:",error.message);
  process.exitCode=1;

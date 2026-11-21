@@ -150,6 +150,15 @@ jobs:
           # because the API integration suite rotates/revokes tenant signing keys.
           npm run test:integration
 
+      - name: B25 independently exercise real TLS PostgreSQL and HTTPS OIDC/JWKS against disposable staging
+        run: |
+          set -euo pipefail
+          # No external provider, public exposure, subscription or production DB.
+          # This is a loopback-only TLS PostgreSQL container and synthetic HTTPS
+          # identity authority with an ephemeral CA and no retained credentials.
+          node --check scripts/rehearse-protocol-staging-b25.mjs
+          CI=true node scripts/rehearse-protocol-staging-b25.mjs
+
       - name: Rehearse encrypted synthetic database backup and restore
         env:
           PGPASSWORD: ci-admin-password
