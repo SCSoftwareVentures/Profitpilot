@@ -137,7 +137,7 @@ const visit=(root,predicate)=>{
 };
 test("B1 embedded DOM walkthrough actually changes displayed financial results on simulated decisions",()=>{
  const html=generated();
- const code=html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
+ const code=html.match(/<script>([\s\S]*?)<\/script>/i)?.[1];
  assert.ok(code,"standalone inline script exists");
  const selectors=["reset","export","kpis","coverage","portfolio-status",
   "exceptions","exception-count","decision-log","contract-rows","live-status"];
