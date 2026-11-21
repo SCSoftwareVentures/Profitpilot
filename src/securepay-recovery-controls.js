@@ -17,7 +17,7 @@ const expectedEvent=["schema","sequence","recordedAt","tenantId","operatorReport
 const roles=["custodian","privacy-reviewer"];
 
 function publicKeyObject(pem){
- const key=createPublicKey(pem);
+ const key=pem?.type==="public"?pem:createPublicKey(pem);
  if(key.asymmetricKeyType!=="ed25519")throw Error("Ed25519 public key required");
  return key;
 }
@@ -62,7 +62,7 @@ export function recoveryApprovalBytes(req){
 }
 // Signing helper is test/tooling only: no private key accepted over an HTTP API.
 export function signRecoveryApprovalRequest(request,privateKey){
- const key=createPrivateKey(privateKey);
+ const key=privateKey?.type==="private"?privateKey:createPrivateKey(privateKey);
  if(key.asymmetricKeyType!=="ed25519")throw Error("Ed25519 signing key required");
  return sign(null,recoveryApprovalBytes(request),key).toString("base64");
 }
@@ -126,7 +126,7 @@ const auditBody=(event,prevDigest)=>{
   expectedEvent.map(k=>event[k])]),"utf8");
 }
 export function signRecoveryAudit(event,prevDigest,signingKey){
- const key=createPrivateKey(signingKey);
+ const key=signingKey?.type==="private"?signingKey:createPrivateKey(signingKey);
  if(key.asymmetricKeyType!=="ed25519")throw Error("Ed25519 audit key required");
  const bytes=auditBody(event,prevDigest);
  return {event,previousDigest:prevDigest,bodyDigest:sha(bytes),
