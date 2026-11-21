@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import {randomBytes,createHash} from "node:crypto";
-import {gzipSync} from "node:zlib";
+import {createHash} from "node:crypto";
+import {execFileSync} from "node:child_process";
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,readdirSync,rmSync,symlinkSync} from "node:fs";
 import {join} from "node:path";
 import {tmpdir} from "node:os";
@@ -24,7 +24,8 @@ function evidence(){
   saleReadiness:"PENDING_INDEPENDENT_DUE_DILIGENCE"
  };
  const sbom={bomFormat:"CycloneDX",specVersion:"1.5",components:[{name:"synthetic-only",version:"0"}]};
- writeFileSync(join(staging,"ProfitPilot_Source.tar.gz"),gzipSync(randomBytes(512)));
+ writeFileSync(join(staging,"ProfitPilot_Source.tar.gz"),execFileSync("git",["archive","--format=tar.gz","--prefix=profitpilot/","HEAD"],
+    {cwd:new URL("../",import.meta.url),maxBuffer:32*1024*1024}));
  writeFileSync(join(staging,"dependencies.cdx.json"),JSON.stringify(sbom));
  writeFileSync(join(staging,"acquisition-inventory.json"),JSON.stringify(inventory));
  return {root,staging,out,inventory,sbom};

@@ -3,6 +3,7 @@
 import {createHash} from "node:crypto";
 import {readFileSync,openSync,readSync,fstatSync,closeSync,writeFileSync,mkdirSync,readdirSync,constants} from "node:fs";
 import {dirname,join,resolve} from "node:path";
+import {checkGitSourceArchive} from "../src/git-source-archive.js";
 import {fileURLToPath} from "node:url";
 
 const ROOT=resolve(dirname(fileURLToPath(import.meta.url)),"..");
@@ -42,8 +43,7 @@ function inputs(dir,sha){
  if(readdirSync(dir).sort().join("\n")!==[...INPUTS].sort().join("\n"))
   reject("input staging directory contains unexpected files");
  const archive=files.get(INPUTS[0]);
- if(archive.length<128||archive[0]!==0x1f||archive[1]!==0x8b)
-  reject("source archive must be a nonempty gzip archive");
+ try{checkGitSourceArchive(archive);}catch(error){reject(error.message);}
  const sbom=parsedJson(files.get(INPUTS[1]),"SBOM");
  if(sbom.bomFormat!=="CycloneDX"||!Array.isArray(sbom.components)||sbom.components.length===0)
   reject("CycloneDX dependency evidence missing");
