@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0b1b26">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta name="description" content="ProfitPilot evidence-first contract economics walkthrough. Fictional, local-only, non-production demonstration.">
+<title>ProfitPilot | Evidence-first buyer walkthrough</title>
+<style>
+:root{color-scheme:light;--navy:#0b1b26;--slate:#435563;--muted:#60727e;--paper:#fff;--bg:#f2f5f6;--teal:#0d635a;--border:#dae2e4;--mint:#ebf6f2;--amber:#91591d;--amber-bg:#fff4e7}
+*{box-sizing:border-box}html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}body{margin:0;background:var(--bg);color:var(--navy);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif}
+button{font:inherit}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #158e7b;outline-offset:3px}
+.wrap{max-width:1130px;margin:auto;padding:0 20px}.top{background:var(--navy);color:#fff}.topin{display:flex;justify-content:space-between;gap:20px;align-items:center;padding-top:17px;padding-bottom:17px;flex-wrap:wrap}
+.brand{font-weight:800;letter-spacing:-.7px;font-size:21px;display:flex;gap:10px;align-items:center}.mark{background:#36b79b;border-radius:9px;color:var(--navy);display:grid;place-items:center;width:33px;height:33px;font-size:19px}
+.top small{color:#b5cdc8;font-weight:700;letter-spacing:.8px;font-size:11px}.hero{padding:44px 0 26px}.eyebrow{text-transform:uppercase;letter-spacing:1.4px;color:var(--teal);font-weight:800;font-size:11px}
+h1{font-size:clamp(30px,4vw,48px);line-height:1.09;letter-spacing:-1.6px;max-width:760px;margin:12px 0 14px}h2{font-size:20px;letter-spacing:-.5px;margin:0}h3{font-size:15px;margin:0}
+.lead{font-size:16px;color:var(--slate);max-width:710px;margin:0}.disclaimer{margin-top:23px;border-left:4px solid #d99b46;background:#fff9ef;padding:12px 15px;color:#705023;font-size:13px}
+.toolbar{display:flex;gap:10px;margin:20px 0 0;flex-wrap:wrap;align-items:center}.btn{border:1px solid #bbc9cc;border-radius:10px;background:#fff;color:var(--navy);padding:11px 16px;min-height:44px;cursor:pointer;font-weight:680}.btn:hover{border-color:var(--teal);color:var(--teal)}.btn.primary{background:var(--teal);border-color:var(--teal);color:#fff}.btn.primary:hover{background:#08473f}.btn:disabled{opacity:.65;cursor:not-allowed}
+.layout{display:grid;grid-template-columns:minmax(0,1fr);gap:17px;padding-bottom:75px}.layout>*{min-width:0}.sectionhead{display:flex;align-items:end;justify-content:space-between;gap:15px;margin-bottom:15px;flex-wrap:wrap}.sectionhead p{margin:3px 0 0;color:var(--muted);font-size:13px}
+.panel{min-width:0;background:var(--paper);border:1px solid var(--border);border-radius:16px;padding:21px}.kpis{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+.kpi{min-height:162px}.kpi .label{font-size:13px;color:var(--slate);font-weight:650}.kpi .number{font-size:clamp(20px,2.7vw,31px);letter-spacing:-.8px;font-weight:780;margin:13px 0 4px;line-height:1.1}.kpi .explain{font-size:12px;color:var(--muted);margin:7px 0 0;max-width:300px}
+.coverage{display:flex;flex-wrap:wrap;gap:9px;margin-top:15px}.chip{font-size:12px;border:1px solid var(--border);border-radius:99px;padding:5px 10px;background:#fff;color:var(--slate)}.chip.ready{background:var(--mint);border-color:#d3e9de;color:var(--teal)}
+.columns{display:grid;grid-template-columns:minmax(0,1.07fr) minmax(0,.93fr);gap:17px}.columns>*{min-width:0}.stack{display:grid;gap:12px}
+.exrow{border:1px solid var(--border);border-radius:11px;padding:15px}.exrow.warn{border-color:#ecd7bb;background:#fffdfa}
+.exmeta{font-size:12px;color:var(--muted);margin:7px 0}.exdetail{font-size:13px;color:var(--slate);margin:8px 0 12px}.exhead{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.pill{font-size:11px;border-radius:99px;padding:4px 9px;font-weight:700;background:var(--amber-bg);color:var(--amber);white-space:nowrap}.pill.exclude{background:#edf0f2;color:var(--slate)}
+.small{font-size:12px;color:var(--muted)}.callout{font-size:12px;color:var(--slate);border:1px solid #dbe8e7;background:#f4faf8;padding:11px 13px;border-radius:10px}
+.tablebox{max-width:100%;min-width:0;overflow-x:auto}table{width:100%;border-collapse:collapse;min-width:740px}th,td{padding:14px 10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top;font-size:12px}
+thead th{text-transform:uppercase;letter-spacing:.7px;font-size:10px;color:var(--muted)}tbody th{font-size:13px}tr:last-child th,tr:last-child td{border-bottom:0}td.metric{font-variant-numeric:tabular-nums;white-space:nowrap}
+.status{font-size:11px;font-weight:750;color:var(--teal)}.status.held{color:var(--amber)}
+details{margin-top:7px}summary{cursor:pointer;color:var(--teal);font-size:12px;font-weight:700;touch-action:manipulation}
+.sources{padding:8px 0;margin:0;font-weight:400;color:var(--slate);font-size:11px;line-height:1.8}
+.logrow{border-top:1px solid var(--border);padding:12px 0}.logrow:first-child{border:0}.logrow strong{font-size:12px;display:block}.logrow span{font-size:12px;color:var(--slate)}
+.footer{background:var(--navy);color:#b9ccc9;padding:23px 0;font-size:12px}.footer strong{color:#fff}
+.tour{border:1px solid #a7cfc3;background:#eaf6f1;border-radius:16px;padding:19px 21px}
+.tourbadge{font-size:11px;text-transform:uppercase;letter-spacing:1px;font-weight:800;color:var(--teal)}
+.tour h2{margin:5px 0 6px}.tour p{margin:0;font-size:13px;color:var(--slate)}
+.tourstatus{margin-top:10px!important;font-weight:720;color:var(--navy)!important}
+.evidence-preview{padding-top:10px}.evidence-preview pre{max-width:100%;max-height:320px;overflow:auto;border-radius:10px;background:#edf2f3;border:1px solid var(--border);padding:12px;font-size:11px;user-select:text;-webkit-user-select:text;white-space:pre-wrap;overflow-wrap:anywhere}
+@media(max-width:780px){.hero{padding-top:28px}.columns{grid-template-columns:minmax(0,1fr)}.kpis{grid-template-columns:minmax(0,1fr)}.kpi{min-height:auto}.panel{padding:16px}.toolbar .btn{width:100%}.lead{font-size:15px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<header class="top"><div class="wrap topin"><div class="brand"><span class="mark" aria-hidden="true">P</span>ProfitPilot</div><small>BUYER WALKTHROUGH B1 · FICTIONAL DATA</small></div></header>
+<main class="wrap">
+<div class="hero"><div class="eyebrow">Contract economics · source-aware review</div>
+<h1>Know what the numbers prove. And what they don't.</h1>
+<p class="lead">Walk through a fictional three-contract portfolio, resolve two source-review exceptions, and see how ProfitPilot withholds unsupported financial totals until coverage is complete.</p>
+<div class="disclaimer"><strong>Demonstration, not a deployed product.</strong> All amounts, sources, users and decisions are fictional. This file runs locally in the browser, has no login, external service or payment function, and must not receive real customer data.</div>
+<div class="toolbar"><button type="button" id="reset" class="btn">Reset fictional scenario</button><button type="button" id="export" class="btn primary">Export synthetic evidence summary (JSON)</button></div>
+</div>
+<div class="layout">
+<section class="tour" aria-labelledby="tour-title"><div class="tourbadge">60-second guided review · local-only</div><h2 id="tour-title">1. Spot the evidence gap</h2><p id="tour-step">Inspect withheld portfolio totals and source coverage before touching a reviewer action.</p><p class="tourstatus" id="tour-progress" aria-live="polite">Step 1 of 3 · Not a production approval</p></section>
+<section aria-labelledby="portfolio-title"><div class="sectionhead"><div><h2 id="portfolio-title">Portfolio evidence position</h2><p>October 2026 · AUD · contract × site × period</p></div><span class="chip" id="portfolio-status">Coverage incomplete</span></div>
+<div class="kpis" id="kpis" aria-live="polite"></div><div class="coverage" id="coverage"></div></section>
+<div class="columns">
+<section class="panel" aria-labelledby="attention-title"><div class="sectionhead"><div><h2 id="attention-title">Review exceptions</h2><p>Decisions are simulated and temporary.</p></div><span class="chip" id="exception-count">3 items</span></div><div id="exceptions" class="stack"></div></section>
+<section class="panel" aria-labelledby="ledger-title"><div class="sectionhead"><div><h2 id="ledger-title">Decision history</h2><p>Browser-memory only; not an immutable audit trail.</p></div></div>
+<div class="callout">Confirmed choices change the fictional calculation immediately. A human must still validate source identity, permissions and the actual evidence in a real deployment.</div><div id="decision-log" aria-live="polite"></div></section>
+</div>
+<section class="panel" aria-labelledby="contracts-title"><div class="sectionhead"><div><h2 id="contracts-title">Contract-by-contract reconciliation</h2><p>Open each source list to inspect the fictional evidence references.</p></div></div><div class="tablebox"><table><thead><tr><th scope="col">Contract and sources</th><th scope="col">Baseline</th><th scope="col">Confirmed billed</th><th scope="col">Payroll residual</th><th scope="col">Contribution</th><th scope="col">Status</th></tr></thead><tbody id="contract-rows"></tbody></table></div></section>
+<section class="panel" aria-labelledby="boundary-title"><h2 id="boundary-title">What this demonstration does—and does not—prove</h2>
+<p class="small">The calculation uses whole Australian dollar cents. Unmatched invoice candidates never count as confirmed billed evidence; unallocated payroll never vanishes from the payroll pool; unapproved variations are excluded from confirmed billing. Portfolio contribution is unavailable until all contracts meet the selected fictional source-coverage gates.</p>
+<p class="small"><strong>Not established:</strong> real customer demand, verified source issuer identity, payroll-law compliance, independent approvals, production authentication, data custody, regulated payment capability, legal clearance or independent security certification.</p>
+<details class="evidence-preview"><summary>View the current synthetic evidence JSON on this device</summary><p class="small">Selectable text provides a fallback when local file downloads are unsupported by your browser. This contains fictional records only.</p><pre id="evidence-json" aria-label="Synthetic evidence JSON in plain text"></pre></details>
+</section>
+</div>
+<p class="small" id="live-status" role="status" aria-live="polite" style="padding-bottom:24px">Fictional demo ready.</p>
+</main><footer class="footer"><div class="wrap"><strong>ProfitPilot — Fictional buyer scenario.</strong> All calculations are illustrative and cannot be relied upon for commercial, financial, tax, payroll or legal decisions.</div></footer>
+<script>
+"use strict";
+/*__BUYER_DEMO_CORE__*/
+const money=cents=>cents===null?"Unavailable":new Intl.NumberFormat("en-AU",
+ {style:"currency",currency:"AUD",minimumFractionDigits:2,maximumFractionDigits:2}).format(cents/100);
+let state=createBuyerDemoState();
+function el(tag,cls,text){
+ // Closed tag allowlist: no user-derived element names or executable/embedded nodes.
+ let node;
+ switch(tag){
+  case "a":node=document.createElement("a");break;
+  case "article":node=document.createElement("article");break;
+  case "button":node=document.createElement("button");break;
+  case "details":node=document.createElement("details");break;
+  case "div":node=document.createElement("div");break;
+  case "h3":node=document.createElement("h3");break;
+  case "p":node=document.createElement("p");break;
+  case "span":node=document.createElement("span");break;
+  case "strong":node=document.createElement("strong");break;
+  case "summary":node=document.createElement("summary");break;
+  case "td":node=document.createElement("td");break;
+  case "th":node=document.createElement("th");break;
+  case "tr":node=document.createElement("tr");break;
+  default:throw new Error("Unsupported presentation element");
+ }
+ if(cls)node.className=cls;
+ if(text!==undefined)node.textContent=String(text);
+ return node;
+}
+function clear(node){while(node.firstChild)node.removeChild(node.firstChild);}
+function kpi(label,amount,detail){
+ const card=el("article","panel kpi");
+ card.append(el("div","label",label),el("div","number",amount),
+  el("p","explain",detail));
+ return card;
+}
+function chip(text,complete=false){
+ return el("span","chip"+(complete?" ready":""),text);
+}
+function render(){
+ const snapshot=buildBuyerDemoSnapshot(state),t=snapshot.totals,c=snapshot.coverage;
+ // Guidance follows the actual simulated decision state. There is no independent
+ // scripted success status that could contradict incomplete source coverage.
+ const tourTitle=document.querySelector("#tour-title");
+ const tourStep=document.querySelector("#tour-step");
+ const tourProgress=document.querySelector("#tour-progress");
+ if(state.invoice==="held"){
+  tourTitle.textContent="1. Spot the evidence gap";
+  tourStep.textContent="Invoice matching is incomplete. Find Riverside's held $500 candidate and inspect the fictional source reference.";
+  tourProgress.textContent="Step 1 of 3 · No financial authority";
+ }else if(state.payroll==="unallocated"){
+  tourTitle.textContent="2. Account for every payroll dollar";
+  tourStep.textContent="The invoice match is now simulated as confirmed, but Northside still has a $600 payroll residual. Resolve it to recalculate delivery costs.";
+  tourProgress.textContent="Step 2 of 3 · No real reviewer identity";
+ }else{
+  tourTitle.textContent="3. Review the contribution—and its limits";
+  tourStep.textContent="Portfolio contribution is now available from fictional complete source categories. Confirm Harbour's unapproved $2,000 variation remains excluded, then inspect the source references and evidence JSON.";
+  tourProgress.textContent="Step 3 of 3 · Fictional arithmetic only";
+ }
+ document.querySelector("#evidence-json").textContent=JSON.stringify(exportBuyerDemoEvidence(state),null,2);
+ const metrics=document.querySelector("#kpis");clear(metrics);
+ metrics.append(
+  kpi("Confirmed billed · full period",money(t.billedCents),
+   t.billedCents===null?"Incomplete invoice matching. Confirmed partial amount: "+money(t.confirmedBilledPartialCents):"All fictional invoice matches completed for this period."),
+  kpi("Delivery costs · full period",money(t.costCents),
+   t.costCents===null?"Payroll residual: "+money(t.unallocatedPayrollCents)+" of "+money(t.payrollPoolCents)+" pool not allocated.":"Reconciled fictional payroll allocation and material costs."),
+  kpi("Contribution · full period",money(t.contributionCents),
+   t.contributionCents===null?"Withheld: invoice and/or payroll coverage is incomplete.":"Confirmed billed minus allocated payroll and materials; not net profit.")
+ );
+ const coverage=document.querySelector("#coverage");clear(coverage);
+ coverage.append(chip("Invoice coverage "+c.invoiceCovered+"/"+c.total,c.invoiceCovered===c.total),
+  chip("Payroll coverage "+c.payrollCovered+"/"+c.total,c.payrollCovered===c.total),
+  chip("Complete contracts "+c.readyCount+"/"+c.total,c.readyCount===c.total));
+ document.querySelector("#portfolio-status").textContent=c.readyCount===c.total?"Coverage complete · synthetic only":"Coverage incomplete";
+ const ex=document.querySelector("#exceptions");clear(ex);
+ for(const item of snapshot.exceptions){
+  const card=el("article","exrow "+(item.action?"warn":""));
+  const head=el("div","exhead"),heading=el("h3","",item.title);
+  head.append(heading,el("span","pill"+(item.action?"":" exclude"),item.severity));
+  card.append(head,el("div","exmeta",item.site+" · "+item.source+" · "+money(item.amountCents)),
+   el("p","exdetail",item.detail));
+  if(item.action){
+   const btn=el("button","btn primary",item.action==="confirm_invoice"?
+    "Simulate invoice-match confirmation":"Simulate payroll allocation");
+   btn.type="button";
+   btn.setAttribute("aria-label",btn.textContent+" for "+item.site);
+   btn.addEventListener("click",()=>{
+    try{
+     state=applyBuyerDemoDecision(state,item.action);
+     render();
+     document.querySelector("#live-status").textContent=
+      "Fictional reviewer action recorded for "+item.source+". Financial summary recalculated.";
+    }catch{
+     document.querySelector("#live-status").textContent="Demo action refused; reset the scenario to try again.";
+    }
+   });
+   card.append(btn);
+  }else card.append(el("div","small","No approval path in this demonstration."));
+  ex.append(card);
+ }
+ document.querySelector("#exception-count").textContent=snapshot.exceptions.length+" items (including exclusions)";
+ const log=document.querySelector("#decision-log");clear(log);
+ if(!snapshot.decisionLog.length)log.append(el("p","small","No simulated decisions yet. Select a review action to see its effect."));
+ else for(const event of snapshot.decisionLog){
+  const entry=el("div","logrow");
+  entry.append(el("strong","",String(event.sequence)+". "+event.note),
+   el("span","",event.actor+" · "+event.reference+" · No real approval or persisted evidence"));
+  log.append(entry);
+ }
+ const rows=document.querySelector("#contract-rows");clear(rows);
+ for(const contract of snapshot.contracts){
+  const tr=el("tr");
+  const th=el("th");th.scope="row";
+  th.append(el("strong","",contract.name),el("div","small",contract.id));
+  const details=el("details"),summary=el("summary","", "View source references"),sources=el("div","sources");
+  sources.append(
+   el("div","", "Contract: "+contract.contractSource),
+   el("div","", "Invoice: "+contract.invoiceSource),
+   el("div","", "Payroll: "+contract.payrollSource),
+   el("div","", "Materials: "+contract.materialSource),
+   el("div","", "Issuer identity: NOT independently verified"));
+  details.append(summary,sources);th.append(details);tr.append(th);
+  for(const value of [
+   money(contract.baselineCents),
+   money(contract.billedCents)+(contract.invoiceReady?"":" (partial)"),
+   money(contract.payrollResidualCents),
+   money(contract.contributionCents)
+  ])tr.append(el("td","metric",value));
+  tr.append(el("td","status"+(contract.ready?"":" held"),contract.ready?"Complete*":"Held"));
+  rows.append(tr);
+ }
+}
+document.querySelector("#reset").addEventListener("click",()=>{
+ state=createBuyerDemoState();render();
+ document.querySelector("#live-status").textContent="Fictional scenario reset. No browser decisions are persisted.";
+});
+document.querySelector("#export").addEventListener("click",()=>{
+ const payload=JSON.stringify(exportBuyerDemoEvidence(state),null,2)+"\n";
+ const url=URL.createObjectURL(new Blob([payload],{type:"application/json"}));
+ try{
+  const a=el("a");a.href=url;a.download="profitpilot-fictional-buyer-evidence.json";
+  document.body.append(a);a.click();a.remove();
+  document.querySelector("#live-status").textContent="Synthetic-only evidence JSON export initiated.";
+ }finally{URL.revokeObjectURL(url);}
+});
+render();
+</script>
+</body></html>

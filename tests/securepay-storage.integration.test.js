@@ -1,0 +1,362 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {createServer} from "node:http";
+import {randomUUID,generateKeyPairSync,sign} from "node:crypto";
+import {signedPartyStatement} from "../src/securepay-signed-party.js";
+import {exportJWK,SignJWT} from "jose";
+import pg from "pg";
+const enabled=Boolean(process.env.TEST_ADMIN_DATABASE_URL&&process.env.TEST_APP_DATABASE_URL);
+test("SecurePay S2 authenticated, idempotent, tenant-isolated append-only evidence",{skip:!enabled},async()=>{
+ const a="11111111-1111-4111-8111-111111111111",b="22222222-2222-4222-8222-222222222222";
+ const owner="eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",reader="ffffffff-ffff-4fff-8fff-ffffffffffff",foreign="99999999-9999-4999-8999-999999999999";
+ const issuer="https://profitpilot-sp-ci.invalid/",audience="profitpilot-api";
+ const {publicKey,privateKey}=generateKeyPairSync("rsa",{modulusLength:2048});
+ const jwk=await exportJWK(publicKey);Object.assign(jwk,{kid:"securepay-ci-key",use:"sig",alg:"RS256"});
+ const {publicKey:issuerPublic,privateKey:issuerPrivate}=generateKeyPairSync("rsa",{modulusLength:2048});
+ const issuerJwk=await exportJWK(issuerPublic);Object.assign(issuerJwk,{kid:"securepay-issuer-ci-key",use:"sig",alg:"RS256"});
+ const jwks=createServer((req,res)=>{if(!["/jwks","/issuer-jwks"].includes(req.url)){res.writeHead(404).end();return;}res.writeHead(200,{"content-type":"application/json"}).end(JSON.stringify({keys:[req.url==="/jwks"?jwk:issuerJwk]}));});
+ await new Promise(resolve=>jwks.listen(0,"127.0.0.1",resolve));
+ process.env.NODE_ENV="test";process.env.DATABASE_URL=process.env.TEST_APP_DATABASE_URL;
+ process.env.AUTH_ISSUER=issuer;process.env.AUTH_AUDIENCE=audience;
+ process.env.AUTH_JWKS_URL="http://127.0.0.1:"+jwks.address().port+"/jwks";
+ const admin=new pg.Pool({connectionString:process.env.TEST_ADMIN_DATABASE_URL});
+ let api,appPool;
+ try{
+  await admin.query("INSERT INTO tenants(id,legal_name) VALUES($1,'SP A'),($2,'SP B') ON CONFLICT(id) DO NOTHING",[a,b]);
+  await admin.query("INSERT INTO users(id,auth_subject,email) VALUES($1,'sp-s2-owner','owner@sp.invalid'),($2,'sp-s2-reader','reader@sp.invalid'),($3,'sp-s2-foreign','foreign@sp.invalid') ON CONFLICT(auth_subject) DO NOTHING",[owner,reader,foreign]);
+  await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'owner','active'),($1,$3,'read_only','active'),($4,$5,'owner','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status=EXCLUDED.status",[a,owner,reader,b,foreign]);
+  await admin.query("INSERT INTO users(id,auth_subject,email) VALUES($1,'sp-s3-reviewer','s3reviewer@sp.invalid') ON CONFLICT(auth_subject) DO NOTHING",["dddddddd-dddd-4ddd-8ddd-dddddddddddd"]);
+  await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'reviewer','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status=EXCLUDED.status",[a,"dddddddd-dddd-4ddd-8ddd-dddddddddddd"]);
+  const [{default:app,requestLimiter},{pool,withTenant}]=await Promise.all([import("../server/index.js"),import("../server/db.js")]);appPool=pool;
+  api=createServer(app);await new Promise(resolve=>api.listen(0,"127.0.0.1",resolve));
+  async function request(path,{subject,method="GET",body}={}){
+   const headers={};if(subject){
+    const jwt=await new SignJWT({}).setProtectedHeader({alg:"RS256",kid:jwk.kid}).setIssuer(issuer).setAudience(audience).setSubject(subject).setIssuedAt().setExpirationTime("5m").sign(privateKey);
+    headers.authorization="Bearer "+jwt;
+   }
+   if(body!==undefined)headers["content-type"]="application/json";
+   const r=await fetch("http://127.0.0.1:"+api.address().port+path,{method,headers,body:body===undefined?undefined:JSON.stringify(body)});
+   return {status:r.status,body:await r.json()};
+  }
+  const fixture=await admin.query("SELECT t.status AS tenant_status,u.status AS user_status,m.status AS member_status,m.role FROM tenant_memberships m JOIN users u ON u.id=m.user_id JOIN tenants t ON t.id=m.tenant_id WHERE m.tenant_id=$1 AND u.auth_subject=$2",[a,"sp-s2-owner"]);
+  assert.equal(fixture.rows[0]?.role,"owner",JSON.stringify(fixture.rows));
+  const signed=await withTenant(a,"sp-s2-owner",c=>c.query("SELECT private.current_tenant_id()::text AS tenant,private.actor_role() AS role,private.actor_id()::text AS actor"));
+  assert.equal(signed.rows[0]?.tenant,a,JSON.stringify(signed.rows));
+  assert.equal(signed.rows[0]?.role,"owner",JSON.stringify(signed.rows));
+  const rootA="/v1/tenants/"+a+"/prototype/securepay-cases",rootB="/v1/tenants/"+b+"/prototype/securepay-cases";
+  const payload={synthetic:true,clientRequestId:randomUUID(),jobReference:"job.sp-001",claimReference:"claim.sp-001"};
+  assert.equal((await request(rootA,{method:"POST",body:payload})).status,401);
+  assert.equal((await request(rootA,{subject:"sp-s2-reader",method:"POST",body:payload})).status,403);
+  assert.equal((await request(rootA,{subject:"sp-s2-foreign",method:"POST",body:payload})).status,403);
+  const unexpectedField=await request(rootA,{subject:"sp-s2-owner",method:"POST",body:{...payload,fundsMoved:true}});
+  assert.equal(unexpectedField.status,400,JSON.stringify(unexpectedField));
+  const opened=await request(rootA,{subject:"sp-s2-owner",method:"POST",body:payload});
+  assert.equal(opened.status,201);assert.equal(opened.body.item.funds_moved,false);assert.equal(opened.body.item.synthetic,true);
+  const caseId=opened.body.item.id;
+  assert.equal((await request(rootA,{subject:"sp-s2-owner",method:"POST",body:payload})).status,200);
+  assert.equal((await request(rootA,{subject:"sp-s2-owner",method:"POST",body:{...payload,jobReference:"job.changed"}})).status,409);
+  const openedB=await request(rootB,{subject:"sp-s2-foreign",method:"POST",body:{...payload,clientRequestId:randomUUID()}});
+  assert.equal(openedB.status,201);
+  assert.equal((await request(rootA+"/"+openedB.body.item.id,{subject:"sp-s2-owner"})).status,404);
+  assert.equal((await request(rootA)).status,401);
+  assert.equal((await request(rootA,{subject:"sp-s2-reader"})).status,403);
+  assert.equal((await request(rootA,{subject:"sp-s2-foreign"})).status,403);
+  assert.equal((await request(rootA+"?cursor=not-a-uuid",{subject:"sp-s2-owner"})).status,400);
+  assert.equal((await request(rootA+"?cursor="+openedB.body.item.id,{subject:"sp-s2-owner"})).status,404);
+  const listB=await request(rootB,{subject:"sp-s2-foreign"});
+  assert.equal(listB.status,200);assert.deepEqual(listB.body.items.map(x=>x.id),[openedB.body.item.id]);
+  await withTenant(a,"sp-s2-owner",c=>c.query(
+   "INSERT INTO securepay_case_rehearsals(tenant_id,client_request_id,job_reference,claim_reference,opened_by) SELECT $1,gen_random_uuid(),'job.page-'||g,'claim.page-'||g,private.actor_id() FROM generate_series(1,101) g",[a]));
+  const casePage1=await request(rootA,{subject:"sp-s2-owner"});
+  assert.equal(casePage1.status,200,JSON.stringify(casePage1.body));
+  assert.equal(casePage1.body.items.length,100);
+  assert.equal(casePage1.body.hasMore,true);assert.ok(casePage1.body.nextCursor);
+  assert.equal(casePage1.body.paymentAuthority,false);assert.equal(casePage1.body.partyIdentityVerified,false);
+  assert.ok(casePage1.body.items.every(x=>x.synthetic===true&&x.funds_moved===false&&x.id!==openedB.body.item.id));
+  const casePage2=await request(rootA+"?cursor="+casePage1.body.nextCursor,{subject:"sp-s2-owner"});
+  assert.equal(casePage2.status,200,JSON.stringify(casePage2.body));
+  assert.equal(casePage2.body.items.length,2);assert.equal(casePage2.body.hasMore,false);
+  assert.equal(casePage2.body.nextCursor,null);
+  assert.equal(new Set([...casePage1.body.items,...casePage2.body.items].map(x=>x.id)).size,102);
+  const preflightPath=rootA+"/"+caseId+"/decision-preflight";
+  assert.equal((await request(preflightPath)).status,401);
+  assert.equal((await request(preflightPath,{subject:"sp-s2-reader"})).status,403);
+  assert.equal((await request(preflightPath,{subject:"sp-s2-foreign"})).status,403);
+  assert.equal((await request(rootA+"/bad/decision-preflight",{subject:"sp-s2-owner"})).status,400);
+  assert.equal((await request(rootA+"/"+openedB.body.item.id+"/decision-preflight",{subject:"sp-s2-owner"})).status,404);
+  const emptyPreflight=await request(preflightPath,{subject:"sp-s2-owner"});
+  assert.equal(emptyPreflight.status,200,JSON.stringify(emptyPreflight));
+  assert.equal(emptyPreflight.body.evidence.totalOperatorReports,0);
+  assert.equal(emptyPreflight.body.decisionReadiness,"blocked");
+  assert.equal(emptyPreflight.body.requesterOpenedCase,true);
+  assert.ok(emptyPreflight.body.blockingGates.includes("requester_must_not_self_review"));
+  const evidence={clientRequestId:randomUUID(),evidenceType:"claim_reported",evidenceReference:"opaque.claim.001"};
+  const ep=rootA+"/"+caseId+"/evidence";
+  assert.equal((await request(ep,{subject:"sp-s2-reader",method:"POST",body:evidence})).status,403);
+  const created=await request(ep,{subject:"sp-s2-owner",method:"POST",body:evidence});
+  assert.equal(created.status,201);assert.equal(created.body.item.externally_verified,false);
+  assert.equal((await request(ep,{subject:"sp-s2-owner",method:"POST",body:evidence})).status,200);
+  assert.equal((await request(ep,{subject:"sp-s2-owner",method:"POST",body:{...evidence,evidenceReference:"other.reference"}})).status,409);
+  const listing=await request(ep,{subject:"sp-s2-owner"});assert.equal(listing.status,200);
+  assert.equal(listing.body.items.length,1);assert.equal(listing.body.externalVerification,false);
+  const provenancePath=ep+"/"+created.body.item.id+"/provenance";
+  const provenanceBody={clientRequestId:randomUUID(),reportedOrigin:"reported_customer",acquisitionMethod:"operator_relay",sourceReference:"reported.source.001"};
+  assert.equal((await request(provenancePath,{subject:"sp-s2-reader",method:"POST",body:provenanceBody})).status,403);
+  assert.equal((await request(provenancePath,{subject:"sp-s2-owner",method:"POST",body:{...provenanceBody,identityVerified:true}})).status,400);
+  const first=await request(provenancePath,{subject:"sp-s2-owner",method:"POST",body:provenanceBody});
+  assert.equal(first.status,201,JSON.stringify(first));
+  assert.equal(first.body.item.origin_verified,false);assert.equal(first.body.item.job_authority_verified,false);
+  assert.equal(first.body.sourceIdentityVerified,false);assert.equal(first.body.paymentAuthority,false);
+  const {publicKey:partyPub,privateKey:partyPriv}=generateKeyPairSync("ed25519");
+  const partyKeySpki=partyPub.export({format:"der",type:"spki"}).toString("base64url");
+  const claimNonce=randomUUID();
+  const claimedHash="a".repeat(64);
+  const partyScope={tenantId:a,caseId,evidenceId:created.body.item.id,provenanceReceiptId:first.body.item.id,
+    provenanceMetadataSha256:first.body.item.metadata_sha256,jobReference:payload.jobReference,
+    evidenceType:evidence.evidenceType,evidenceReference:evidence.evidenceReference,
+    claimedPartyRole:"customer",claimedContentSha256:claimedHash,nonce:claimNonce};
+  const proofSignature=sign(null,signedPartyStatement(partyScope),partyPriv).toString("base64url");
+  const partyRequest={clientRequestId:randomUUID(),provenanceReceiptId:first.body.item.id,
+    claimedPartyRole:"customer",keySpki:partyKeySpki,nonce:claimNonce,claimedContentSha256:claimedHash,signature:proofSignature};
+  const partyRoute=ep+"/"+created.body.item.id+"/signed-party-claims";
+  assert.equal((await request(partyRoute,{method:"POST",body:partyRequest})).status,401);
+  assert.equal((await request(partyRoute,{subject:"sp-s2-reader",method:"POST",body:partyRequest})).status,403);
+  assert.equal((await request(partyRoute,{subject:"sp-s2-owner",method:"POST",body:{...partyRequest,identityVerified:true}})).status,400);
+  const claimCreated=await request(partyRoute,{subject:"sp-s2-owner",method:"POST",body:partyRequest});
+  assert.equal(claimCreated.status,201,JSON.stringify(claimCreated));
+  assert.equal(claimCreated.body.signatureValid,true);
+  assert.equal(claimCreated.body.partyIdentityVerified,false);
+  assert.equal(claimCreated.body.partyToJobVerified,false);
+  assert.equal(claimCreated.body.contentBytesVerified,false);
+  assert.equal(claimCreated.body.paymentAuthority,false);
+  assert.equal(claimCreated.body.item.issuer_trusted,false);
+  assert.equal((await request(partyRoute,{subject:"sp-s2-owner",method:"POST",body:partyRequest})).status,200);
+  assert.equal((await request(partyRoute,{subject:"sp-s2-owner",method:"POST",body:{...partyRequest,claimedContentSha256:"b".repeat(64)}})).status,409);
+  const invalidProof=await request(partyRoute,{subject:"sp-s2-owner",method:"POST",body:{...partyRequest,clientRequestId:randomUUID(),nonce:randomUUID()}});
+  assert.equal(invalidProof.status,422,JSON.stringify(invalidProof));
+  const wrongRole=await request(partyRoute,{subject:"sp-s2-owner",method:"POST",body:{...partyRequest,clientRequestId:randomUUID(),claimedPartyRole:"tradesperson"}});
+  assert.equal(wrongRole.status,409);
+  const proofList=await request(partyRoute,{subject:"sp-s2-owner"});
+  assert.equal(proofList.status,200);assert.equal(proofList.body.items.length,1);
+  const verifiedProof=await request(partyRoute+"/"+claimCreated.body.item.id+"/verify-signature",{subject:"sp-s2-owner"});
+  assert.equal(verifiedProof.status,200,JSON.stringify(verifiedProof));
+  assert.equal(verifiedProof.body.cryptographicSignatureValid,true);assert.equal(verifiedProof.body.trustVerified,false);
+  assert.equal(verifiedProof.body.claimStatus,"untrusted_unverified");assert.equal(verifiedProof.body.revoked,false);
+  assert.equal(verifiedProof.body.operationallyUsable,false);
+  const issuerPath=partyRoute+"/"+claimCreated.body.item.id+"/issuer-attestations";
+  const attestationIssuer="https://securepay-issuer-ci.invalid/";
+  const originalAuthority=process.env.SECUREPAY_AUTHORITY_JWKS_URL;
+  const invalidConfigured=await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:{clientRequestId:randomUUID(),attestationJwt:"malformed"}});
+  assert.equal(invalidConfigured.status,400);
+  const baseIssuerPayload={tenantId:a,caseId,evidenceId:created.body.item.id,claimId:claimCreated.body.item.id,
+   jobReference:payload.jobReference,claimedPartyRole:"customer",keySpkiSha256:claimCreated.body.item.key_spki_sha256,
+   permission:"synthetic_job_claim_review_only"};
+  const signIssuer=async(data)=>new SignJWT(data).setProtectedHeader({alg:"RS256",kid:issuerJwk.kid})
+   .setIssuer(attestationIssuer).setAudience("securepay-synthetic").setSubject("opaque.synthetic.party001")
+   .setJti(randomUUID()).setIssuedAt().setNotBefore("0s").setExpirationTime("5m").sign(issuerPrivate);
+  const authorityJwt=await signIssuer(baseIssuerPayload);
+  const attestationPayload={clientRequestId:randomUUID(),attestationJwt:authorityJwt};
+  delete process.env.SECUREPAY_AUTHORITY_JWKS_URL;
+  assert.equal((await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:attestationPayload})).status,503);
+  process.env.SECUREPAY_AUTHORITY_ISSUER=attestationIssuer;
+  process.env.SECUREPAY_AUTHORITY_AUDIENCE="securepay-synthetic";
+  process.env.SECUREPAY_AUTHORITY_JWKS_URL="http://127.0.0.1:"+jwks.address().port+"/issuer-jwks";
+  assert.equal((await request(issuerPath,{subject:"sp-s2-reader",method:"POST",body:attestationPayload})).status,403);
+  assert.equal((await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:{...attestationPayload,identityVerified:true}})).status,400);
+  const attested=await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:attestationPayload});
+  assert.equal(attested.status,201,JSON.stringify(attested));
+  assert.equal(attested.body.issuerSignatureVerifiedAtRequest,true);
+  assert.equal(attested.body.identityVerified,false);assert.equal(attested.body.jobAuthorityVerified,false);
+  assert.equal(attested.body.item.identity_verified,false);
+  assert.equal(attested.body.item.job_authority_verified,false);
+  assert.equal((await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:attestationPayload})).status,200);
+  assert.equal((await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:{...attestationPayload,attestationJwt:authorityJwt+"a"}})).status,409);
+  const forgedJwt=await signIssuer({...baseIssuerPayload,jobReference:"other.job"});
+  assert.equal((await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:{clientRequestId:randomUUID(),attestationJwt:forgedJwt}})).status,422);
+  const wrongTenantJwt=await signIssuer({...baseIssuerPayload,tenantId:b});
+  assert.equal((await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:{clientRequestId:randomUUID(),attestationJwt:wrongTenantJwt}})).status,422);
+  const badRoleJwt=await signIssuer({...baseIssuerPayload,claimedPartyRole:"tradesperson"});
+  assert.equal((await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:{clientRequestId:randomUUID(),attestationJwt:badRoleJwt}})).status,422);
+  const failedIssuerList=await request(issuerPath,{subject:"sp-s2-owner"});
+  assert.equal(failedIssuerList.status,200);
+  assert.equal(failedIssuerList.body.items.length,1);
+  assert.equal(failedIssuerList.body.signatureReverifiedAtRead,false);
+  assert.equal(failedIssuerList.body.items[0].usableForJobAuthorization,false);
+  assert.equal((await request(rootA+"/"+openedB.body.item.id+"/evidence/"+created.body.item.id+"/signed-party-claims/"+claimCreated.body.item.id+"/issuer-attestations",{subject:"sp-s2-owner"})).status,404);
+  if(originalAuthority!==undefined)process.env.SECUREPAY_AUTHORITY_JWKS_URL=originalAuthority;
+  // Isolate the large synthetic S2-S8 integration phases; API throttling remains 100/min in production and is separately asserted in api.integration.test.js.
+  await requestLimiter.resetKey("127.0.0.1");
+
+  const trustPreflight="/v1/tenants/"+a+"/prototype/securepay-party-job-trust/"+caseId;
+  const beforeRevoke=await request(trustPreflight,{subject:"sp-s2-owner"});
+  assert.equal(beforeRevoke.status,200,JSON.stringify(beforeRevoke));
+  assert.equal(beforeRevoke.body.claims.total,1);assert.equal(beforeRevoke.body.claims.revoked,0);
+  assert.equal(beforeRevoke.body.decisionReadiness,"blocked");
+  const revokePath=partyRoute+"/"+claimCreated.body.item.id+"/revoke";
+  const revokePayload={clientRequestId:randomUUID(),reasonCode:"suspected_key_compromise",revocationReference:"revocation.synthetic.001"};
+  assert.equal((await request(revokePath,{method:"POST",body:revokePayload})).status,401);
+  assert.equal((await request(revokePath,{subject:"sp-s2-reader",method:"POST",body:revokePayload})).status,403);
+  assert.equal((await request(revokePath,{subject:"sp-s3-reviewer",method:"POST",body:revokePayload})).status,403);
+  assert.equal((await request(revokePath,{subject:"sp-s2-owner",method:"POST",body:{...revokePayload,paymentAuthority:true}})).status,400);
+  assert.equal((await request(revokePath,{subject:"sp-s2-owner",method:"POST",body:{...revokePayload,reasonCode:"restore"}})).status,400);
+  const revoked=await request(revokePath,{subject:"sp-s2-owner",method:"POST",body:revokePayload});
+  assert.equal(revoked.status,201,JSON.stringify(revoked));assert.equal(revoked.body.revoked,true);
+  assert.equal(revoked.body.operationallyUsable,false);
+  const repeated=await request(revokePath,{subject:"sp-s2-owner",method:"POST",body:revokePayload});
+  assert.equal(repeated.status,200);assert.equal(repeated.body.item.id,revoked.body.item.id);
+  assert.equal((await request(revokePath,{subject:"sp-s2-owner",method:"POST",body:{...revokePayload,revocationReference:"altered.ref"}})).status,409);
+  assert.equal((await request(revokePath,{subject:"sp-s2-owner",method:"POST",body:{...revokePayload,clientRequestId:randomUUID()}})).status,409);
+  const revokedRead=await request(revokePath,{subject:"sp-s2-owner"});
+  assert.equal(revokedRead.status,200);assert.equal(revokedRead.body.revoked,true);
+  const reverified=await request(partyRoute+"/"+claimCreated.body.item.id+"/verify-signature",{subject:"sp-s2-owner"});
+  assert.equal(reverified.status,200);assert.equal(reverified.body.cryptographicSignatureValid,true);
+  assert.equal(reverified.body.revoked,true);assert.equal(reverified.body.claimStatus,"revoked");
+  assert.ok(reverified.body.blockingGates.includes("synthetic_claim_revoked"));
+  assert.equal(reverified.body.operationallyUsable,false);
+  const revokedIssuerAttempt=await request(issuerPath,{subject:"sp-s2-owner",method:"POST",body:{clientRequestId:randomUUID(),attestationJwt:await signIssuer(baseIssuerPayload)}});
+  assert.equal(revokedIssuerAttempt.status,409,JSON.stringify(revokedIssuerAttempt));
+  const revokedIssuerList=await request(issuerPath,{subject:"sp-s2-owner"});
+  assert.equal(revokedIssuerList.status,200);
+  assert.equal(revokedIssuerList.body.items[0].underlyingClaimRevoked,true);
+  assert.equal(revokedIssuerList.body.items[0].usableForJobAuthorization,false);
+  await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query("DELETE FROM securepay_job_issuer_attestations WHERE id=$1",[attested.body.item.id])),/permission denied|append-only/i);
+  await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query("INSERT INTO securepay_job_issuer_attestations(tenant_id,case_id,evidence_id,claim_id,client_request_id,recorded_by,issuer,token_jti,issuer_subject_sha256,token_sha256,issued_at,expires_at) VALUES($1,$2,$3,$4,gen_random_uuid(),private.actor_id(),$5,gen_random_uuid(),$6,$6,now(),now()+interval '2 minutes')",[a,caseId,created.body.item.id,claimCreated.body.item.id,attestationIssuer,"a".repeat(64)])),/row-level security|permission denied/i);
+
+  const afterList=await request(partyRoute,{subject:"sp-s2-owner"});
+  assert.equal(afterList.status,200);assert.equal(afterList.body.items[0].revoked,true);
+  assert.equal(afterList.body.items[0].operationallyUsable,false);
+  const afterPreflight=await request(trustPreflight,{subject:"sp-s2-owner"});
+  assert.equal(afterPreflight.status,200);assert.equal(afterPreflight.body.claims.revoked,1);
+  assert.equal(afterPreflight.body.partyIdentityVerified,false);
+  assert.equal((await request("/v1/tenants/"+a+"/prototype/securepay-party-job-trust/"+openedB.body.item.id,{subject:"sp-s2-owner"})).status,404);
+  assert.equal((await request(rootA+"/"+openedB.body.item.id+"/evidence/"+created.body.item.id+"/signed-party-claims/"+claimCreated.body.item.id+"/revoke",{subject:"sp-s2-owner",method:"POST",body:{...revokePayload,clientRequestId:randomUUID()}})).status,404);
+  await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query("DELETE FROM securepay_signed_claim_revocations WHERE id=$1",[revoked.body.item.id])),/permission denied|append-only/i);
+  await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query("INSERT INTO securepay_signed_claim_revocations(tenant_id,case_id,evidence_id,claim_id,client_request_id,revoked_by,reason_code,revocation_reference) VALUES($1,$2,$3,$4,gen_random_uuid(),private.actor_id(),'operator_withdrawal','direct.bad')",[a,openedB.body.item.id,created.body.item.id,claimCreated.body.item.id])),/foreign key|row-level security|permission denied/i);
+
+  const otherTenantProof=await request(rootA+"/"+openedB.body.item.id+"/evidence/"+created.body.item.id+"/signed-party-claims",{subject:"sp-s2-owner",method:"POST",body:partyRequest});
+  assert.equal(otherTenantProof.status,404);
+
+  assert.match(first.body.item.metadata_sha256,/^[a-f0-9]{64}$/);
+  assert.equal((await request(provenancePath,{subject:"sp-s2-owner",method:"POST",body:provenanceBody})).status,200);
+  assert.equal((await request(provenancePath,{subject:"sp-s2-owner",method:"POST",body:{...provenanceBody,reportedOrigin:"reported_business"}})).status,409);
+  const provenanceList=await request(provenancePath,{subject:"sp-s2-owner"});
+  assert.equal(provenanceList.status,200);assert.equal(provenanceList.body.items.length,1);
+  assert.equal((await request(provenancePath+"?cursor="+randomUUID(),{subject:"sp-s2-owner"})).status,404);
+  assert.equal((await request(rootA+"/"+openedB.body.item.id+"/evidence/"+created.body.item.id+"/provenance",{subject:"sp-s2-owner"})).status,404);
+  const missingMetadata=await request(rootA+"/"+caseId+"/provenance-preflight",{subject:"sp-s2-owner"});
+  assert.equal(missingMetadata.status,200,JSON.stringify(missingMetadata));
+  assert.equal(missingMetadata.body.metadata.evidenceCount,1);
+  assert.equal(missingMetadata.body.metadata.itemsWithReportedProvenance,1);
+  assert.equal(missingMetadata.body.decisionReadiness,"blocked");
+  assert.equal(missingMetadata.body.partyToJobVerified,false);
+
+  const untrustedPreflight=await request(preflightPath,{subject:"sp-s2-owner"});
+  assert.equal(untrustedPreflight.body.evidence.matchingClaimReported,false,
+   "A different opaque claim reference must not count as the case claim");
+  const reports=[
+   {clientRequestId:randomUUID(),evidenceType:"claim_reported",evidenceReference:payload.claimReference},
+   {clientRequestId:randomUUID(),evidenceType:"business_response_reported",evidenceReference:"business.report.001"},
+   {clientRequestId:randomUUID(),evidenceType:"operator_review_note",evidenceReference:"review.note.001"}
+  ];
+  for(const report of reports)assert.equal((await request(ep,{subject:"sp-s2-owner",method:"POST",body:report})).status,201);
+  const populatedPreflight=await request(preflightPath,{subject:"sp-s2-owner"});
+  assert.equal(populatedPreflight.status,200,JSON.stringify(populatedPreflight));
+  assert.equal(populatedPreflight.body.evidence.totalOperatorReports,4);
+  const provenanceIncomplete=await request(rootA+"/"+caseId+"/provenance-preflight",{subject:"sp-s2-owner"});
+  assert.equal(provenanceIncomplete.status,200);
+  assert.equal(provenanceIncomplete.body.metadata.evidenceCount,4);
+  assert.equal(provenanceIncomplete.body.metadata.itemsWithReportedProvenance,1);
+  assert.ok(provenanceIncomplete.body.blockingGates.includes("evidence_provenance_metadata_incomplete"));
+  assert.ok(provenanceIncomplete.body.blockingGates.includes("business_origin_report_missing"));
+
+  assert.equal(populatedPreflight.body.evidence.matchingClaimReported,true);
+  assert.equal(populatedPreflight.body.evidence.businessResponseReported,true);
+  assert.equal(populatedPreflight.body.evidence.operatorReviewNoteReported,true);
+  assert.equal(populatedPreflight.body.decisionReadiness,"blocked");
+  assert.equal(populatedPreflight.body.paymentAuthority,false);
+  assert.equal(populatedPreflight.body.partyIdentityVerified,false);
+  assert.ok(populatedPreflight.body.blockingGates.includes("evidence_provenance_unverified"));
+  assert.equal((await request(rootA+"/"+openedB.body.item.id+"/evidence",{subject:"sp-s2-owner"})).status,404);
+  await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query(
+   "UPDATE securepay_case_rehearsals SET status='evidence_pending' WHERE tenant_id=$1 AND id=$2",[a,caseId])),/permission denied|append-only/i);
+  await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query(
+   "INSERT INTO securepay_evidence_rehearsals(tenant_id,case_id,client_request_id,recorded_by,evidence_type,evidence_reference) VALUES($1,$2,$3,$4,'operator_review_note','forged.actor')",[a,caseId,randomUUID(),reader])),/row-level security|permission denied/i);
+  const reviewPath=rootA+"/"+caseId+"/reviewer-assessments";
+  const declarationPath=rootA+"/"+caseId+"/reviewer-declarations";
+  const none={clientRequestId:randomUUID(),declarationStatus:"no_conflict_declared",conflictCode:null,disclosureReference:null};
+  assert.equal((await request(declarationPath,{subject:"sp-s2-owner",method:"POST",body:none})).status,403);
+  assert.equal((await request(declarationPath,{subject:"sp-s2-reader",method:"POST",body:none})).status,403);
+  assert.equal((await request(declarationPath,{subject:"sp-s3-reviewer",method:"POST",body:{...none,paymentAuthority:true}})).status,400);
+  const declaration=await request(declarationPath,{subject:"sp-s3-reviewer",method:"POST",body:none});
+  assert.equal(declaration.status,201,JSON.stringify(declaration));
+  assert.equal(declaration.body.item.declaration_status,"no_conflict_declared");
+  assert.equal(declaration.body.conflictIndependentlyScreened,false);
+  assert.equal((await request(declarationPath,{subject:"sp-s3-reviewer",method:"POST",body:none})).status,200);
+  assert.equal((await request(declarationPath,{subject:"sp-s3-reviewer",method:"POST",body:{...none,declarationStatus:"potential_conflict",conflictCode:"financial_interest",disclosureReference:"conflict.001"}})).status,409);
+  assert.equal((await request(declarationPath,{subject:"sp-s3-reviewer"})).body.items.length,1);
+  assert.equal((await request(rootA+"/"+openedB.body.item.id+"/reviewer-declarations",{subject:"sp-s3-reviewer"})).status,404);
+  const reviewPayload={clientRequestId:randomUUID(),reviewReference:"review.snapshot.s3",declarationId:declaration.body.item.id};
+  const missingCase=await request(rootA,{subject:"sp-s2-owner",method:"POST",body:{synthetic:true,clientRequestId:randomUUID(),jobReference:"job.s3-missing",claimReference:"claim.s3-missing"}});
+  assert.equal(missingCase.status,201,JSON.stringify(missingCase));
+  const missingDeclaration=await request(rootA+"/"+missingCase.body.item.id+"/reviewer-declarations",{subject:"sp-s3-reviewer",method:"POST",body:{...none,clientRequestId:randomUUID()}});
+  assert.equal(missingDeclaration.status,201,JSON.stringify(missingDeclaration));
+  const missingReview=await request(rootA+"/"+missingCase.body.item.id+"/reviewer-assessments",{subject:"sp-s3-reviewer",method:"POST",body:{...reviewPayload,declarationId:missingDeclaration.body.item.id}});
+  assert.equal(missingReview.status,409,JSON.stringify(missingReview));
+  assert.ok(missingReview.body.blockingGates.includes("matching_claim_report_missing"));
+  assert.equal((await request(reviewPath,{subject:"sp-s2-owner",method:"POST",body:reviewPayload})).status,403);
+  assert.equal((await request(reviewPath,{subject:"sp-s2-reader",method:"POST",body:reviewPayload})).status,403);
+  assert.equal((await request(reviewPath,{subject:"sp-s3-reviewer",method:"POST",body:{...reviewPayload,paymentApproved:true}})).status,400);
+  const withoutDeclaration=await request(reviewPath,{subject:"sp-s3-reviewer",method:"POST",body:{...reviewPayload,declarationId:randomUUID()}});
+  assert.equal(withoutDeclaration.status,409);
+  const r=await request(reviewPath,{subject:"sp-s3-reviewer",method:"POST",body:reviewPayload});
+  assert.equal(r.status,201,JSON.stringify(r));assert.equal(r.body.item.reviewer_id,"dddddddd-dddd-4ddd-8ddd-dddddddddddd");
+  assert.equal(r.body.item.evidence_count,4);assert.match(r.body.item.evidence_snapshot_sha256,/^[a-f0-9]{64}$/);
+  assert.equal(r.body.paymentAuthority,false);assert.equal(r.body.decisionAuthority,false);
+  const replay=await request(reviewPath,{subject:"sp-s3-reviewer",method:"POST",body:reviewPayload});
+  assert.equal(replay.status,200);assert.equal(replay.body.item.id,r.body.item.id);
+  assert.equal((await request(reviewPath,{subject:"sp-s3-reviewer",method:"POST",body:{...reviewPayload,reviewReference:"altered.ref"}})).status,409);
+  assert.equal((await request(reviewPath,{subject:"sp-s3-reviewer",method:"POST",body:{...reviewPayload,declarationId:missingDeclaration.body.item.id}})).status,409);
+  assert.equal((await request(reviewPath,{subject:"sp-s3-reviewer"})).body.items.length,1);
+  assert.equal((await request(rootA+"/"+openedB.body.item.id+"/reviewer-assessments",{subject:"sp-s3-reviewer"})).status,404);
+  assert.equal((await request(rootA+"/"+openedB.body.item.id+"/reviewer-assessments",{subject:"sp-s3-reviewer",method:"POST",body:{clientRequestId:randomUUID(),reviewReference:"foreign.ref",declarationId:declaration.body.item.id}})).status,404);
+  await assert.rejects(()=>withTenant(a,"sp-s3-reviewer",c=>c.query("UPDATE securepay_reviewer_assessments SET review_reference='changed.ref' WHERE id=$1",[r.body.item.id])),/permission denied|append-only/i);
+  const other=await request(rootA,{subject:"sp-s3-reviewer",method:"POST",body:{synthetic:true,clientRequestId:randomUUID(),jobReference:"job.self",claimReference:"claim.self"}});
+  assert.equal(other.status,201);
+  const selfDeclared=await request(rootA+"/"+other.body.item.id+"/reviewer-declarations",{subject:"sp-s3-reviewer",method:"POST",body:{...none,clientRequestId:randomUUID()}});
+  assert.equal(selfDeclared.status,201,JSON.stringify(selfDeclared));
+  const ownReview=await request(rootA+"/"+other.body.item.id+"/reviewer-assessments",{subject:"sp-s3-reviewer",method:"POST",body:{clientRequestId:randomUUID(),reviewReference:"self.ref",declarationId:selfDeclared.body.item.id}});
+  assert.equal(ownReview.status,409);assert.ok(ownReview.body.blockingGates.includes("reviewer_opened_case"));
+  const reviewer2Id="bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+  await admin.query("INSERT INTO users(id,auth_subject,email) VALUES($1,'sp-s4-conflicted','conflicted@sp.invalid') ON CONFLICT(auth_subject) DO NOTHING",[reviewer2Id]);
+  await admin.query("INSERT INTO tenant_memberships(tenant_id,user_id,role,status) VALUES($1,$2,'reviewer','active') ON CONFLICT(tenant_id,user_id) DO UPDATE SET role=EXCLUDED.role,status=EXCLUDED.status",[a,reviewer2Id]);
+  const conflict={clientRequestId:randomUUID(),declarationStatus:"potential_conflict",conflictCode:"prior_involvement",disclosureReference:"conflict.record.s4"};
+  const reported=await request(declarationPath,{subject:"sp-s4-conflicted",method:"POST",body:conflict});
+  assert.equal(reported.status,201,JSON.stringify(reported));
+  const noConflictLater=await request(declarationPath,{subject:"sp-s4-conflicted",method:"POST",body:{...none,clientRequestId:randomUUID()}});
+  assert.equal(noConflictLater.status,201);
+  const blockedReview=await request(reviewPath,{subject:"sp-s4-conflicted",method:"POST",body:{clientRequestId:randomUUID(),reviewReference:"blocked.s4",declarationId:noConflictLater.body.item.id}});
+  assert.equal(blockedReview.status,409);assert.ok(blockedReview.body.blockingGates.includes("reviewer_conflict_declared"));
+  await assert.rejects(()=>withTenant(a,"sp-s4-conflicted",c=>c.query("INSERT INTO securepay_reviewer_assessments(tenant_id,case_id,client_request_id,reviewer_id,review_reference,evidence_count,evidence_snapshot_sha256,conflict_declaration_id) VALUES($1,$2,$3,private.actor_id(),'bypass.s4',4,$4,$5)",[a,caseId,randomUUID(),"a".repeat(64),noConflictLater.body.item.id])),/row-level security|permission denied/i);
+  await assert.rejects(()=>withTenant(a,"sp-s3-reviewer",c=>c.query("UPDATE securepay_reviewer_declarations SET declaration_status='potential_conflict' WHERE id=$1",[declaration.body.item.id])),/permission denied|append-only/i);
+
+  await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query(
+   "UPDATE securepay_evidence_provenance_receipts SET reported_origin='reported_business' WHERE id=$1",[first.body.item.id])),/permission denied|append-only/i);
+  await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query(
+   "INSERT INTO securepay_evidence_provenance_receipts(tenant_id,case_id,evidence_id,client_request_id,recorded_by,reported_origin,acquisition_method,source_reference,metadata_sha256) VALUES($1,$2,$3,$4,private.actor_id(),'reported_customer','unknown','wrong.case',$5)",[a,openedB.body.item.id,created.body.item.id,randomUUID(),"a".repeat(64)])),/foreign key|row-level security|permission denied/i);
+
+  await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query(
+   "UPDATE securepay_signed_party_claims SET claimed_party_role='tradesperson' WHERE id=$1",[claimCreated.body.item.id])),/permission denied|append-only/i);
+  await assert.rejects(()=>withTenant(a,"sp-s2-owner",c=>c.query(
+   "INSERT INTO securepay_signed_party_claims(tenant_id,case_id,evidence_id,provenance_receipt_id,client_request_id,recorded_by,claimed_party_role,key_spki,claim_nonce,claimed_content_sha256,signature,statement_sha256,key_spki_sha256) VALUES($1,$2,$3,$4,$5,private.actor_id(),'customer',$6,$7,$8,$9,$10,$11)",
+   [a,openedB.body.item.id,created.body.item.id,first.body.item.id,randomUUID(),partyKeySpki,claimNonce,claimedHash,proofSignature,"a".repeat(64),"a".repeat(64)])),/foreign key|row-level security|permission denied/i);
+  const hidden=await withTenant(a,"sp-s2-owner",c=>c.query("SELECT count(*)::int AS n FROM securepay_case_rehearsals WHERE tenant_id=$1",[b]));
+  assert.equal(hidden.rows[0].n,0);
+  const denied=await withTenant(a,"sp-s2-reader",c=>c.query("SELECT count(*)::int AS n FROM securepay_case_rehearsals WHERE tenant_id=$1",[a]));
+  assert.equal(denied.rows[0].n,0);
+ }finally{
+  if(api)await new Promise(resolve=>api.close(resolve));
+  if(appPool)await appPool.end();
+  await admin.end();
+  await new Promise(resolve=>jwks.close(resolve));
+ }
+});

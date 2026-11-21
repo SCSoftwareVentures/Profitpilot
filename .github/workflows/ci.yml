@@ -44,6 +44,17 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Validate local Compose syntax without starting services
+        env:
+          POSTGRES_ADMIN_PASSWORD: ci-placeholder-admin
+          POSTGRES_APP_PASSWORD: ci-placeholder-runtime
+          TENANT_CONTEXT_HMAC_SECRET: ci-placeholder-tenant-signing-key
+          CORS_ORIGIN: http://localhost:8080
+          AUTH_ISSUER: https://example.invalid/
+          AUTH_AUDIENCE: profitpilot-api
+          AUTH_JWKS_URL: https://example.invalid/keys
+        run: docker compose -f docker-compose.yml config --quiet
+
   database:
     name: PostgreSQL migrations and tenant RLS
     runs-on: ubuntu-latest
@@ -108,6 +119,15 @@ jobs:
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/022_privacy_case_evidence_gate.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/023_calculation_restatement.sql
           psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/024_unified_report_snapshots.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/025_securepay_evidence_register.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/026_securepay_reviewer_assessments.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/027_securepay_conflict_declarations.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/028_securepay_reported_provenance.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/029_securepay_signed_party_claims.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/030_securepay_signed_claim_revocations.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/031_securepay_job_issuer_attestations.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/032_securepay_evidence_custody.sql
+          psql "$DB_URL" -v ON_ERROR_STOP=1 -f database/migrations/033_securepay_encrypted_custody.sql
 
       - name: Verify tenant RLS with restricted runtime role
         env:
@@ -124,6 +144,9 @@ jobs:
           TEST_ADMIN_DATABASE_URL: postgresql://profitpilot_admin:ci-admin-password@localhost:5432/profitpilot
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
+          # Run SecurePay before the deliberate tenant-signing-key rotation/revocation tests.
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/securepay-storage.integration.test.js
+          TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/securepay-custody.integration.test.js
           TEST_APP_DATABASE_URL="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot" TEST_ADMIN_DATABASE_URL="$TEST_ADMIN_DATABASE_URL" node --test tests/api.integration.test.js
 
       - name: Rehearse encrypted synthetic database backup and restore
@@ -150,11 +173,69 @@ jobs:
           gpg --batch --yes --pinentry-mode loopback --no-symkey-cache --passphrase-file "$BACKUP_DIR/passphrase" --decrypt --output "$DUMP" "$BACKUP_DIR/backup.gpg"
           createdb -h localhost -U profitpilot_admin profitpilot_restore
           docker exec -i -e PGPASSWORD="$PGPASSWORD" "$PG_CONTAINER" pg_restore -h 127.0.0.1 -U profitpilot_admin -d profitpilot_restore --exit-on-error --single-transaction < "$DUMP"
-          QUERY="SELECT (SELECT count(*) FROM tenants),(SELECT count(*) FROM raw_import_rows),(SELECT count(*) FROM audit_events),(SELECT count(*) FROM invoice_identity_claims),(SELECT count(*) FROM invoice_confirmation_rehearsals),(SELECT count(*) FROM payroll_contract_rehearsals),(SELECT count(*) FROM calculation_runs),(SELECT count(*) FROM calculation_restatements),(SELECT count(*) FROM unified_report_snapshots),(SELECT count(*) FROM privacy_requests),(SELECT count(*) FROM import_source_receipts WHERE sha256=encode(public.digest(original_bytes,'sha256'),'hex'));"
+          QUERY="SELECT (SELECT count(*) FROM tenants),(SELECT count(*) FROM raw_import_rows),(SELECT count(*) FROM audit_events),(SELECT count(*) FROM invoice_identity_claims),(SELECT count(*) FROM invoice_confirmation_rehearsals),(SELECT count(*) FROM payroll_contract_rehearsals),(SELECT count(*) FROM calculation_runs),(SELECT count(*) FROM calculation_restatements),(SELECT count(*) FROM unified_report_snapshots),(SELECT count(*) FROM securepay_case_rehearsals),(SELECT count(*) FROM securepay_evidence_rehearsals),(SELECT count(*) FROM securepay_reviewer_assessments),(SELECT count(*) FROM securepay_reviewer_declarations),(SELECT count(*) FROM securepay_evidence_provenance_receipts),(SELECT count(*) FROM securepay_signed_party_claims),(SELECT count(*) FROM securepay_signed_claim_revocations),(SELECT count(*) FROM securepay_job_issuer_attestations),(SELECT count(*) FROM securepay_evidence_custody_receipts),(SELECT count(*) FROM securepay_evidence_custody_receipts WHERE sha256=encode(public.digest(original_bytes,'sha256'),'hex')),(SELECT count(*) FROM securepay_encrypted_custody_receipts),(SELECT count(*) FROM securepay_encrypted_custody_receipts WHERE ciphertext_sha256=encode(public.digest(ciphertext,'sha256'),'hex')),(SELECT count(*) FROM privacy_requests),(SELECT count(*) FROM import_source_receipts WHERE sha256=encode(public.digest(original_bytes,'sha256'),'hex'));"
           test "$(psql "$ADMIN_URL" -At -c "$QUERY")" = "$(psql "$RESTORE_URL" -At -c "$QUERY")"
           RESTORED_APP="postgresql://profitpilot_app:${POSTGRES_APP_PASSWORD}@localhost:5432/profitpilot_restore"
           test "$(psql "$RESTORED_APP" -At -c 'SELECT count(*) FROM tenants;')" = "0"
           psql "$RESTORE_URL" -v ON_ERROR_STOP=1 -c "DO \$\$ BEGIN IF EXISTS (SELECT 1 FROM import_source_receipts WHERE sha256<>encode(public.digest(original_bytes,'sha256'),'hex')) THEN RAISE EXCEPTION 'Restored source receipt checksum mismatch'; END IF; END \$\$;"
+          # S11.2: inspect *restored* synthetic custody ciphertext with the application AEAD
+          # and operator MAC keys. Secrets and audit output stay in a private ephemeral CI dir.
+          printf '%s\n' "$RESTORE_URL" > "$BACKUP_DIR/restore-db-url"
+          mkdir -m 700 "$BACKUP_DIR/custody-audit"
+          node --input-type=module - "$BACKUP_DIR/custody-keyring.json" "$BACKUP_DIR/custody-wrong-keyring.json" <<'NODE'
+          import {writeFileSync} from "node:fs";
+          import {randomBytes} from "node:crypto";
+          const id="s10-ci-key-01";
+          for(const [file,encryptionKey,attestationKey] of [
+            [process.argv[2],"1".repeat(64),"2".repeat(64)],
+            [process.argv[3],randomBytes(32).toString("hex"),randomBytes(32).toString("hex")]
+          ]){
+            const manifest={activeKeyId:id,keys:[{keyId:id,encryptionKey,attestationKey,status:"active"}]};
+            writeFileSync(file,JSON.stringify(manifest),{mode:0o600});
+          }
+          NODE
+          export NODE_ENV=test PROFITPILOT_PROFILE=prototype SECUREPAY_OFFLINE_RECOVERY_MODE=synthetic-rehearsal
+          NODE_ENV=test node tests/fixtures/generate-synthetic-recovery-approvals.mjs "$BACKUP_DIR"
+          export SECUREPAY_RECOVERY_APPROVERS_FILE="$BACKUP_DIR/recovery-approvers.json"
+          export SECUREPAY_RECOVERY_AUDIT_PRIVATE_KEY_FILE="$BACKUP_DIR/recovery-audit-private.pem"
+          export SECUREPAY_RECOVERY_AUDIT_PUBLIC_KEY_FILE="$BACKUP_DIR/recovery-audit-public.pem"
+          export SECUREPAY_RECOVERY_APPROVAL_FILE="$BACKUP_DIR/recovery-approval-good.json"
+          export SECUREPAY_CUSTODY_KEYRING_FILE="$BACKUP_DIR/custody-keyring.json"
+          node scripts/securepay-restore-rehearsal.mjs rehearse \
+            abababab-abab-4bab-8bab-abababababab \
+            "$BACKUP_DIR/restore-db-url" "$BACKUP_DIR/custody-audit" \
+            efefefef-efef-4fef-8fef-efefefefefef ci.s11-2.restored
+          export SECUREPAY_CUSTODY_KEYRING_FILE="$BACKUP_DIR/custody-wrong-keyring.json"
+          export SECUREPAY_RECOVERY_APPROVAL_FILE="$BACKUP_DIR/recovery-approval-wrongkey.json"
+          if node scripts/securepay-restore-rehearsal.mjs rehearse \
+            abababab-abab-4bab-8bab-abababababab \
+            "$BACKUP_DIR/restore-db-url" "$BACKUP_DIR/custody-audit" \
+            efefefef-efef-4fef-8fef-efefefefefef ci.s11-2.wrongkey; then
+            echo 'Wrong recovery key unexpectedly passed'; exit 1
+          fi
+          test "$(find "$BACKUP_DIR/custody-audit" -maxdepth 1 -name 's11-3-*.json' -type f | wc -l)" -eq 2
+          grep -l '"outcome": "verified_synthetic_recovery"' "$BACKUP_DIR/custody-audit"/s11-3-*.json > /dev/null
+          grep -l '"outcome": "rejected"' "$BACKUP_DIR/custody-audit"/s11-3-*.json > /dev/null
+          node --input-type=module - "$BACKUP_DIR/custody-audit" "$BACKUP_DIR/recovery-audit-public.pem" <<'NODE'
+          import {readFileSync} from "node:fs";
+          import {join} from "node:path";
+          import {verifyRecoveryAudit} from "./src/securepay-recovery-controls.js";
+          import {runAuditVerification} from "./scripts/securepay-restore-rehearsal.mjs";
+          const auditDir=process.argv[2],publicPath=process.argv[3];
+          const pub=readFileSync(publicPath,"utf8");
+          const first=JSON.parse(readFileSync(join(auditDir,"s11-3-000001.json"),"utf8"));
+          const second=JSON.parse(readFileSync(join(auditDir,"s11-3-000002.json"),"utf8"));
+          const prev=verifyRecoveryAudit(first,pub,null);
+          const head=verifyRecoveryAudit(second,pub,prev);
+          if(first.event.outcome!=="verified_synthetic_recovery"||first.event.approvalKeyIds.length!==2||
+             second.event.outcome!=="rejected"||first.event.approvalRequestId===second.event.approvalRequestId)
+            throw Error("Signed approval or audit outcome mismatch");
+          const verified=runAuditVerification(["verify-audit",auditDir,publicPath,head]);
+          if(verified.verifiedSignedRecords!==2)throw Error("Missing signed audit chain records");
+          console.log("S11.3 externally provided expected audit head matches all signed entries");
+          NODE
+          unset SECUREPAY_CUSTODY_KEYRING_FILE SECUREPAY_OFFLINE_RECOVERY_MODE PROFITPILOT_PROFILE NODE_ENV SECUREPAY_RECOVERY_APPROVAL_FILE SECUREPAY_RECOVERY_APPROVERS_FILE SECUREPAY_RECOVERY_AUDIT_PRIVATE_KEY_FILE SECUREPAY_RECOVERY_AUDIT_PUBLIC_KEY_FILE
+          echo 'S11.3 restored evidence verifies only with dual signatures; wrong key refused; signed audit chain verified'
           echo 'Encrypted synthetic database restored; wrong-key rejection, counts, receipt hashes and deny-by-default RLS checked'
           dropdb -h localhost -U profitpilot_admin profitpilot_restore
 
@@ -342,3 +423,35 @@ jobs:
             profitpilot-attestation.jsonl
           if-no-files-found: error
           retention-days: 30
+
+  buyer_demo:
+    name: CI-gated fictional buyer demo package
+    needs: [verify, database, static_analysis, container_security]
+    if: startsWith(github.ref, 'refs/heads/feature/buyer-') && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout reviewed source commit
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+      - name: Build and verify synthetic-only handoff
+        run: |
+          set -euo pipefail
+          node scripts/package-buyer-demo.mjs build buyer-handoff "$GITHUB_SHA"
+          node scripts/package-buyer-demo.mjs verify buyer-handoff "$GITHUB_SHA"
+          test "$(find buyer-handoff -maxdepth 1 -type f | wc -l)" -eq 4
+          echo 'Fictional demo package verified; NOT a release, a production build or iPhone certification'
+      - name: Retain CI-tested portable buyer package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: profitpilot-fictional-buyer-demo-${{ github.sha }}
+          path: buyer-handoff/
+          if-no-files-found: error
+          retention-days: 7

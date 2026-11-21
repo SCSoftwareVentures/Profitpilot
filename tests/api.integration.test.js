@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {createServer} from "node:http";
-import {createHash,createHmac,randomBytes,generateKeyPairSync} from "node:crypto";
+import {createHash,createHmac,randomBytes,randomUUID,generateKeyPairSync,sign} from "node:crypto";
 import {generateKeyPair,exportJWK,SignJWT} from "jose";
 import pg from "pg";
 
@@ -130,6 +130,73 @@ test("authenticated API enforces tenant membership, role permissions and import 
     const oldB=await createRunB("a".repeat(64)),nextB=await createRunB("b".repeat(64));
     await insertB("INSERT INTO calculation_restatements(tenant_id,prior_run_id,next_run_id,reviewed_by,reason_code,evidence_reference) VALUES($1,$2,$3,$4,'synthetic_changed_evidence','CI.fixture.restate')",[tenantB,oldB,nextB,independentB]);
     const fixturePrivacy=await insertB("INSERT INTO privacy_requests(tenant_id,requester_id,client_request_id,request_type) VALUES($1,$2,gen_random_uuid(),'access')",[tenantB,userC]);
+    const securepayCaseB=await insertB("INSERT INTO securepay_case_rehearsals(tenant_id,client_request_id,job_reference,claim_reference,opened_by) VALUES($1,gen_random_uuid(),'job.ci-tenantB','claim.ci-tenantB',$2)",[tenantB,userC]);
+    await insertB("INSERT INTO securepay_evidence_rehearsals(tenant_id,case_id,client_request_id,recorded_by,evidence_type,evidence_reference) VALUES($1,$2,gen_random_uuid(),$3,'operator_review_note','note.ci-tenantB')",[tenantB,securepayCaseB,userC]);
+
+    // A non-vacuous tenant-B row for SP-S3, with a distinct reviewer and
+    // a digest of the exact synthetic evidence that this fixture represents.
+    await insertB("INSERT INTO securepay_evidence_rehearsals(tenant_id,case_id,client_request_id,recorded_by,evidence_type,evidence_reference) VALUES($1,$2,gen_random_uuid(),$3,'claim_reported','claim.ci-tenantB')",[tenantB,securepayCaseB,userC]);
+    await insertB("INSERT INTO securepay_evidence_rehearsals(tenant_id,case_id,client_request_id,recorded_by,evidence_type,evidence_reference) VALUES($1,$2,gen_random_uuid(),$3,'business_response_reported','business.ci-tenantB')",[tenantB,securepayCaseB,userC]);
+    const {checkOperatorReviewer}=await import("../src/securepay-review.js");
+    const securepayCaseRowB=(await admin.query("SELECT id,tenant_id,opened_by,claim_reference,synthetic,funds_moved,status FROM securepay_case_rehearsals WHERE tenant_id=$1 AND id=$2",[tenantB,securepayCaseB])).rows[0];
+    const securepayEvidenceB=(await admin.query("SELECT id,client_request_id,recorded_by,evidence_type,evidence_reference,externally_verified,recorded_at FROM securepay_evidence_rehearsals WHERE tenant_id=$1 AND case_id=$2 ORDER BY recorded_at,id",[tenantB,securepayCaseB])).rows;
+    const custodyFixtureB=Buffer.from("CI S9 synthetic tenant-B custody.\\n");
+    const custodyHashB=createHash("sha256").update(custodyFixtureB).digest("hex");
+    const custodyEvidenceB=(await admin.query("SELECT id FROM securepay_evidence_rehearsals WHERE tenant_id=$1 AND case_id=$2 AND evidence_type='claim_reported' LIMIT 1",[tenantB,securepayCaseB])).rows[0].id;
+    await insertB("INSERT INTO securepay_evidence_custody_receipts(tenant_id,case_id,evidence_id,client_request_id,received_by,sha256,byte_count,media_type,scan_status,original_bytes) VALUES($1,$2,$3,gen_random_uuid(),$4,$5,$6,'text/plain','scanner_reported_clean',$7)",
+      [tenantB,securepayCaseB,custodyEvidenceB,userC,custodyHashB,custodyFixtureB.length,custodyFixtureB]);
+    // S10 must have non-vacuous tenant-B RLS visibility without uploading real files.
+    // This is an admin-only synthetic fixture, not a real independently scanner-certified upload.
+    const {sealCustodyBytes}=await import("../src/securepay-encrypted-custody.js");
+    const s10BBytes=Buffer.from("CI S10 tenant B encrypted fixture.");
+    const s10BHash=createHash("sha256").update(s10BBytes).digest("hex");
+    const s10EvidenceB=(await admin.query("SELECT id FROM securepay_evidence_rehearsals WHERE tenant_id=$1 AND case_id=$2 AND evidence_type='operator_review_note' LIMIT 1",[tenantB,securepayCaseB])).rows[0].id;
+    const s10RequestB=randomUUID();
+    const s10FixtureKeys={cipherKey:Buffer.alloc(32,49),macKey:Buffer.alloc(32,50),keyId:"s10-ci-fixture-v1"};
+    const s10ScopeB={tenantId:tenantB,caseId:securepayCaseB,evidenceId:s10EvidenceB,
+      clientRequestId:s10RequestB,actorId:userC,sha256:s10BHash,
+      byteCount:s10BBytes.length,mediaType:"text/plain",keyId:s10FixtureKeys.keyId};
+    const s10SealedB=sealCustodyBytes(s10BBytes,s10ScopeB,s10FixtureKeys);
+    await insertB("INSERT INTO securepay_encrypted_custody_receipts(tenant_id,case_id,evidence_id,client_request_id,received_by,sha256,byte_count,media_type,scan_observed_at,scanner_attestation_mac,encryption_algorithm,key_id,aad_sha256,ciphertext_sha256,nonce,auth_tag,ciphertext) VALUES($1,$2,$3,$4,$5,$6,$7,'text/plain',$8,$9,'aes-256-gcm',$10,$11,$12,$13,$14,$15)",
+      [tenantB,securepayCaseB,s10EvidenceB,s10RequestB,userC,s10BHash,s10BBytes.length,
+       s10SealedB.observedAt,s10SealedB.attestationMac,s10SealedB.keyId,
+       s10SealedB.aadSha256,s10SealedB.ciphertextSha256,
+       s10SealedB.nonce,s10SealedB.tag,s10SealedB.ciphertext]);
+
+
+    const {reportedMetadataDigest}=await import("../src/securepay-provenance.js");
+    const provenanceEvidenceB=securepayEvidenceB.find(e=>e.evidence_type==='claim_reported');
+    const metadataB={tenantId:tenantB,caseId:securepayCaseB,evidenceId:provenanceEvidenceB.id,
+      actorId:userC,jobReference:'job.ci-tenantB',evidenceType:provenanceEvidenceB.evidence_type,
+      evidenceReference:provenanceEvidenceB.evidence_reference,reportedOrigin:'reported_customer',
+      acquisitionMethod:'document_reference_only',sourceReference:'source.ci-tenantB'};
+    const signedClaimProvenanceB=await insertB("INSERT INTO securepay_evidence_provenance_receipts(tenant_id,case_id,evidence_id,client_request_id,recorded_by,reported_origin,acquisition_method,source_reference,metadata_sha256) VALUES($1,$2,$3,gen_random_uuid(),$4,$5,$6,$7,$8)",
+      [tenantB,securepayCaseB,provenanceEvidenceB.id,userC,metadataB.reportedOrigin,metadataB.acquisitionMethod,metadataB.sourceReference,reportedMetadataDigest(metadataB)]);
+    const {signedPartyStatement}=await import("../src/securepay-signed-party.js");
+    const {publicKey:signerPublicB,privateKey:signerPrivateB}=generateKeyPairSync("ed25519");
+    const signerKeyB=signerPublicB.export({format:"der",type:"spki"}).toString("base64url");
+    const signerNonceB="ab123456-ab12-4b12-8b12-123456789abc";
+    const contentHashB="b".repeat(64);
+    const signedScopeB={tenantId:tenantB,caseId:securepayCaseB,evidenceId:provenanceEvidenceB.id,
+      provenanceReceiptId:signedClaimProvenanceB,provenanceMetadataSha256:reportedMetadataDigest(metadataB),
+      jobReference:"job.ci-tenantB",evidenceType:provenanceEvidenceB.evidence_type,
+      evidenceReference:provenanceEvidenceB.evidence_reference,
+      claimedPartyRole:"customer",claimedContentSha256:contentHashB,nonce:signerNonceB};
+    const signatureB=sign(null,signedPartyStatement(signedScopeB),signerPrivateB).toString("base64url");
+    const statementHashB=createHash("sha256").update(signedPartyStatement(signedScopeB)).digest("hex");
+    const keyHashB=createHash("sha256").update(signerPublicB.export({format:"der",type:"spki"})).digest("hex");
+    const signedClaimB=await insertB("INSERT INTO securepay_signed_party_claims(tenant_id,case_id,evidence_id,provenance_receipt_id,client_request_id,recorded_by,claimed_party_role,key_spki,claim_nonce,claimed_content_sha256,signature,statement_sha256,key_spki_sha256) VALUES($1,$2,$3,$4,gen_random_uuid(),$5,'customer',$6,$7,$8,$9,$10,$11)",
+      [tenantB,securepayCaseB,provenanceEvidenceB.id,signedClaimProvenanceB,userC,signerKeyB,signerNonceB,contentHashB,signatureB,statementHashB,keyHashB]);
+    await insertB("INSERT INTO securepay_signed_claim_revocations(tenant_id,case_id,evidence_id,claim_id,client_request_id,revoked_by,reason_code,revocation_reference) VALUES($1,$2,$3,$4,gen_random_uuid(),$5,'administrative_hold','s7.ci-tenantB')",
+      [tenantB,securepayCaseB,provenanceEvidenceB.id,signedClaimB,userC]);
+    await insertB("INSERT INTO securepay_job_issuer_attestations(tenant_id,case_id,evidence_id,claim_id,client_request_id,recorded_by,issuer,token_jti,issuer_subject_sha256,token_sha256,issued_at,expires_at) VALUES($1,$2,$3,$4,gen_random_uuid(),$5,'https://synthetic-ci-issuer.invalid/',gen_random_uuid(),$6,$6,now(),now()+interval '5 minutes')",
+      [tenantB,securepayCaseB,provenanceEvidenceB.id,signedClaimB,userC,"c".repeat(64)]);
+
+    const snapshotB=checkOperatorReviewer(securepayCaseRowB,securepayEvidenceB,independentB);
+    assert.equal(snapshotB.eligibleForNonbindingOperatorReview,true,"tenant B review fixture must satisfy internal actor separation");
+    await admin.query("UPDATE tenant_memberships SET role='reviewer' WHERE tenant_id=$1 AND user_id=$2",[tenantB,independentB]);
+    const conflictDeclarationB=await insertB("INSERT INTO securepay_reviewer_declarations(tenant_id,case_id,client_request_id,reviewer_id,declaration_status) VALUES($1,$2,gen_random_uuid(),$3,'no_conflict_declared')",[tenantB,securepayCaseB,independentB]);
+    await insertB("INSERT INTO securepay_reviewer_assessments(tenant_id,case_id,client_request_id,reviewer_id,review_reference,evidence_count,evidence_snapshot_sha256,conflict_declaration_id) VALUES($1,$2,gen_random_uuid(),$3,'review.ci-tenantB',$4,$5,$6)",[tenantB,securepayCaseB,independentB,snapshotB.evidenceCount,snapshotB.evidenceSnapshotSha256,conflictDeclarationB]);
     // Automatically include every current public tenant-owned table (plus tenants)
     // and require its fixture, forced RLS, and both positive and negative visibility.
     const catalog=await admin.query("SELECT c.relname AS name,c.relrowsecurity AS rls,c.relforcerowsecurity AS forced FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='public' AND c.relkind='r' AND (c.relname='tenants' OR EXISTS (SELECT 1 FROM pg_attribute a WHERE a.attrelid=c.oid AND a.attname='tenant_id' AND NOT a.attisdropped)) ORDER BY c.relname");
@@ -147,7 +214,10 @@ test("authenticated API enforces tenant membership, role permissions and import 
         else assert.equal(result.rowCount,0,name+" exposed rows without signed context");
       }
     }
+    // Exercise full tenant inventory using an authorised operator, since SecurePay is operator-only.
+    await admin.query("UPDATE tenant_memberships SET role='owner' WHERE tenant_id=$1 AND user_id=$2",[tenantB,userC]);
     await withTenant(tenantB,"ci-api-tenant-b-only",client=>visibility(client,tenantB));
+    await admin.query("UPDATE tenant_memberships SET role='analyst' WHERE tenant_id=$1 AND user_id=$2",[tenantB,userC]);
     await withTenant(tenantA,"ci-api-analyst",client=>visibility(client,tenantA));
     await visibility(appPool,null);
     const blockedMatch=await withTenant(tenantB,"ci-api-tenant-b-only",c=>c.query("UPDATE match_reviews SET decision='confirmed',reviewer_id=$1,reviewed_at=now() WHERE id=$2",[userC,matchB]));

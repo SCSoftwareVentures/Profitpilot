@@ -19,7 +19,7 @@ This guide is for a developer with Node.js 22, Docker Compose and a local termin
 7. Check the health endpoint at `/health`.
 8. Provision a user and tenant membership using a reviewed administrative process before making authenticated requests.
 
-The Compose database initialization scripts run only when the named database volume is first created. Existing volumes are not automatically migrated. Back up data and apply migrations deliberately; never delete a volume containing data to force a reinitialisation. The runtime database password and HMAC key are passed to both database bootstrap and API processes from `.env`; the database key table is not readable by the runtime role.
+The Compose database initialization mounts now mirror migrations 002–033, with parity checked against CI by tests/bootstrap-parity.test.js. CI also syntax-checks Compose without starting containers. A real fresh-start Compose boot and an existing-volume upgrade test have **not** been performed. The Compose database initialization scripts run only when the named database volume is first created. Existing volumes are not automatically migrated. Back up data and apply migrations deliberately; never delete a volume containing data to force a reinitialisation. The runtime database password and HMAC key are passed to both database bootstrap and API processes from `.env`; the database key table is not readable by the runtime role.
 
 ## API boundaries
 - The API is not deployed by this repository.

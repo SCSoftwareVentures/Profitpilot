@@ -78,3 +78,39 @@ These prototypes are for design review only. They are not a deployed product or 
 
 ## Security and privacy handover
 [Protected deployment requirements, privacy lifecycle and independent review gates](docs/SECURITY_PRIVACY_HANDOVER.md). Main-branch CI includes encrypted synthetic recovery, native scanner fixture testing, dependency inventory and source package provenance. Review corresponding run before relying on any claimed result.
+
+## Evidence-first buyer walkthrough (synthetic B1 draft)
+
+- [Standalone buyer walkthrough](demo/buyer-walkthrough.html) — dependency-free HTML with fictional figures, visible source references, source completeness gates and simulated human-review choices. This file is not a deployed SaaS or proof of customer demand.
+- [Buyer B1 operating and due-diligence notes](docs/BUYER_WALKTHROUGH_B1.md) — initial vs completed arithmetic, verification scope and unverified acquisition conditions.
+- [Auditable demo calculation logic](src/buyer-walkthrough-core.js) — deterministic cents-based contract economics scenario, with tests and a reproducible standalone build.
+
+To verify the packaged demo in a Node.js 22 source review environment: `npm test` and `npm run check`. Production security, real customer identity, legal/payment clearances and independent iPhone browser tests remain outstanding.
+
+## B2 guided buyer review and mobile acceptance
+
+The [offline interactive buyer walkthrough](demo/buyer-walkthrough.html) now guides the visitor through three evidence states and offers an on-page, selectable JSON summary when a mobile browser cannot download the export. [B2 device acceptance protocol](docs/BUYER_DEVICE_ACCEPTANCE_B2.md) separates automated CI checks from **unperformed actual iPhone/WebKit tests**. Do not describe this UI as mobile-certified or customer-validated.
+
+## B3 portable buyer evaluation handoff
+
+The reviewed B3 branch packages the **fictional, standalone** walkthrough as a short-lived GitHub Actions artifact named \`profitpilot-fictional-buyer-demo-<commit-sha>\`. Its workflow only packages files **after the existing Node, PostgreSQL/recovery, CodeQL, and container-security checks pass**. The package contains exactly four files: executable local HTML, a plain-language evaluation guide, a commit-specific manifest, and SHA-256 checksums.
+
+A reviewer needs no working server, domain or customer account to inspect the artifact. On iPhone, whether a downloaded local HTML file can run inside Safari depends on the device and opening workflow; this has **not** been tested on a physical iPhone. The file can alternatively be inspected as source; that does not constitute a UI test. There is no public hosting or deploy action. CI artifacts expire after seven days, whereas the source HTML remains in the repository.
+
+The checksums detect modifications relative to the package manifest but are **not** a trusted-publisher signature. Actual buyer validation, licence/ownership audit, independent legal/security review and customer willingness-to-pay evidence remain mandatory before any honest market-sale valuation.
+
+## B4 aggregate G0 feasibility evaluator
+
+The [B4 G0 feasibility engine](src/g0-feasibility.js) computes explicit pass/fail/exclusion outcomes for pseudonymous aggregate export-set records, with [adversarial regression tests](tests/g0-feasibility.test.js) and [evidence limitations](docs/G0_FEASIBILITY_ENGINE_B4.md). This is not a validated pilot, actual demand, verified independent-source permission or authorisation to build the SaaS. G0 remains externally blocked even if declared numeric thresholds are met.
+
+## B5 mobile buyer walkthrough overflow correction
+
+The [B5 layout investigation and test boundary](docs/BUYER_MOBILE_LAYOUT_B5.md) documents a content-sized grid defect discovered with an actual headless Chromium interaction run, its minmax/min-width CSS correction and new regression tests. Browser-emulated widths passed locally; real iPhone/WebKit and assistive-technology QA remain unperformed.
+
+## B6 reproducible acquisition inventory (draft)
+
+The [B6 buyer source and dependency audit](docs/BUYER_ACQUISITION_B6.md) explains how the offline `npm run audit:buyer` command inventories tracked file hashes, npm lockfile licences and outstanding IP, customer-demand, accessibility and production clearance gates. No library metadata, CI success or fictional demonstration establishes transfer rights or a production-ready application.
+
+## B7 Compose schema-parity correction (draft)
+
+[Clean Compose schema parity and consolidation note](docs/COMPOSE_SCHEMA_PARITY_B7.md) covers nine SecurePay SQL migrations previously absent from fresh Docker Compose initialisation. Automated checks compare all numbered migration files against both Compose mounts and CI application order. **Existing database volumes do not automatically migrate**; a live upgrade path and fresh Compose start are not claimed as tested.
