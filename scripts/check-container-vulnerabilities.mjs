@@ -18,6 +18,12 @@ const recent=(value,maxAge,label)=>{
 };
 const object=x=>x!==null&&typeof x==="object"&&!Array.isArray(x);
 const observedImages=new Set();
+const expectedIds=[
+ process.env.PROFITPILOT_EXPECTED_API_IMAGE_ID,
+ process.env.PROFITPILOT_EXPECTED_PROTECTED_IMAGE_ID
+];
+if(expectedIds.some(x=>!digest(x))||expectedIds[0]===expectedIds[1])
+ throw Error("Both distinct Docker-inspected image IDs are required");
 let blocked=0;
 for(let i=0;i<paths.length;i++){
  const path=paths[i], [canonical,expectedImage]=expected[i];
@@ -33,6 +39,7 @@ for(let i=0;i<paths.length;i++){
    !Array.isArray(target.tags)||!target.tags.includes(expectedImage)||
    !digest(target.imageID)||!digest(target.manifestDigest))
   throw Error("Scan target does not match image profile: "+path);
+ if(target.imageID!==expectedIds[i])throw Error("Grype image ID differs from independently inspected Docker image: "+path);
  if(observedImages.has(target.imageID))throw Error("Repeated image identity");
  observedImages.add(target.imageID);
  if(descriptor.name!=="grype"||descriptor.version!=="0.104.1"||
